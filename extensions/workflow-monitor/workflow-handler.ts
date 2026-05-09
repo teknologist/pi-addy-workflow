@@ -1,5 +1,5 @@
 import { createInitialWorkflowState, transitionWorkflow, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
-import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, renderWorkflowStrip } from "./workflow-tracker.ts";
+import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
 type SessionEntry = { type?: string; customType?: string; data?: unknown };
@@ -36,7 +36,7 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
 export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowState, appendEntry?: AppendEntry): void {
   ctx.state = state;
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
-  ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowStrip(state));
+  ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowWidget(state));
   const warning = workflowWarningText(state);
   if (warning) ctx.ui?.notify?.(warning, "warning");
 }

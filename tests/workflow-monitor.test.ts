@@ -58,7 +58,8 @@ test("next command parses args, transitions, persists, prefills, and continues",
   assert.deepEqual(result, { action: "continue" });
   assert.equal(ctx.state.current, "review");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
-  assert.deepEqual(effects.at(0), ["pi-addy-workflow", "define → plan → build → verify → [review] → ship"]);
+  assert.equal(effects.at(0)?.[0], "pi-addy-workflow");
+  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["define → plan → build → verify → [review] → ship"]);
   assert.deepEqual(effects.at(1), ["prefill", "/addy-review diff.md"]);
 });
 
@@ -87,5 +88,6 @@ test("write tool calls drive file-write transitions", async () => {
 
   assert.equal(ctx.state.current, "verify");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
-  assert.deepEqual(effects.at(-1), ["pi-addy-workflow", "define → plan → build → [verify] → review → ship"]);
+  assert.equal(effects.at(-1)?.[0], "pi-addy-workflow");
+  assert.deepEqual((effects.at(-1)?.[1] as any)().render(), ["define → plan → build → [verify] → review → ship"]);
 });

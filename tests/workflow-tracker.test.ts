@@ -92,7 +92,8 @@ test("workflow handler sets widget, reset clears widget, next opens prompt", () 
   assert.equal(openNextWorkflowPrompt(ctx, "review", "diff.md"), "/addy-review diff.md");
   resetWorkflow(ctx);
 
-  assert.deepEqual(widgets.at(0), ["pi-addy-workflow", "define → plan → build → verify → [review] → ship"]);
+  assert.equal(widgets.at(0)?.[0], "pi-addy-workflow");
+  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["define → plan → build → verify → [review] → ship"]);
   assert.deepEqual(widgets.at(1), ["prefill", "/addy-review diff.md"]);
   assert.deepEqual(widgets.at(2), ["pi-addy-workflow", undefined]);
 });

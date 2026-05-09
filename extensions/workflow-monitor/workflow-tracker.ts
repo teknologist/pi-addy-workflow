@@ -28,6 +28,16 @@ export function renderWorkflowStrip(state: WorkflowState): string {
   return WORKFLOW_PHASES.map((phase) => renderPhase(phase, state)).join(" → ");
 }
 
+export function renderWorkflowWidget(state: WorkflowState) {
+  const content = renderWorkflowStrip(state);
+  return () => ({
+    invalidate() {},
+    render(): string[] {
+      return [content];
+    },
+  });
+}
+
 function renderPhase(phase: WorkflowPhase, state: WorkflowState): string {
   const status = state.phases[phase];
   if (status === "complete") return `✓${phase}`;
