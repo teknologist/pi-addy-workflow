@@ -24,24 +24,27 @@ export function parseWorkflowState(value: unknown): WorkflowState {
   return createInitialWorkflowState();
 }
 
-export function renderWorkflowStrip(state: WorkflowState): string {
-  return WORKFLOW_PHASES.map((phase) => renderPhase(phase, state)).join(" → ");
+export function renderWorkflowStrip(state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }): string {
+  return WORKFLOW_PHASES.map((phase) => renderPhase(phase, state, theme)).join(" → ");
 }
 
 export function renderWorkflowWidget(state: WorkflowState) {
-  const content = renderWorkflowStrip(state);
-  return () => ({
+  return (_tui?: unknown, theme?: { fg?: (name: string, text: string) => string }) => ({
     invalidate() {},
     render(): string[] {
-      return [content];
+      const label = theme?.fg?.("accent", "Addy Workflow: ") ?? theme?.fg?.("blue", "Addy Workflow: ") ?? "Addy Workflow: ";
+      return [`${label}${renderWorkflowStrip(state, theme)}`];
     },
   });
 }
 
-function renderPhase(phase: WorkflowPhase, state: WorkflowState): string {
+function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }): string {
   const status = state.phases[phase];
   if (status === "complete") return `✓${phase}`;
-  if (status === "active") return `[${phase}]`;
+  if (status === "active") {
+    const text = `[${phase}]`;
+    return theme?.fg?.("success", text) ?? theme?.fg?.("green", text) ?? text;
+  }
   return phase;
 }
 
