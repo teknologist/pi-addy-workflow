@@ -1,11 +1,22 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
 import { getContextWorkflowState, handleWorkflowEvent } from "../extensions/workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE } from "../extensions/workflow-monitor/workflow-tracker.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
 type CommandConfig = { description: string; handler: Handler };
+
+const stateDir = mkdtempSync(join(tmpdir(), "pi-addy-workflow-test-"));
+process.env.PI_ADDY_WORKFLOW_STATE_DIR = stateDir;
+
+test.after(() => {
+  delete process.env.PI_ADDY_WORKFLOW_STATE_DIR;
+  rmSync(stateDir, { recursive: true, force: true });
+});
 
 function createPiMock() {
   const events = new Map<string, Handler>();
@@ -38,7 +49,7 @@ test("reset command clears widget, persists reset state, and continues", async (
   addyWorkflowMonitor(pi as never);
 
   const widgets: Array<[string, unknown]> = [];
-  const result = await commands.get("addy-workflow-reset")?.handler({}, { ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } });
+  const result = await commands.get("addy-workflow-reset")?.handler({}, { id: "reset-command-test", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } });
 
   assert.deepEqual(result, { action: "continue" });
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
@@ -51,6 +62,7 @@ test("next command parses args, transitions, persists, prefills, and continues",
 
   const effects: Array<[string, unknown]> = [];
   const ctx: any = {
+    id: "next-command-test",
     ui: { setWidget: (key: string, value: unknown) => effects.push([key, value]) },
     input: { prefill: (value: string) => effects.push(["prefill", value]) },
   };
@@ -78,6 +90,18 @@ test("next command warns and continues on invalid phase", async () => {
   assert.deepEqual(result, { action: "continue" });
   assert.match(notices[0][0], /Usage: \/addy-workflow-next/);
   assert.equal(notices[0][1], "warning");
+});
+
+test("workflow state survives fresh contexts without session entries", () => {
+  const firstCtx: any = { id: "fresh-context-test", ui: { setWidget() {} } };
+  const build = handleWorkflowEvent(firstCtx, { source: "user-input", text: "/addy-build" });
+  assert.equal(build.current, "build");
+
+  const nextCtx: any = { id: "fresh-context-test", ui: { setWidget() {}, notify(message: string) { throw new Error(message); } } };
+  const verify = handleWorkflowEvent(nextCtx, { source: "user-input", text: "/addy-verify" });
+
+  assert.equal(verify.current, "verify");
+  assert.deepEqual(verify.warnings, []);
 });
 
 test("workflow state round-trips from persisted append entries", () => {
@@ -126,7 +150,7 @@ test("write tool calls drive file-write transitions", async () => {
   addyWorkflowMonitor(pi as never);
 
   const effects: Array<[string, unknown]> = [];
-  const ctx: any = { ui: { setWidget: (key: string, value: unknown) => effects.push([key, value]) } };
+  const ctx: any = { id: "write-tool-test", ui: { setWidget: (key: string, value: unknown) => effects.push([key, value]) } };
   await events.get("tool_call")?.({ toolName: "write", input: { path: "tests/example.test.ts" } }, ctx);
 
   assert.equal(ctx.state.current, "verify");

@@ -113,6 +113,7 @@ test("renders phase strip and next prompt", () => {
 test("workflow handler sets widget, reset clears widget, next opens prompt", () => {
   const widgets: Array<[string, unknown]> = [];
   const ctx: any = {
+    id: "workflow-handler-test",
     ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) },
     input: { prefill: (value: string) => widgets.push(["prefill", value]) },
   };

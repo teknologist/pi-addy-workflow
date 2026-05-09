@@ -1,3 +1,7 @@
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
@@ -5,6 +9,10 @@ import { workflowWarningText } from "./warnings.ts";
 type SessionEntry = { type?: string; customType?: string; data?: unknown } | [string, unknown];
 
 type WorkflowContext = {
+  cwd?: string;
+  sessionId?: string;
+  conversationId?: string;
+  id?: string;
   ui?: {
     setWidget?: (key: string, value: unknown) => void;
     notify?: (message: string, level?: string) => void;
@@ -19,6 +27,8 @@ type WorkflowContext = {
 };
 
 type AppendEntry = (type: string, data: unknown) => void;
+
+const workflowMemory = new Map<string, WorkflowState>();
 
 function isPhaseStatus(value: unknown): value is PhaseStatus {
   return value === "pending" || value === "active" || value === "complete";
@@ -63,6 +73,42 @@ function workflowStateFromEntry(entry: SessionEntry): WorkflowState | undefined 
   return undefined;
 }
 
+function workflowStateKey(ctx: WorkflowContext): string {
+  const explicitSessionScope = [ctx.sessionId, ctx.conversationId, ctx.id].find((value) => typeof value === "string" && value.length > 0);
+  const projectScope = [ctx.cwd, process.cwd()].find((value) => typeof value === "string" && value.length > 0) ?? "default";
+  const scope = explicitSessionScope ?? `${process.pid}:${projectScope}`;
+  return createHash("sha256").update(scope).digest("hex").slice(0, 24);
+}
+
+function workflowStateDir(): string {
+  return process.env.PI_ADDY_WORKFLOW_STATE_DIR ?? join(homedir(), ".pi", "agent", "state", "pi-addy-workflow");
+}
+
+function workflowStatePath(key: string): string {
+  return join(workflowStateDir(), `${key}.json`);
+}
+
+function readStoredWorkflowState(key: string): WorkflowState | undefined {
+  const path = workflowStatePath(key);
+  if (!existsSync(path)) return undefined;
+
+  try {
+    return parsePersistedWorkflowState(readFileSync(path, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredWorkflowState(key: string, state: WorkflowState): void {
+  const path = workflowStatePath(key);
+  try {
+    mkdirSync(workflowStateDir(), { recursive: true });
+    writeFileSync(path, JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state }), "utf8");
+  } catch {
+    // Persistence is best-effort; in-memory/session state still drives the current turn.
+  }
+}
+
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   const entries = ctx.sessionManager?.getBranch?.() ?? [];
   for (const entry of [...entries].reverse()) {
@@ -70,11 +116,17 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
     if (state) return state;
   }
 
-  return ctx.state ?? createInitialWorkflowState();
+  if (ctx.state) return ctx.state;
+
+  const key = workflowStateKey(ctx);
+  return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? createInitialWorkflowState();
 }
 
 export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowState, appendEntry?: AppendEntry): void {
   ctx.state = state;
+  const key = workflowStateKey(ctx);
+  workflowMemory.set(key, state);
+  writeStoredWorkflowState(key, state);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
   ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowWidget(state));
   const warning = workflowWarningText(state);
@@ -90,6 +142,9 @@ export function handleWorkflowEvent(ctx: WorkflowContext, event: WorkflowEvent, 
 export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): WorkflowState {
   const state = createInitialWorkflowState();
   ctx.state = state;
+  const key = workflowStateKey(ctx);
+  workflowMemory.set(key, state);
+  writeStoredWorkflowState(key, state);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
   ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, undefined);
   return state;
