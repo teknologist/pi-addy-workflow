@@ -7,16 +7,16 @@ Build `pi-addy-workflow` in `~/Dev/pi-addy-workflow`: a self-contained Pi packag
 Workflow:
 
 ```text
-DEFINE → PLAN → BUILD → VERIFY → REVIEW → SHIP
+DEFINE → PLAN → BUILD → SIMPLIFY → VERIFY → REVIEW → SHIP
 ```
 
 Packaged slash prompts:
 
 ```text
-/addy-spec
+/addy-define
 /addy-plan
 /addy-build
-/addy-test
+/addy-verify
 /addy-review
 /addy-code-simplify
 /addy-ship
@@ -31,7 +31,7 @@ Source patterns:
 ## Fixed decisions
 
 - Slash commands stay `addy-*`; do not add `/spec`, `/plan`, `/build`, `/test`, `/review`, or `/ship` aliases in MVP.
-- `/addy-code-simplify` is cross-cutting; it must not advance the lifecycle phase.
+- `/addy-code-simplify` maps to optional SIMPLIFY between BUILD and VERIFY.
 - Companion tools `todo` and `subagent` are optional; bootstrap warns when missing but does not block.
 - Use `ctx.ui.setWidget`, not `ctx.ui.setFooter`, for the workflow strip. This follows Pi TUI widget docs, preserves Pi's normal footer, and avoids global footer conflicts.
 - Package only referenced skills and agents first. Do not copy every local skill/agent.
@@ -74,10 +74,10 @@ pi-addy-workflow/
 │       ├── workflow-transitions.ts
 │       └── warnings.ts
 ├── prompts/
-│   ├── addy-spec.md
+│   ├── addy-define.md
 │   ├── addy-plan.md
 │   ├── addy-build.md
-│   ├── addy-test.md
+│   ├── addy-verify.md
 │   ├── addy-review.md
 │   ├── addy-code-simplify.md
 │   └── addy-ship.md
@@ -171,13 +171,13 @@ Notes:
 
 | Stage | Prompt | Required primary skill | Widget phase |
 |---|---|---|---|
-| DEFINE | `/addy-spec` | `spec-driven-development` | `define` |
+| DEFINE | `/addy-define` | `spec-driven-development` | `define` |
 | PLAN | `/addy-plan` | `planning-and-task-breakdown` | `plan` |
 | BUILD | `/addy-build` | `incremental-implementation` | `build` |
-| VERIFY | `/addy-test` | `debugging-and-error-recovery` | `verify` |
+| VERIFY | `/addy-verify` | `debugging-and-error-recovery` | `verify` |
 | REVIEW | `/addy-review` | `code-review-and-quality` | `review` |
 | SHIP | `/addy-ship` | `shipping-and-launch` | `ship` |
-| Cross-cutting | `/addy-code-simplify` | `code-simplification` | unchanged |
+| SIMPLIFY | `/addy-code-simplify` | `code-simplification` | `simplify` |
 
 Supporting skills and agents are copied only when referenced by prompts, primary skills, or included agent configs.
 
@@ -254,7 +254,7 @@ Required behavior:
 - Widget key: `pi-addy-workflow`.
 - State entry type: `pi-addy-workflow-state`.
 - Register `/addy-workflow-reset` with `pi.registerCommand("addy-workflow-reset", ...)`; do not create a prompt file for it.
-- Register `/addy-workflow-next <define|plan|build|verify|review|ship> [artifact]` with `pi.registerCommand("addy-workflow-next", ...)`; do not create a prompt file for it.
+- Register `/addy-workflow-next <define|plan|build|simplify|verify|review|ship> [artifact]` with `pi.registerCommand("addy-workflow-next", ...)`; do not create a prompt file for it.
 - Phase strip rendering:
   - current: accent `[phase]`
   - complete: success `✓phase`
@@ -269,10 +269,10 @@ export const WORKFLOW_PHASES = ["define", "plan", "build", "verify", "review", "
 Prompt transitions:
 
 ```text
-/addy-spec   -> define
+/addy-define   -> define
 /addy-plan   -> plan
 /addy-build  -> build
-/addy-test   -> verify
+/addy-verify   -> verify
 /addy-review -> review
 /addy-ship   -> ship
 ```
@@ -290,20 +290,20 @@ Transition algorithm:
 - If target phase is after current phase, mark the current active phase `complete`, set target `active`, leave skipped intermediate phases `pending`, and warn about the first pending intermediate phase.
 - If target phase equals current phase, no state change.
 - If target phase is before current phase, reset workflow state, then set target phase `active`.
-- `/addy-code-simplify` records no workflow state and never changes current phase.
+- `/addy-code-simplify` records optional `simplify` phase state.
 - Warnings never block tool calls or prompts in MVP.
 
 Trigger table:
 
 | Event source | Exact trigger | Target phase | Extra behavior |
 |---|---|---|---|
-| user input | contains `/addy-spec` | `define` | prompt trigger wins over artifact triggers in same event |
+| user input | contains `/addy-define` | `define` | prompt trigger wins over artifact triggers in same event |
 | user input | contains `/addy-plan` | `plan` | completes current active phase if moving forward |
 | user input | contains `/addy-build` | `build` | completes current active phase if moving forward |
-| user input | contains `/addy-test` | `verify` | completes current active phase if moving forward |
+| user input | contains `/addy-verify` | `verify` | completes current active phase if moving forward |
 | user input | contains `/addy-review` | `review` | completes current active phase if moving forward |
 | user input | contains `/addy-ship` | `ship` | completes current active phase if moving forward |
-| user input | contains `/addy-code-simplify` | none | no phase change |
+| user input | contains `/addy-code-simplify` | `simplify` | optional phase trigger |
 | file write | `SPEC.md`, `spec.md`, `docs/specs/**`, `docs/prd/**` | `define` | record artifact path |
 | file write | `tasks/plan.md`, `tasks/todo.md`, `docs/plans/**` | `plan` | record artifact path |
 | file write | source file outside `tests/**`, `docs/**`, `tasks/**`, `agents/**`, `skills/**`, `prompts/**`, `extensions/**` | `build` | ignored if current phase is after `build` |
@@ -326,10 +326,10 @@ Warning behavior:
 Prompts:
 
 - Copy exactly these files from `~/.pi/agent/prompts`:
-  - `addy-spec.md`
+  - `addy-define.md`
   - `addy-plan.md`
   - `addy-build.md`
-  - `addy-test.md`
+  - `addy-verify.md`
   - `addy-review.md`
   - `addy-code-simplify.md`
   - `addy-ship.md`
@@ -436,14 +436,14 @@ Bootstrap:
 Workflow monitor:
 
 - Every row in the trigger table has a unit test.
-- `/addy-spec` sets current phase to `define`.
+- `/addy-define` sets current phase to `define`.
 - `/addy-plan` moves from active `define` to complete `define` plus active `plan`.
 - `/addy-build` moves from active `plan` to complete `plan` plus active `build`.
-- `/addy-test` moves from active `build` to complete `build` plus active `verify`.
+- `/addy-verify` moves from active `build` to complete `build` plus active `verify`.
 - `/addy-review` moves from active `verify` to complete `verify` plus active `review`.
 - `/addy-ship` moves from active `review` to complete `review` plus active `ship`.
 - `/addy-review` from fresh state sets active `review`, leaves earlier phases pending, warns about `define`, and does not block.
-- `/addy-code-simplify` does not change current phase.
+- `/addy-code-simplify` changes current phase to optional `simplify`.
 - Artifact transitions follow the trigger table exactly.
 - Backward transitions reset workflow state before activating the earlier phase.
 - `/addy-workflow-reset` clears state and removes the widget.
@@ -505,8 +505,8 @@ Manual Pi checks after install:
 
 - Slash autocomplete shows all seven `addy-*` prompts.
 - `subagent({ action: "list", agentScope: "user" })` shows packaged `addy-*` agents.
-- New session with `/addy-spec` shows Addy widget at `define`.
-- `/addy-plan`, `/addy-build`, `/addy-test`, `/addy-review`, `/addy-ship` advance phases in order.
+- New session with `/addy-define` shows Addy widget at `define`.
+- `/addy-plan`, `/addy-build`, `/addy-verify`, `/addy-review`, `/addy-ship` advance phases in order.
 - `/addy-review` from a fresh session warns about missing prior phases and continues.
 - `/addy-code-simplify` leaves current phase unchanged.
 - `/addy-workflow-reset` clears widget.

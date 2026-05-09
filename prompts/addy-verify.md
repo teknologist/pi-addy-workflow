@@ -1,11 +1,11 @@
 ---
-description: "Addy workflow: run TDD workflow and Prove-It bug workflow"
+description: "Addy workflow: verify behavior with TDD and Prove-It bug workflows"
 thinking: medium
 ---
 
-# Addy Test
+# Addy Verify
 
-Pi adaptation of Addy Osmani's `test` command.
+Pi adaptation of Addy Osmani's `verify` command.
 
 Use the Pi `test-driven-development` skill.
 

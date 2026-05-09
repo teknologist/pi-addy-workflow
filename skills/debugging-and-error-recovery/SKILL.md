@@ -1,6 +1,6 @@
 ---
 name: debugging-and-error-recovery
-description: Diagnose failures systematically. Use when tests fail, builds break, or /addy-test finds a bug.
+description: Diagnose failures systematically. Use when tests fail, builds break, or /addy-verify finds a bug.
 ---
 
 # Debugging and Error Recovery

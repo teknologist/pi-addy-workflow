@@ -1,6 +1,6 @@
 ---
 name: spec-driven-development
-description: Create a concise spec before implementation. Use when starting new features, unclear requirements, or /addy-spec.
+description: Create a concise spec before implementation. Use when starting new features, unclear requirements, or /addy-define.
 ---
 
 # Spec-Driven Development

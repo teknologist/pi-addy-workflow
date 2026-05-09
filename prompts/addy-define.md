@@ -3,9 +3,9 @@ description: "Addy workflow: start spec-driven development before writing code"
 thinking: medium
 ---
 
-# Addy Spec
+# Addy Define
 
-Pi adaptation of Addy Osmani's `spec` command.
+Pi adaptation of Addy Osmani's `define` command.
 
 Use the Pi `spec-driven-development` skill.
 

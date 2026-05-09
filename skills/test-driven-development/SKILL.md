@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Red-green-refactor and Prove-It bug workflow. Use for /addy-test and /addy-build when behavior changes.
+description: Red-green-refactor and Prove-It bug workflow. Use for /addy-verify and /addy-build when behavior changes.
 ---
 
 # Test-Driven Development

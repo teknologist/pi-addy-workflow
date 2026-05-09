@@ -50,10 +50,11 @@ function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: 
 
 export function nextPromptForPhase(phase: WorkflowPhase, artifact?: string): string {
   const promptByPhase: Record<WorkflowPhase, string> = {
-    define: "/addy-spec",
+    define: "/addy-define",
     plan: "/addy-plan",
     build: "/addy-build",
-    verify: "/addy-test",
+    simplify: "/addy-code-simplify",
+    verify: "/addy-verify",
     review: "/addy-review",
     ship: "/addy-ship",
   };

@@ -80,7 +80,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       const [phase, ...artifactParts] = parseCommandArgs(event);
       if (!isWorkflowPhase(phase)) {
       (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(
-        "Usage: /addy-workflow-next <define|plan|build|verify|review|ship> [artifact]",
+        "Usage: /addy-workflow-next <define|plan|build|simplify|verify|review|ship> [artifact]",
         "warning",
       );
         return { action: "continue" as const };

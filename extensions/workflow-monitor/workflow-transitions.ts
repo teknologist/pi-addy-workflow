@@ -1,4 +1,4 @@
-export const WORKFLOW_PHASES = ["define", "plan", "build", "verify", "review", "ship"] as const;
+export const WORKFLOW_PHASES = ["define", "plan", "build", "simplify", "verify", "review", "ship"] as const;
 export const ENFORCED_WORKFLOW_PHASES = ["build", "verify", "review"] as const;
 
 export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
@@ -71,13 +71,13 @@ export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase
   const text = event.text ?? "";
 
   if (event.source === "user-input" || event.source === "command") {
-    const workflowNext = text.match(/\/addy-workflow-next\s+(define|plan|build|verify|review|ship)\b/);
+    const workflowNext = text.match(/\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|ship)\b/);
     if (workflowNext) return workflowNext[1] as WorkflowPhase;
-    if (text.includes("/addy-code-simplify")) return undefined;
-    if (text.includes("/addy-spec")) return "define";
+    if (text.includes("/addy-code-simplify")) return "simplify";
+    if (text.includes("/addy-define")) return "define";
     if (text.includes("/addy-plan")) return "plan";
     if (text.includes("/addy-build")) return "build";
-    if (text.includes("/addy-test")) return "verify";
+    if (text.includes("/addy-verify")) return "verify";
     if (text.includes("/addy-review")) return "review";
     if (text.includes("/addy-ship")) return "ship";
   }

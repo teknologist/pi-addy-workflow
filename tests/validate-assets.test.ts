@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const prompts = ["addy-spec", "addy-plan", "addy-build", "addy-test", "addy-review", "addy-code-simplify", "addy-ship"];
+const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-ship"];
 const agents = [
   "addy-planner",
   "addy-implementer",

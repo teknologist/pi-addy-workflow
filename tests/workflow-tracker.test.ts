@@ -5,17 +5,17 @@ import { nextPromptForPhase, renderWorkflowStrip } from "../extensions/workflow-
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
 
 test("prompt triggers map to phases and code-simplify is unchanged", () => {
-  assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-spec" }), "define");
+  assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-define" }), "define");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-plan" }), "plan");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-build" }), "build");
-  assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-test" }), "verify");
+  assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-code-simplify" }), "simplify");
+  assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-verify" }), "verify");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-review" }), "review");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-ship" }), "ship");
-  assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-code-simplify" }), undefined);
 });
 
 test("forward transition completes current phase without enforcing define or plan", () => {
-  const define = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-spec" });
+  const define = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-define" });
   const build = transitionWorkflow(define, { source: "user-input", text: "/addy-build" });
 
   assert.equal(build.phases.define, "complete");
@@ -24,12 +24,16 @@ test("forward transition completes current phase without enforcing define or pla
   assert.deepEqual(build.warnings, []);
 });
 
-test("fresh build is allowed but verify and review enforce build to verify to review", () => {
+test("fresh build and simplify are allowed but verify and review enforce build to verify to review", () => {
   const build = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
   assert.equal(build.current, "build");
   assert.deepEqual(build.warnings, []);
 
-  const verify = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-test" });
+  const simplify = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-code-simplify" });
+  assert.equal(simplify.current, "simplify");
+  assert.deepEqual(simplify.warnings, []);
+
+  const verify = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-verify" });
   assert.equal(verify.current, "verify");
   assert.match(verify.warnings[0], /build/);
 
@@ -107,7 +111,7 @@ test("workflow handler sets widget, reset clears widget, next opens prompt", () 
   resetWorkflow(ctx);
 
   assert.equal(widgets.at(0)?.[0], "pi-addy-workflow");
-  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → verify → [review] → ship"]);
+  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → ship"]);
   assert.deepEqual(widgets.at(1), ["prefill", "/addy-review diff.md"]);
   assert.deepEqual(widgets.at(2), ["pi-addy-workflow", undefined]);
 });

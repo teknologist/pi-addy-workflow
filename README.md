@@ -11,19 +11,19 @@ pi install git:github.com/teknologist/pi-addy-workflow
 ## Workflow
 
 ```text
-[DEFINE] → [PLAN] → BUILD → VERIFY → REVIEW → [SHIP]
+[DEFINE] → [PLAN] → BUILD → [SIMPLIFY] → VERIFY → REVIEW → [SHIP]
 ```
 
-Only `BUILD → VERIFY → REVIEW` is enforced. `DEFINE`, `PLAN`, and `SHIP` are optional entry/exit aids; users can run many build/verify/review slices before shipping.
+Only `BUILD → VERIFY → REVIEW` is enforced. `DEFINE`, `PLAN`, `SIMPLIFY`, and `SHIP` are optional aids; users can run many build/verify/review slices before shipping.
 
 Prompts:
 
-- `/addy-spec` — clarify requirements and write a spec
+- `/addy-define` — clarify requirements and write a spec
 - `/addy-plan` — break spec into small verifiable tasks
 - `/addy-build` — implement incrementally with tests
-- `/addy-test` — run TDD or Prove-It bug workflow
-- `/addy-review` — review correctness, quality, security, performance
 - `/addy-code-simplify` — simplify code without changing behavior
+- `/addy-verify` — run TDD or Prove-It bug workflow
+- `/addy-review` — review correctness, quality, security, performance
 - `/addy-ship` — produce GO/NO-GO decision and rollback plan
 
 ## Runtime behavior
@@ -37,7 +37,7 @@ Prompts:
 ## Commands
 
 - `/addy-workflow-reset` clears workflow state and widget.
-- `/addy-workflow-next <define|plan|build|verify|review|ship> [artifact]` opens the matching Addy prompt.
+- `/addy-workflow-next <define|plan|build|simplify|verify|review|ship> [artifact]` opens the matching Addy prompt.
 
 ## Uninstall note
 
