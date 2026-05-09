@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
+import { getContextWorkflowState, handleWorkflowEvent } from "../extensions/workflow-monitor/workflow-handler.ts";
+import { WORKFLOW_STATE_ENTRY_TYPE } from "../extensions/workflow-monitor/workflow-tracker.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
 type CommandConfig = { description: string; handler: Handler };
@@ -76,6 +78,47 @@ test("next command warns and continues on invalid phase", async () => {
   assert.deepEqual(result, { action: "continue" });
   assert.match(notices[0][0], /Usage: \/addy-workflow-next/);
   assert.equal(notices[0][1], "warning");
+});
+
+test("workflow state round-trips from persisted append entries", () => {
+  const entries: Array<[string, unknown]> = [];
+  const firstCtx: any = { ui: { setWidget() {} } };
+  const build = handleWorkflowEvent(firstCtx, { source: "user-input", text: "/addy-build" }, (type, data) => entries.push([type, data]));
+  assert.equal(build.current, "build");
+
+  const nextCtx: any = {
+    ui: { setWidget() {}, notify(message: string) { throw new Error(message); } },
+    sessionManager: { getBranch: () => entries },
+  };
+  const verify = handleWorkflowEvent(nextCtx, { source: "user-input", text: "/addy-verify" }, (type, data) => entries.push([type, data]));
+
+  assert.equal(getContextWorkflowState(nextCtx).current, "verify");
+  assert.deepEqual(verify.warnings, []);
+});
+
+test("workflow state skips malformed latest entries", () => {
+  const validState = { current: "build", phases: { define: "pending", plan: "pending", build: "active", simplify: "pending", verify: "pending", review: "pending", ship: "pending" }, warnings: [] };
+  const ctx: any = {
+    sessionManager: {
+      getBranch: () => [
+        [WORKFLOW_STATE_ENTRY_TYPE, validState],
+        [WORKFLOW_STATE_ENTRY_TYPE, { bad: "state" }],
+        [WORKFLOW_STATE_ENTRY_TYPE, { current: "verify", phases: {}, warnings: [] }],
+      ],
+    },
+  };
+
+  assert.equal(getContextWorkflowState(ctx).current, "build");
+});
+
+test("workflow state reads custom session entries", () => {
+  const ctx: any = {
+    sessionManager: {
+      getBranch: () => [{ type: "custom", customType: WORKFLOW_STATE_ENTRY_TYPE, data: { current: "build", phases: { define: "pending", plan: "pending", build: "active", simplify: "pending", verify: "pending", review: "pending", ship: "pending" }, warnings: [] } }],
+    },
+  };
+
+  assert.equal(getContextWorkflowState(ctx).current, "build");
 });
 
 test("write tool calls drive file-write transitions", async () => {

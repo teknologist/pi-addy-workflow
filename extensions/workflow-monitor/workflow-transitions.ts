@@ -115,12 +115,13 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   const warnings: string[] = [];
   const targetIndex = phaseIndex(target);
 
-  if (current && phaseIndex(target) > phaseIndex(current)) {
+  if (current) {
     for (const phase of WORKFLOW_PHASES) {
       const index = phaseIndex(phase);
       if (index < targetIndex && state.phases[phase] === "complete") next.phases[phase] = "complete";
     }
-    next.phases[current] = "complete";
+
+    if (phaseIndex(target) > phaseIndex(current)) next.phases[current] = "complete";
   }
 
   const firstSkipped = firstSkippedEnforcedPhase(state, target, next);

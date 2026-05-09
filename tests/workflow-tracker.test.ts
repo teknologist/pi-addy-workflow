@@ -4,7 +4,7 @@ import { createInitialWorkflowState, resolveTargetPhase, transitionWorkflow, typ
 import { nextPromptForPhase, renderWorkflowStrip } from "../extensions/workflow-monitor/workflow-tracker.ts";
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
 
-test("prompt triggers map to phases and code-simplify is unchanged", () => {
+test("prompt triggers map to phases", () => {
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-define" }), "define");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-plan" }), "plan");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-build" }), "build");
@@ -40,6 +40,18 @@ test("fresh build and simplify are allowed but verify and review enforce build t
   const review = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-review" });
   assert.equal(review.current, "review");
   assert.match(review.warnings[0], /build/);
+});
+
+test("returning to optional simplify preserves completed build", () => {
+  const build = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
+  const verify = transitionWorkflow(build, { source: "user-input", text: "/addy-verify" });
+  const simplify = transitionWorkflow(verify, { source: "user-input", text: "/addy-code-simplify" });
+  const verifyAgain = transitionWorkflow(simplify, { source: "user-input", text: "/addy-verify" });
+
+  assert.equal(simplify.current, "simplify");
+  assert.equal(simplify.phases.build, "complete");
+  assert.equal(simplify.phases.verify, "pending");
+  assert.deepEqual(verifyAgain.warnings, []);
 });
 
 test("ship is optional and does not enforce earlier phases", () => {

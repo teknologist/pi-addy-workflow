@@ -1,8 +1,8 @@
-import { createInitialWorkflowState, transitionWorkflow, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
-import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, renderWorkflowWidget } from "./workflow-tracker.ts";
+import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
+import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
-type SessionEntry = { type?: string; customType?: string; data?: unknown };
+type SessionEntry = { type?: string; customType?: string; data?: unknown } | [string, unknown];
 
 type WorkflowContext = {
   ui?: {
@@ -20,14 +20,54 @@ type WorkflowContext = {
 
 type AppendEntry = (type: string, data: unknown) => void;
 
+function isPhaseStatus(value: unknown): value is PhaseStatus {
+  return value === "pending" || value === "active" || value === "complete";
+}
+
 function isWorkflowState(value: unknown): value is WorkflowState {
-  return typeof value === "object" && value !== null && "phases" in value;
+  if (typeof value !== "object" || value === null || !("phases" in value) || !("warnings" in value)) return false;
+
+  const candidate = value as Partial<WorkflowState>;
+  if (candidate.current !== undefined && !WORKFLOW_PHASES.includes(candidate.current)) return false;
+  if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return false;
+  if (typeof candidate.phases !== "object" || candidate.phases === null) return false;
+
+  return WORKFLOW_PHASES.every((phase) => isPhaseStatus(candidate.phases?.[phase]));
+}
+
+function parsePersistedWorkflowState(value: unknown): WorkflowState | undefined {
+  if (isWorkflowState(value)) return parseWorkflowState(value);
+
+  if (typeof value !== "string") return undefined;
+
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed?.type === WORKFLOW_STATE_ENTRY_TYPE && isWorkflowState(parsed.state)) return parseWorkflowState(parsed.state);
+    if (isWorkflowState(parsed)) return parseWorkflowState(parsed);
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+function workflowStateFromEntry(entry: SessionEntry): WorkflowState | undefined {
+  if (Array.isArray(entry)) {
+    const [type, data] = entry;
+    return type === WORKFLOW_STATE_ENTRY_TYPE ? parsePersistedWorkflowState(data) : undefined;
+  }
+
+  if (entry.type === "custom" && entry.customType === WORKFLOW_STATE_ENTRY_TYPE) return parsePersistedWorkflowState(entry.data);
+  if (entry.type === WORKFLOW_STATE_ENTRY_TYPE) return parsePersistedWorkflowState(entry.data);
+
+  return undefined;
 }
 
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   const entries = ctx.sessionManager?.getBranch?.() ?? [];
   for (const entry of [...entries].reverse()) {
-    if (entry.type === "custom" && entry.customType === WORKFLOW_STATE_ENTRY_TYPE && isWorkflowState(entry.data)) return entry.data;
+    const state = workflowStateFromEntry(entry);
+    if (state) return state;
   }
 
   return ctx.state ?? createInitialWorkflowState();
