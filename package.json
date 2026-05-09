@@ -1,0 +1,50 @@
+{
+  "name": "pi-addy-workflow",
+  "version": "0.1.0",
+  "description": "Addy Osmani agent-skills workflow for Pi coding agent",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "addy",
+    "agent-skills",
+    "workflow"
+  ],
+  "files": [
+    "extensions/",
+    "skills/",
+    "prompts/",
+    "agents/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "extensions/bootstrap.ts",
+      "extensions/agent-installer.ts",
+      "extensions/workflow-monitor.ts"
+    ],
+    "skills": [
+      "skills"
+    ],
+    "prompts": [
+      "prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.2",
+    "typescript": "^6.0.3"
+  }
+}
