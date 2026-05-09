@@ -5,14 +5,16 @@ description: Governs the Addy workflow package lifecycle. Use at session start o
 
 # Using Addy Workflow
 
-Follow the lifecycle unless the user explicitly overrides it:
+Workflow commands:
 
-1. DEFINE with `/addy-spec`: clarify goal, users, constraints, acceptance criteria.
-2. PLAN with `/addy-plan`: create small vertical tasks and verification steps.
+1. DEFINE with `/addy-spec`: clarify goal, users, constraints, acceptance criteria. Optional; user may skip.
+2. PLAN with `/addy-plan`: create small vertical tasks and verification steps. Optional; user may skip or reuse an existing plan.
 3. BUILD with `/addy-build`: implement incrementally, test first when useful, no auto-commit.
 4. VERIFY with `/addy-test`: prove behavior with tests or reproduction.
 5. REVIEW with `/addy-review`: check correctness, readability, architecture, security, performance.
-6. SHIP with `/addy-ship`: decide GO/NO-GO with rollback and verification notes.
+6. SHIP with `/addy-ship`: decide GO/NO-GO with rollback and verification notes. Optional; user may run after any number of build/verify/review cycles.
+
+Enforce only `BUILD → VERIFY → REVIEW`. Do not force DEFINE or PLAN before BUILD. Do not force SHIP after REVIEW.
 
 Rules:
 

@@ -14,20 +14,34 @@ test("prompt triggers map to phases and code-simplify is unchanged", () => {
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-code-simplify" }), undefined);
 });
 
-test("forward transition completes current phase and warns for skipped phases", () => {
+test("forward transition completes current phase without enforcing define or plan", () => {
   const define = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-spec" });
   const build = transitionWorkflow(define, { source: "user-input", text: "/addy-build" });
 
   assert.equal(build.phases.define, "complete");
   assert.equal(build.phases.plan, "pending");
   assert.equal(build.phases.build, "active");
-  assert.match(build.warnings[0], /plan/);
+  assert.deepEqual(build.warnings, []);
 });
 
-test("fresh later phase warns about first missing earlier phase", () => {
+test("fresh build is allowed but verify and review enforce build to verify to review", () => {
+  const build = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
+  assert.equal(build.current, "build");
+  assert.deepEqual(build.warnings, []);
+
+  const verify = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-test" });
+  assert.equal(verify.current, "verify");
+  assert.match(verify.warnings[0], /build/);
+
   const review = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-review" });
   assert.equal(review.current, "review");
-  assert.match(review.warnings[0], /define/);
+  assert.match(review.warnings[0], /build/);
+});
+
+test("ship is optional and does not enforce earlier phases", () => {
+  const ship = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-ship" });
+  assert.equal(ship.current, "ship");
+  assert.deepEqual(ship.warnings, []);
 });
 
 test("backward transition resets state", () => {

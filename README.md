@@ -11,8 +11,10 @@ pi install git:github.com/teknologist/pi-addy-workflow
 ## Workflow
 
 ```text
-DEFINE → PLAN → BUILD → VERIFY → REVIEW → SHIP
+[DEFINE] → [PLAN] → BUILD → VERIFY → REVIEW → [SHIP]
 ```
+
+Only `BUILD → VERIFY → REVIEW` is enforced. `DEFINE`, `PLAN`, and `SHIP` are optional entry/exit aids; users can run many build/verify/review slices before shipping.
 
 Prompts:
 

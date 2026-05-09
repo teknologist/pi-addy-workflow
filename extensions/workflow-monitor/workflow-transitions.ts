@@ -1,4 +1,5 @@
 export const WORKFLOW_PHASES = ["define", "plan", "build", "verify", "review", "ship"] as const;
+export const ENFORCED_WORKFLOW_PHASES = ["build", "verify", "review"] as const;
 
 export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
 export type PhaseStatus = "pending" | "active" | "complete";
@@ -30,6 +31,20 @@ export function createInitialWorkflowState(): WorkflowState {
 
 export function phaseIndex(phase: WorkflowPhase): number {
   return WORKFLOW_PHASES.indexOf(phase);
+}
+
+function enforcedPhaseIndex(phase: WorkflowPhase): number {
+  return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).indexOf(phase);
+}
+
+function firstSkippedEnforcedPhase(state: WorkflowState, target: WorkflowPhase, next: WorkflowState): WorkflowPhase | undefined {
+  const targetIndex = enforcedPhaseIndex(target);
+  if (targetIndex === -1) return undefined;
+
+  return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).find((phase) => {
+    const index = enforcedPhaseIndex(phase);
+    return index < targetIndex && state.phases[phase] !== "complete" && next.phases[phase] !== "complete";
+  });
 }
 
 function matchesAny(path: string, patterns: RegExp[]): boolean {
@@ -106,13 +121,10 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
       if (index < targetIndex && state.phases[phase] === "complete") next.phases[phase] = "complete";
     }
     next.phases[current] = "complete";
-
-    const firstSkipped = WORKFLOW_PHASES.find((phase) => phaseIndex(phase) < targetIndex && next.phases[phase] === "pending");
-    if (firstSkipped) warnings.push(`Workflow warning: ${target} started before ${firstSkipped}.`);
-  } else if (!current) {
-    const firstMissing = WORKFLOW_PHASES.find((phase) => phaseIndex(phase) < targetIndex);
-    if (firstMissing) warnings.push(`Workflow warning: ${target} started before ${firstMissing}.`);
   }
+
+  const firstSkipped = firstSkippedEnforcedPhase(state, target, next);
+  if (firstSkipped) warnings.push(`Workflow warning: ${target} started before ${firstSkipped}.`);
 
   next.current = target;
   next.phases[target] = "active";
