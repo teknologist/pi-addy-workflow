@@ -16,6 +16,8 @@ function normalizeWorkflowState(state: WorkflowState): WorkflowState {
     ? {
       currentTask: state.currentTask,
       nextTask: state.nextTask,
+      currentTaskSummary: state.currentTaskSummary,
+      nextTaskSummary: state.nextTaskSummary,
     }
     : {};
 
@@ -159,14 +161,32 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
   if (!markdown) return state;
 
   const tasks = planTasksFromMarkdown(markdown);
-  if (tasks.length === 0) return { ...state, currentTask: undefined, nextTask: undefined };
+  if (tasks.length === 0) return { ...state, currentTask: undefined, nextTask: undefined, currentTaskSummary: undefined, nextTaskSummary: undefined };
 
   const currentIndex = tasks.findIndex((task) => !task.complete);
-  if (currentIndex === -1) return { ...state, currentTask: "all tasks complete", nextTask: "none" };
+  if (currentIndex === -1) {
+    const currentTask = "all tasks complete";
+    const nextTask = "none";
+    return {
+      ...state,
+      currentTask,
+      nextTask,
+      currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
+      nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
+    };
+  }
 
   const current = tasks[currentIndex];
   const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
-  return { ...state, currentTask: current.title, nextTask: next?.title ?? "none" };
+  const currentTask = current.title;
+  const nextTask = next?.title ?? "none";
+  return {
+    ...state,
+    currentTask,
+    nextTask,
+    currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
+    nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
+  };
 }
 
 export function promptArtifactForPhase(state: WorkflowState, phase: WorkflowPhase): string | undefined {
@@ -185,7 +205,9 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
       const styledArtifactName = artifactName ? (theme?.fg?.("mdLinkUrl", artifactName) ?? theme?.fg?.("accent", artifactName) ?? artifactName) : undefined;
       const artifactSuffix = styledArtifactName ? ` | ${styledArtifactName}` : "";
       const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
-      const taskLine = state.currentTask ? `Current task: ${state.currentTask} | Next task: ${state.nextTask ?? "none"}` : workflowTaskFooterLine(state.activePlan, baseCwd);
+      const currentTask = state.currentTaskSummary ?? state.currentTask;
+      const nextTask = state.nextTaskSummary ?? state.nextTask;
+      const taskLine = currentTask ? `Current task: ${currentTask} | Next task: ${nextTask ?? "none"}` : workflowTaskFooterLine(state.activePlan, baseCwd);
       const lines = taskLine ? [line, taskLine] : [line];
       return width ? lines.map((value) => truncateToWidth(value, Math.max(1, width), "", true)) : lines;
     },

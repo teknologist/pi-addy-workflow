@@ -125,6 +125,9 @@ test("ambiguous spec and plan selection uses structured questions", async () => 
 
   assert.match(planPrompt, /ask_user_question.*bounded candidate.*spec paths/i);
   assert.match(buildPrompt, /ask_user_question.*bounded candidate plan paths/i);
+  assert.match(buildPrompt, /always use the active plan from workflow state/i);
+  assert.match(buildPrompt, /Do not ask which plan to use just because other slice plans exist/i);
+  assert.match(buildPrompt, /Do not skip an unfinished active plan/i);
   assert.match(finishPrompt, /ask_user_question.*bounded options/i);
 });
 

@@ -269,6 +269,45 @@ test("workflow widget uses persisted task state when plan file is unavailable", 
   ]);
 });
 
+test("workflow widget prefers summarized task labels", () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    current: "build" as const,
+    phases: { ...createInitialWorkflowState().phases, define: "complete" as const, plan: "complete" as const, build: "active" as const },
+    activePlan: "docs/plans/task-footer.md",
+    currentTask: "Runtime wires per-invoice state transitions parsed converted submitted",
+    nextTask: "Submit endpoint chooses draft live based on CSV isDraft",
+    currentTaskSummary: "Wire state transitions",
+    nextTaskSummary: "Route draft/live submits",
+  };
+
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [
+    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "Current task: Wire state transitions | Next task: Route draft/live submits",
+  ]);
+});
+
+test("refreshing workflow tasks clears stale summaries when task changes", () => {
+  const planPath = join(taskFooterDir, "stale-summary.md");
+  writeFileSync(planPath, [
+    "## Task 1: New task name",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: "build",
+    activePlan: planPath,
+    currentTask: "Old task name",
+    currentTaskSummary: "Old summary",
+  });
+
+  assert.equal(state.currentTask, "New task name");
+  assert.equal(state.currentTaskSummary, undefined);
+});
+
 test("plan task parser supports checklist tasks", () => {
   assert.deepEqual(planTasksFromMarkdown("- [x] First task\n- [ ] Second task"), [
     { title: "First task", complete: true },

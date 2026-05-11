@@ -11,7 +11,16 @@ Use the Pi `incremental-implementation` skill alongside `test-driven-development
 
 Argument: `/addy-build [plan-path]`.
 
-Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state. If neither exists, call `ask_user_question` with bounded candidate plan paths before changing code.
+Plan selection rules:
+
+1. Use the supplied plan path when present and update the Addy workflow state's active plan.
+2. If no path is supplied, always use the active plan from workflow state when it exists. Do not ask which plan to use just because other slice plans exist.
+3. Read that active/supplied slice plan and decide whether it has unfinished implementation work.
+4. If the active/supplied slice plan still has unfinished implementation work, continue that plan.
+5. If the active/supplied slice plan is fully implemented, move to the next slice plan only when the next slice is unambiguous from the plan index or neighboring slice filenames.
+6. If neither an active/supplied plan exists, or if the active/supplied slice is complete and the next slice is ambiguous, call `ask_user_question` with bounded candidate plan paths before changing code.
+
+When asking for a plan, include the active plan as the recommended option unless you have already confirmed it is fully implemented. Do not skip an unfinished active plan in favor of a later slice.
 
 Before changing code, read the active/supplied plan and reconcile the current task's status checkboxes with real evidence. Do not mark work done just because it is intended.
 

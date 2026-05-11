@@ -12,6 +12,8 @@ export type WorkflowState = {
   activePlan?: string;
   currentTask?: string;
   nextTask?: string;
+  currentTaskSummary?: string;
+  nextTaskSummary?: string;
   lastTrigger?: string;
   lastArtifact?: string;
   testStatus?: "detected" | "passed" | "failed";

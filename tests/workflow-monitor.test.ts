@@ -155,6 +155,46 @@ test("workflow state stores current and next task from active plan", () => {
   assert.equal(ctx.state.nextTask, "Next");
 });
 
+test("late task summaries do not overwrite newer workflow state", async () => {
+  const cwd = join(stateDir, "task-summary-race-project");
+  const firstPlan = join(cwd, "docs", "plans", "first.md");
+  const secondPlan = join(cwd, "docs", "plans", "second.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(firstPlan, [
+    "## Task 1: First long task name that needs summary",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+  writeFileSync(secondPlan, [
+    "## Task 1: Second long task name that must win",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  let releaseFirstSummary: (() => void) | undefined;
+  const ctx: any = {
+    cwd,
+    id: "task-summary-race-session",
+    ui: { setWidget() {} },
+    model: { provider: "test", id: "test-model" },
+    modelRegistry: {
+      getApiKeyAndHeaders: () => new Promise((resolve) => {
+        releaseFirstSummary = () => resolve({ ok: true, apiKey: "test-key" });
+      }),
+    },
+  };
+
+  handleWorkflowEvent(ctx, { source: "user-input", text: `/addy-build ${firstPlan}` });
+  handleWorkflowEvent(ctx, { source: "user-input", text: `/addy-build ${secondPlan}` });
+  releaseFirstSummary?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(ctx.state.activePlan, secondPlan);
+  assert.equal(ctx.state.currentTask, "Second long task name that must win");
+});
+
 test("workflow state round-trips from persisted append entries", () => {
   const entries: Array<[string, unknown]> = [];
   const firstCtx: any = { ui: { setWidget() {} } };
