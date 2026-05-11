@@ -168,9 +168,9 @@ test("workflow widget colors footer artifact name light blue", () => {
 
 test("workflow widget dims optional pending phases", () => {
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
-  const theme = { fg: (name: string, text: string) => name === "gray" ? `<gray>${text}</gray>` : text };
+  const theme = { fg: (name: string, text: string) => name === "dim" ? `<dim>${text}</dim>` : text };
 
-  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), ["Addy Workflow: define → plan → [build] → <gray>simplify</gray> → verify → review → <gray>ship</gray>"]);
+  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), ["Addy Workflow: define → plan → [build] → <dim>simplify</dim> → verify → review → <dim>ship</dim>"]);
 });
 
 test("workflow widget truncates to render width", () => {

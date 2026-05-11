@@ -71,7 +71,7 @@ function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: 
     const text = `[${phase}]`;
     return theme?.fg?.("success", text) ?? theme?.fg?.("green", text) ?? text;
   }
-  if (OPTIONAL_PHASES.has(phase)) return theme?.fg?.("gray", phase) ?? theme?.fg?.("grey", phase) ?? theme?.fg?.("muted", phase) ?? theme?.fg?.("dim", phase) ?? phase;
+  if (OPTIONAL_PHASES.has(phase)) return theme?.fg?.("dim", phase) ?? theme?.fg?.("muted", phase) ?? phase;
   return phase;
 }
 
