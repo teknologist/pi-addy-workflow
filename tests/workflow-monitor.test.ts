@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
@@ -119,6 +119,39 @@ test("active plan written during plan phase survives fresh sessions for next bui
   // A fresh session with no explicit argument should use the persisted active plan immediately.
   assert.equal(openNextWorkflowPrompt(nextCtx, "build"), `/addy-build ${planPath}`);
   assert.deepEqual(prefills, [`/addy-build ${planPath}`]);
+});
+
+test("workflow state stores current and next task from active plan", () => {
+  const cwd = join(stateDir, "task-state-project");
+  const relativePlanPath = join("docs", "plans", "task-state.md");
+  const planPath = join(cwd, relativePlanPath);
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(planPath, [
+    "## Task 1: Done",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "",
+    "## Task 2: Current",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 3: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const ctx: any = { cwd, id: "task-state-session", ui: { setWidget() {} } };
+  const planned = handleWorkflowEvent(ctx, { source: "file-write", artifact: relativePlanPath });
+  const build = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-build" });
+
+  assert.equal(planned.activePlan, relativePlanPath);
+  assert.equal(build.currentTask, "Current");
+  assert.equal(build.nextTask, "Next");
+  assert.equal(ctx.state.currentTask, "Current");
+  assert.equal(ctx.state.nextTask, "Next");
 });
 
 test("workflow state round-trips from persisted append entries", () => {

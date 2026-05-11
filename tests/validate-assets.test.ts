@@ -59,6 +59,16 @@ test("finish prompt advances tasks and slices with commit prompts", async () => 
   assert.match(content, /\/addy-build <next-slice-plan-path>/);
   assert.match(content, /\/commit/);
   assert.match(content, /\/addy-ship/);
+  assert.match(content, /execute the selected action directly/);
+  assert.match(content, /Never respond with only the slash command text/);
+  assert.match(content, /Do not merely print `\/commit`/);
+  assert.match(content, /Do not merely print `\/addy-build <current-slice-plan-path>`/);
+  assert.match(content, /Do not merely print `\/addy-build <next-slice-plan-path>`/);
+  assert.match(content, /Do not merely print `\/addy-ship`/);
+  assert.match(content, /User has answered/);
+  assert.match(content, /do not wait for another user message/);
+  assert.doesNotMatch(content, /trigger `\/addy-build/);
+  assert.doesNotMatch(content, /trigger the `\/addy-ship/);
 });
 
 test("finish guidance does not advertise commit and push", async () => {

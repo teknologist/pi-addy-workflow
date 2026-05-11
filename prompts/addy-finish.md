@@ -22,28 +22,32 @@ If the current slice has unfinished tasks:
 
 1. Call the `ask_user_question` tool with one single-select question asking whether to commit the current work before moving to the next task.
 2. Options must be exactly:
-   - `commit first` — trigger the `/commit` prompt for unstaged files before any more build work.
-   - `next task` — trigger `/addy-build <current-slice-plan-path>` to implement the next unfinished task in the current slice.
-3. If the user chooses `commit first`, run `/commit`.
-4. If the user chooses `next task`, run `/addy-build <current-slice-plan-path>`.
+   - `commit first` — commit unstaged files before any more build work.
+   - `next task` — implement the next unfinished task in the current slice using the Addy Build workflow.
+3. If the user chooses `commit first`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
+4. If the user chooses `next task`, immediately continue with the Addy Build workflow for `<current-slice-plan-path>` in this same turn. Do not merely print `/addy-build <current-slice-plan-path>` or wait for the user to submit it.
 
 If the current slice is complete and a next unfinished slice exists:
 
 1. Call the `ask_user_question` tool with one single-select question asking whether to commit the completed slice before moving to the next slice.
 2. Options must be exactly:
-   - `commit first` — trigger the `/commit` prompt for unstaged files before starting another slice.
-   - `next slice` — trigger `/addy-build <next-slice-plan-path>` to start the first unfinished task in the next slice.
-3. If the user chooses `commit first`, run `/commit`.
-4. If the user chooses `next slice`, run `/addy-build <next-slice-plan-path>`.
+   - `commit first` — commit unstaged files before starting another slice.
+   - `next slice` — start the first unfinished task in the next slice using the Addy Build workflow.
+3. If the user chooses `commit first`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
+4. If the user chooses `next slice`, immediately continue with the Addy Build workflow for `<next-slice-plan-path>` in this same turn. Do not merely print `/addy-build <next-slice-plan-path>` or wait for the user to submit it.
 
 If all slices are complete:
 
 1. Call the `ask_user_question` tool with one single-select question asking whether to commit or ship.
 2. Options must be exactly:
-   - `commit` — trigger the `/commit` prompt.
-   - `ship` — trigger the `/addy-ship` prompt.
-3. If the user chooses `commit`, run `/commit`.
-4. If the user chooses `ship`, run `/addy-ship`, passing the active/supplied plan path when available.
+   - `commit` — commit unstaged files.
+   - `ship` — continue with the Addy Ship workflow.
+3. If the user chooses `commit`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
+4. If the user chooses `ship`, immediately continue with the Addy Ship workflow, passing the active/supplied plan path when available. Do not merely print `/addy-ship` or wait for the user to submit it.
+
+For every answer returned by `ask_user_question`, execute the selected action directly in the current assistant turn. Never respond with only the slash command text for the user to run manually.
+
+Important: the `ask_user_question` tool returns a tool result like `User has answered ... ="commit first"`. When that tool result appears, treat it as permission and immediately perform the mapped action. Do not create or complete only a `todo`, do not stop after writing `/commit`, `/addy-build`, or `/addy-ship`, and do not wait for another user message.
 
 If the current slice, next task, or next slice path is ambiguous, call `ask_user_question` with one concise single-select follow-up before running anything. Use bounded options from the candidate slices, tasks, or plan paths you found.
 

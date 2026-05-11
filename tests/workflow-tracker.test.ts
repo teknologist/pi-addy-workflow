@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { visibleWidth } from "@earendil-works/pi-tui";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createInitialWorkflowState, resolveTargetPhase, transitionWorkflow, type WorkflowPhase } from "../extensions/workflow-monitor/workflow-transitions.ts";
-import { nextPromptForPhase, parseWorkflowState, renderWorkflowStrip, renderWorkflowWidget } from "../extensions/workflow-monitor/workflow-tracker.ts";
+import { nextPromptForPhase, parseWorkflowState, planTasksFromMarkdown, refreshWorkflowTasksFromPlan, renderWorkflowStrip, renderWorkflowWidget } from "../extensions/workflow-monitor/workflow-tracker.ts";
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
+
+const taskFooterDir = "/tmp/pi-addy-workflow-task-footer-test";
 
 test("prompt triggers map to phases", () => {
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-define" }), "define");
@@ -192,6 +196,71 @@ test("workflow widget renders spec or plan name footer", () => {
 
   const build = transitionWorkflow({ ...state, activePlan: planPath }, { source: "user-input", text: "/addy-build" });
   assert.deepEqual(renderWorkflowWidget(build)().render(), [`Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | 2026-05-11-better-workflow.md`]);
+});
+
+test("workflow widget renders current and next task from active plan", () => {
+  const planPath = join(taskFooterDir, "docs", "plans", "task-footer.md");
+  mkdirSync(join(taskFooterDir, "docs", "plans"), { recursive: true });
+  writeFileSync(planPath, [
+    "## Task 1: Existing import path",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "",
+    "## Task 2: Parse invoice rows",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 3: Persist invoice payloads",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = refreshWorkflowTasksFromPlan(transitionWorkflow({ ...createInitialWorkflowState(), activePlan: planPath }, { source: "user-input", text: "/addy-build" }));
+
+  assert.equal(state.currentTask, "Parse invoice rows");
+  assert.equal(state.nextTask, "Persist invoice payloads");
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [
+    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "Current task: Parse invoice rows | Next task: Persist invoice payloads",
+  ]);
+});
+
+test("workflow widget uses persisted task state when plan file is unavailable", () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    current: "build" as const,
+    phases: { ...createInitialWorkflowState().phases, define: "complete" as const, plan: "complete" as const, build: "active" as const },
+    activePlan: "docs/plans/missing.md",
+    currentTask: "Parse invoice rows",
+    nextTask: "Persist invoice payloads",
+  };
+
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [
+    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | missing.md",
+    "Current task: Parse invoice rows | Next task: Persist invoice payloads",
+  ]);
+});
+
+test("plan task parser supports checklist tasks", () => {
+  assert.deepEqual(planTasksFromMarkdown("- [x] First task\n- [ ] Second task"), [
+    { title: "First task", complete: true },
+    { title: "Second task", complete: false },
+  ]);
+});
+
+test("plan task parser ignores nested checklist items when status task headings exist", () => {
+  assert.deepEqual(planTasksFromMarkdown([
+    "## Task 1: Parse invoice rows",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "- [ ] Acceptance criterion that is not a task",
+  ].join("\n")), [
+    { title: "Parse invoice rows", complete: false },
+  ]);
 });
 
 test("workflow widget colors footer artifact name light blue", () => {

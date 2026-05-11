@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
-import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, renderWorkflowWidget } from "./workflow-tracker.ts";
+import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, refreshWorkflowTasksFromPlan, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
 type SessionEntry = { type?: string; customType?: string; data?: unknown } | [string, unknown];
@@ -44,6 +44,8 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return undefined;
   if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return undefined;
   if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
+  if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
+  if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
   if (typeof candidate.phases !== "object" || candidate.phases === null) return undefined;
 
   const legacyPhases = candidate.phases as Record<string, unknown>;
@@ -141,6 +143,7 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
 }
 
 export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowState, appendEntry?: AppendEntry): void {
+  state = refreshWorkflowTasksFromPlan(state, ctx.cwd);
   ctx.state = state;
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);
@@ -157,7 +160,7 @@ export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowSta
 export function handleWorkflowEvent(ctx: WorkflowContext, event: WorkflowEvent, appendEntry?: AppendEntry): WorkflowState {
   const next = transitionWorkflow(getContextWorkflowState(ctx), event);
   setContextWorkflowState(ctx, next, appendEntry);
-  return next;
+  return ctx.state ?? next;
 }
 
 export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): WorkflowState {

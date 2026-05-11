@@ -10,6 +10,8 @@ export type WorkflowState = {
   warnings: string[];
   activeSpec?: string;
   activePlan?: string;
+  currentTask?: string;
+  nextTask?: string;
   lastTrigger?: string;
   lastArtifact?: string;
   testStatus?: "detected" | "passed" | "failed";
