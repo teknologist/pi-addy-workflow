@@ -43,17 +43,86 @@ test("all Addy prompts exist and workflow commands are not prompt files", async 
   assert.equal(promptFiles.includes("addy-workflow-next.md"), false);
 });
 
-test("finish prompt offers the supported finish actions", async () => {
+test("finish prompt advances tasks and slices with commit prompts", async () => {
   const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
 
   assert.match(content, /ask_user_question/);
-  assert.match(content, /`commit`/);
-  assert.match(content, /`commit and push`/);
+  assert.match(content, /current slice has unfinished tasks/);
+  assert.match(content, /current slice is complete and a next unfinished slice exists/);
+  assert.match(content, /all slices are complete/);
+  assert.match(content, /`commit first`/);
+  assert.match(content, /`next task`/);
   assert.match(content, /`next slice`/);
+  assert.match(content, /`commit`/);
   assert.match(content, /`ship`/);
-  assert.match(content, /\/commit-push/);
+  assert.match(content, /\/addy-build <current-slice-plan-path>/);
   assert.match(content, /\/addy-build <next-slice-plan-path>/);
+  assert.match(content, /\/commit/);
   assert.match(content, /\/addy-ship/);
+});
+
+test("finish guidance does not advertise commit and push", async () => {
+  const checkedFiles = [
+    "README.md",
+    "extensions/bootstrap/core.ts",
+    "skills/using-addy-workflow/SKILL.md",
+    "prompts/addy-finish.md",
+  ];
+
+  for (const file of checkedFiles) {
+    const content = await readFile(file, "utf8");
+    assert.doesNotMatch(content, /commit-and-push/i, file);
+    assert.doesNotMatch(content, /commit and push/i, file);
+    assert.doesNotMatch(content, /\/commit-push/, file);
+  }
+});
+
+test("workflow guidance requires plan checkbox synchronization", async () => {
+  const checkedFiles = [
+    "README.md",
+    "extensions/bootstrap/core.ts",
+    "skills/using-addy-workflow/SKILL.md",
+    "skills/planning-and-task-breakdown/SKILL.md",
+    "skills/incremental-implementation/SKILL.md",
+    "prompts/addy-plan.md",
+    "prompts/addy-build.md",
+    "prompts/addy-verify.md",
+    "prompts/addy-review.md",
+    "prompts/addy-finish.md",
+  ];
+
+  for (const file of checkedFiles) {
+    const content = await readFile(file, "utf8");
+    assert.match(content, /Implemented/i, file);
+    assert.match(content, /Verified/i, file);
+    assert.match(content, /Reviewed/i, file);
+  }
+});
+
+test("verify and review require checkbox synchronization after every run", async () => {
+  for (const prompt of ["addy-verify", "addy-review"]) {
+    const content = await readFile(join("prompts", `${prompt}.md`), "utf8");
+    assert.match(content, new RegExp(`mandatory after every \\\`\\/${prompt}\\\` run`), prompt);
+    assert.match(content, /Before reporting completion, re-open the active\/supplied plan/, prompt);
+    assert.match(content, /If any status is uncertain, leave it unchecked/, prompt);
+  }
+});
+
+test("ambiguous spec and plan selection uses structured questions", async () => {
+  const planPrompt = await readFile(join("prompts", "addy-plan.md"), "utf8");
+  const buildPrompt = await readFile(join("prompts", "addy-build.md"), "utf8");
+  const finishPrompt = await readFile(join("prompts", "addy-finish.md"), "utf8");
+
+  assert.match(planPrompt, /ask_user_question.*bounded candidate.*spec paths/i);
+  assert.match(buildPrompt, /ask_user_question.*bounded candidate plan paths/i);
+  assert.match(finishPrompt, /ask_user_question.*bounded options/i);
+});
+
+test("review may update plan checkboxes without editing source files", async () => {
+  const content = await readFile(join("prompts", "addy-review.md"), "utf8");
+
+  assert.match(content, /do not edit source files unless the user asks/i);
+  assert.match(content, /Updating the active\/supplied plan status checkboxes is required/);
 });
 
 test("required lifecycle skills exist", async () => {

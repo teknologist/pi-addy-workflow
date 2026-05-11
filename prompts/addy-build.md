@@ -11,7 +11,9 @@ Use the Pi `incremental-implementation` skill alongside `test-driven-development
 
 Argument: `/addy-build [plan-path]`.
 
-Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state. If neither exists, ask which plan to build from before changing code.
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state. If neither exists, call `ask_user_question` with bounded candidate plan paths before changing code.
+
+Before changing code, read the active/supplied plan and reconcile the current task's status checkboxes with real evidence. Do not mark work done just because it is intended.
 
 Pick the next pending task from the plan. For each task:
 
@@ -21,8 +23,9 @@ Pick the next pending task from the plan. For each task:
 4. Implement the minimum code to pass the test (GREEN)
 5. Run the full test suite to check for regressions
 6. Run the build to verify compilation
-7. Prepare a descriptive commit message, but do not commit unless the user explicitly asks
-8. Mark the task complete and move to the next one
+7. Update the active/supplied plan so the task's `[ ] Implemented` checkbox becomes `[x] Implemented` only after the implementation exists and the relevant checks pass. Leave `[ ] Verified` and `[ ] Reviewed` unchanged unless those steps have actually happened.
+8. Prepare a descriptive commit message, but do not commit unless the user explicitly asks
+9. Move to the next task only after the plan checkboxes match what was implemented, verified, and reviewed
 
 If any step fails, follow the Pi `debugging-and-error-recovery` skill.
 
@@ -30,4 +33,5 @@ Pi-specific execution notes:
 
 - Use `todo` for task tracking when there are multiple steps.
 - Use `process` for long-running dev servers, watchers, or log tails.
+- Keep task status checkboxes in the active plan synchronized with the real implementation state before reporting progress.
 - Before claiming completion, follow `verification-before-completion` and report the exact checks run.

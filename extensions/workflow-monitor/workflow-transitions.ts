@@ -49,6 +49,19 @@ function firstSkippedEnforcedPhase(state: WorkflowState, target: WorkflowPhase, 
   });
 }
 
+function completeSpecAndPlanAfterPlanning(state: WorkflowState, target: WorkflowPhase): WorkflowState {
+  if (phaseIndex(target) <= phaseIndex("plan")) return state;
+
+  return {
+    ...state,
+    phases: {
+      ...state.phases,
+      define: "complete",
+      plan: "complete",
+    },
+  };
+}
+
 function matchesAny(path: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(path));
 }
@@ -132,16 +145,16 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
 
   const current = state.current;
   if (current === target) {
-    return applyActiveArtifact({
+    return applyActiveArtifact(completeSpecAndPlanAfterPlanning({
       ...state,
       warnings: [],
       lastTrigger: event.text ?? event.command ?? event.agentName,
       lastArtifact: event.artifact ?? state.lastArtifact,
       testStatus: target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus,
-    }, event, target);
+    }, target), event, target);
   }
 
-  const next = createInitialWorkflowState();
+  const next = completeSpecAndPlanAfterPlanning(createInitialWorkflowState(), target);
   const warnings: string[] = [];
   const targetIndex = phaseIndex(target);
 

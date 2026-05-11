@@ -12,6 +12,6 @@ For each slice:
 3. Add or run the narrowest relevant test.
 4. Make the minimum change.
 5. Verify immediately.
-6. Update task status.
+6. Update task status checkboxes in the active plan so `[x] Implemented`, `[x] Verified`, and `[x] Reviewed` reflect only work that actually happened.
 
 Prefer small diffs. Avoid unrelated refactors. Do not commit unless requested.

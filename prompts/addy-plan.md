@@ -11,7 +11,7 @@ Use the Pi `planning-and-task-breakdown` skill.
 
 Argument: `/addy-plan [spec-path]`.
 
-Read the supplied spec path. If no path is supplied, use the active spec from the Addy workflow state. If neither exists, ask the user which `docs/specs/YYYY-MM-DD-<meaningful-name>.md` spec to plan from before writing the plan.
+Read the supplied spec path. If no path is supplied, use the active spec from the Addy workflow state. If neither exists, call `ask_user_question` with bounded candidate `docs/specs/YYYY-MM-DD-<meaningful-name>.md` spec paths before writing the plan.
 
 Then read the relevant codebase sections and:
 
@@ -19,8 +19,12 @@ Then read the relevant codebase sections and:
 2. Identify the dependency graph between components
 3. Slice work vertically (one complete path per task, not horizontal layers)
 4. Write tasks with acceptance criteria and verification steps
-5. Add checkpoints between phases
-6. Present the plan for human review
+5. For every slice task, include status checkboxes that can stay synchronized with execution:
+   - `[ ] Implemented`
+   - `[ ] Verified`
+   - `[ ] Reviewed`
+6. Add checkpoints between phases
+7. Present the plan for human review
 
 Save durable plans under `docs/plans/` using the same naming convention as specs: a meaningful, kebab-case filename with a date prefix, `YYYY-MM-DD-<meaningful-name>.md`. Do not save `/addy-plan` output as `tasks/plan.md` or `tasks/todo.md`.
 

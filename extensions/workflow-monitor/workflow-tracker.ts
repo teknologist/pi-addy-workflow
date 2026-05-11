@@ -5,6 +5,23 @@ export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
 export const WORKFLOW_STATE_ENTRY_TYPE = "pi-addy-workflow-state";
 const OPTIONAL_PHASES = new Set<WorkflowPhase>(["simplify"]);
 
+function phaseIndex(phase: WorkflowPhase): number {
+  return WORKFLOW_PHASES.indexOf(phase);
+}
+
+function normalizeWorkflowState(state: WorkflowState): WorkflowState {
+  if (!state.current || phaseIndex(state.current) <= phaseIndex("plan")) return state;
+
+  return {
+    ...state,
+    phases: {
+      ...state.phases,
+      define: "complete",
+      plan: "complete",
+    },
+  };
+}
+
 export function serializeWorkflowState(state: WorkflowState): string {
   return JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state });
 }
@@ -15,14 +32,14 @@ export function parseWorkflowState(value: unknown): WorkflowState {
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value);
-      if (parsed?.type === WORKFLOW_STATE_ENTRY_TYPE && parsed.state) return parsed.state as WorkflowState;
-      if (parsed?.phases) return parsed as WorkflowState;
+      if (parsed?.type === WORKFLOW_STATE_ENTRY_TYPE && parsed.state) return normalizeWorkflowState(parsed.state as WorkflowState);
+      if (parsed?.phases) return normalizeWorkflowState(parsed as WorkflowState);
     } catch {
       return createInitialWorkflowState();
     }
   }
 
-  if (typeof value === "object" && value !== null && "phases" in value) return value as WorkflowState;
+  if (typeof value === "object" && value !== null && "phases" in value) return normalizeWorkflowState(value as WorkflowState);
   return createInitialWorkflowState();
 }
 
@@ -34,7 +51,7 @@ export function workflowArtifactForFooter(state: WorkflowState): string | undefi
   if (!state.current) return undefined;
 
   if (state.current === "define" || state.current === "plan") return state.activeSpec;
-  if (WORKFLOW_PHASES.indexOf(state.current) > WORKFLOW_PHASES.indexOf("plan")) return state.activePlan;
+  if (phaseIndex(state.current) > phaseIndex("plan")) return state.activePlan;
 
   return undefined;
 }
@@ -45,7 +62,7 @@ export function workflowArtifactName(path: string): string {
 
 export function promptArtifactForPhase(state: WorkflowState, phase: WorkflowPhase): string | undefined {
   if (phase === "plan") return state.activeSpec;
-  if (WORKFLOW_PHASES.indexOf(phase) > WORKFLOW_PHASES.indexOf("plan")) return state.activePlan;
+  if (phaseIndex(phase) > phaseIndex("plan")) return state.activePlan;
   return undefined;
 }
 

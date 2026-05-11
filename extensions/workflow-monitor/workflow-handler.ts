@@ -133,7 +133,7 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
     if (state) return state;
   }
 
-  if (ctx.state) return ctx.state;
+  if (ctx.state) return parseWorkflowState(ctx.state);
 
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);

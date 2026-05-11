@@ -24,12 +24,13 @@ Prompts:
 - `/addy-code-simplify` — simplify code without changing behavior
 - `/addy-verify` — run TDD or Prove-It bug workflow
 - `/addy-review` — review correctness, quality, security, performance
-- `/addy-finish` — choose commit, commit-and-push, next slice, or ship
+- `/addy-finish` — commit current work, continue the next task or slice, or ship when all slices are complete
 
 ## Runtime behavior
 
 - Bootstrap injects concise `using-addy-workflow` guidance once per session.
 - Workflow monitor renders the phase strip with `ctx.ui.setWidget`.
+- Slice plans track `[ ] Implemented`, `[ ] Verified`, and `[ ] Reviewed`; workflow prompts keep those checkboxes synchronized with real evidence.
 - Agent installer syncs bundled agents into `~/.pi/agent/agents/pi-addy-workflow/` for pi-subagents discovery.
 
 `todo` and `subagent` are optional companion tools. Missing tools warn but do not block session start.
