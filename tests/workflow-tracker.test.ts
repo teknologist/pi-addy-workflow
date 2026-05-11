@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { createInitialWorkflowState, resolveTargetPhase, transitionWorkflow, type WorkflowPhase } from "../extensions/workflow-monitor/workflow-transitions.ts";
 import { nextPromptForPhase, renderWorkflowStrip, renderWorkflowWidget } from "../extensions/workflow-monitor/workflow-tracker.ts";
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
@@ -163,6 +164,16 @@ test("workflow widget colors footer artifact name light blue", () => {
   const theme = { fg: (name: string, text: string) => name === "mdLinkUrl" ? `<light-blue>${text}</light-blue>` : text };
 
   assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [`Addy Workflow: define → [plan] → build → simplify → verify → review → ship | <light-blue>2026-05-11-better-workflow.md</light-blue>`]);
+});
+
+test("workflow widget truncates to render width", () => {
+  const state = transitionWorkflow(createInitialWorkflowState(), {
+    source: "user-input",
+    text: "/addy-workflow-next review docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md",
+  });
+
+  const [line] = renderWorkflowWidget(state)().render(80);
+  assert.equal(visibleWidth(line) <= 80, true);
 });
 
 test("workflow handler sets widget, reset clears widget, next opens prompt", () => {

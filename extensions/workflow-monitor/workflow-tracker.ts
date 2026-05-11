@@ -1,3 +1,4 @@
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { WORKFLOW_PHASES, type WorkflowPhase, type WorkflowState, createInitialWorkflowState } from "./workflow-transitions.ts";
 
 export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
@@ -50,13 +51,14 @@ export function promptArtifactForPhase(state: WorkflowState, phase: WorkflowPhas
 export function renderWorkflowWidget(state: WorkflowState) {
   return (_tui?: unknown, theme?: { fg?: (name: string, text: string) => string }) => ({
     invalidate() {},
-    render(): string[] {
+    render(width?: number): string[] {
       const label = theme?.fg?.("accent", "Addy Workflow: ") ?? theme?.fg?.("blue", "Addy Workflow: ") ?? "Addy Workflow: ";
       const artifact = workflowArtifactForFooter(state);
       const artifactName = artifact ? workflowArtifactName(artifact) : undefined;
       const styledArtifactName = artifactName ? (theme?.fg?.("mdLinkUrl", artifactName) ?? theme?.fg?.("accent", artifactName) ?? artifactName) : undefined;
       const artifactSuffix = styledArtifactName ? ` | ${styledArtifactName}` : "";
-      return [`${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`];
+      const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
+      return [width ? truncateToWidth(line, Math.max(1, width), "", true) : line];
     },
   });
 }
