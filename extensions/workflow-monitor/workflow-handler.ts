@@ -82,6 +82,11 @@ function workflowStateKey(ctx: WorkflowContext): string {
   return createHash("sha256").update(scope).digest("hex").slice(0, 24);
 }
 
+function projectWorkflowStateKey(ctx: WorkflowContext): string {
+  const projectScope = [ctx.cwd, process.cwd()].find((value) => typeof value === "string" && value.length > 0) ?? "default";
+  return createHash("sha256").update(`project:${projectScope}`).digest("hex").slice(0, 24);
+}
+
 function workflowStateDir(): string {
   return process.env.PI_ADDY_WORKFLOW_STATE_DIR ?? join(homedir(), ".pi", "agent", "state", "pi-addy-workflow");
 }
@@ -121,14 +126,18 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   if (ctx.state) return ctx.state;
 
   const key = workflowStateKey(ctx);
-  return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? createInitialWorkflowState();
+  const projectKey = projectWorkflowStateKey(ctx);
+  return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey) ?? createInitialWorkflowState();
 }
 
 export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowState, appendEntry?: AppendEntry): void {
   ctx.state = state;
   const key = workflowStateKey(ctx);
+  const projectKey = projectWorkflowStateKey(ctx);
   workflowMemory.set(key, state);
+  workflowMemory.set(projectKey, state);
   writeStoredWorkflowState(key, state);
+  writeStoredWorkflowState(projectKey, state);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
   ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowWidget(state));
   const warning = workflowWarningText(state);
@@ -145,8 +154,11 @@ export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): 
   const state = createInitialWorkflowState();
   ctx.state = state;
   const key = workflowStateKey(ctx);
+  const projectKey = projectWorkflowStateKey(ctx);
   workflowMemory.set(key, state);
+  workflowMemory.set(projectKey, state);
   writeStoredWorkflowState(key, state);
+  writeStoredWorkflowState(projectKey, state);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
   ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, undefined);
   return state;

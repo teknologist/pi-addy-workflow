@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
-import { getContextWorkflowState, handleWorkflowEvent } from "../extensions/workflow-monitor/workflow-handler.ts";
+import { getContextWorkflowState, handleWorkflowEvent, openNextWorkflowPrompt } from "../extensions/workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE } from "../extensions/workflow-monitor/workflow-tracker.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
@@ -105,6 +105,22 @@ test("workflow state survives fresh contexts without session entries", () => {
   assert.deepEqual(verify.warnings, []);
 });
 
+test("active plan written during plan phase survives fresh sessions for next build", () => {
+  const cwd = join(stateDir, "fresh-plan-project");
+  const planPath = "docs/plans/2026-05-11-better-workflow.md";
+  const firstCtx: any = { cwd, id: "plan-session", ui: { setWidget() {} } };
+  const planned = handleWorkflowEvent(firstCtx, { source: "file-write", artifact: planPath });
+  assert.equal(planned.activePlan, planPath);
+
+  const prefills: string[] = [];
+  const nextCtx: any = { cwd, id: "build-session", input: { prefill: (value: string) => prefills.push(value) } };
+
+  assert.equal(getContextWorkflowState(nextCtx).activePlan, planPath);
+  // A fresh session with no explicit argument should use the persisted active plan immediately.
+  assert.equal(openNextWorkflowPrompt(nextCtx, "build"), `/addy-build ${planPath}`);
+  assert.deepEqual(prefills, [`/addy-build ${planPath}`]);
+});
+
 test("workflow state round-trips from persisted append entries", () => {
   const entries: Array<[string, unknown]> = [];
   const firstCtx: any = { ui: { setWidget() {} } };
@@ -151,7 +167,7 @@ test("write tool calls drive file-write transitions", async () => {
   addyWorkflowMonitor(pi as never);
 
   const effects: Array<[string, unknown]> = [];
-  const ctx: any = { id: "write-tool-test", ui: { setWidget: (key: string, value: unknown) => effects.push([key, value]) } };
+  const ctx: any = { cwd: join(stateDir, "write-tool-project"), id: "write-tool-test", ui: { setWidget: (key: string, value: unknown) => effects.push([key, value]) } };
   await events.get("tool_call")?.({ toolName: "write", input: { path: "tests/example.test.ts" } }, ctx);
 
   assert.equal(ctx.state.current, "verify");
