@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-ship"];
+const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-finish", "addy-ship"];
 const agents = [
   "addy-planner",
   "addy-implementer",
@@ -41,6 +41,19 @@ test("all Addy prompts exist and workflow commands are not prompt files", async 
   const promptFiles = await readdir("prompts");
   assert.equal(promptFiles.includes("addy-workflow-reset.md"), false);
   assert.equal(promptFiles.includes("addy-workflow-next.md"), false);
+});
+
+test("finish prompt offers the supported finish actions", async () => {
+  const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
+
+  assert.match(content, /ask_user_question/);
+  assert.match(content, /`commit`/);
+  assert.match(content, /`commit and push`/);
+  assert.match(content, /`next slice`/);
+  assert.match(content, /`ship`/);
+  assert.match(content, /\/commit-push/);
+  assert.match(content, /\/addy-build <next-slice-plan-path>/);
+  assert.match(content, /\/addy-ship/);
 });
 
 test("required lifecycle skills exist", async () => {

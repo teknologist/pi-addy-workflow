@@ -13,9 +13,9 @@ Workflow commands:
 4. SIMPLIFY with `/addy-code-simplify`: simplify code without behavior changes. Optional; user may skip.
 5. VERIFY with `/addy-verify`: prove behavior with tests or reproduction.
 6. REVIEW with `/addy-review`: check correctness, readability, architecture, security, performance.
-7. SHIP with `/addy-ship`: decide GO/NO-GO with rollback and verification notes. Optional; user may run after any number of build/verify/review cycles.
+7. FINISH with `/addy-finish`: choose whether to commit, commit and push, build the next slice, or run `/addy-ship`. Optional; user may run after any number of build/verify/review cycles.
 
-Enforce only `BUILD → VERIFY → REVIEW`. Do not force DEFINE, PLAN, or SIMPLIFY before VERIFY. Do not force SHIP after REVIEW.
+Enforce only `BUILD → VERIFY → REVIEW`. Do not force DEFINE, PLAN, or SIMPLIFY before VERIFY. Do not force FINISH after REVIEW.
 
 Rules:
 

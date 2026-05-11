@@ -3,7 +3,7 @@ import { WORKFLOW_PHASES, type WorkflowPhase, type WorkflowState, createInitialW
 
 export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
 export const WORKFLOW_STATE_ENTRY_TYPE = "pi-addy-workflow-state";
-const OPTIONAL_PHASES = new Set<WorkflowPhase>(["simplify", "ship"]);
+const OPTIONAL_PHASES = new Set<WorkflowPhase>(["simplify"]);
 
 export function serializeWorkflowState(state: WorkflowState): string {
   return JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state });
@@ -83,7 +83,7 @@ export function nextPromptForPhase(phase: WorkflowPhase, artifact?: string): str
     simplify: "/addy-code-simplify",
     verify: "/addy-verify",
     review: "/addy-review",
-    ship: "/addy-ship",
+    finish: "/addy-finish",
   };
 
   return artifact ? `${promptByPhase[phase]} ${artifact}` : promptByPhase[phase];

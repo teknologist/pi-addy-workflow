@@ -34,28 +34,38 @@ function isPhaseStatus(value: unknown): value is PhaseStatus {
   return value === "pending" || value === "active" || value === "complete";
 }
 
-function isWorkflowState(value: unknown): value is WorkflowState {
-  if (typeof value !== "object" || value === null || !("phases" in value) || !("warnings" in value)) return false;
+function coerceWorkflowState(value: unknown): WorkflowState | undefined {
+  if (typeof value !== "object" || value === null || !("phases" in value) || !("warnings" in value)) return undefined;
 
-  const candidate = value as Partial<WorkflowState>;
-  if (candidate.current !== undefined && !WORKFLOW_PHASES.includes(candidate.current)) return false;
-  if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return false;
-  if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return false;
-  if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return false;
-  if (typeof candidate.phases !== "object" || candidate.phases === null) return false;
+  const candidate = value as Omit<Partial<WorkflowState>, "current"> & { current?: WorkflowPhase | "ship" };
+  const rawCurrent = candidate.current;
+  const current: WorkflowPhase | undefined = rawCurrent === "ship" ? "finish" : rawCurrent;
+  if (current !== undefined && !WORKFLOW_PHASES.includes(current)) return undefined;
+  if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return undefined;
+  if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return undefined;
+  if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
+  if (typeof candidate.phases !== "object" || candidate.phases === null) return undefined;
 
-  return WORKFLOW_PHASES.every((phase) => isPhaseStatus(candidate.phases?.[phase]));
+  const legacyPhases = candidate.phases as Record<string, unknown>;
+  const phases = Object.fromEntries(WORKFLOW_PHASES.map((phase) => {
+    const status = phase === "finish" ? legacyPhases.finish ?? legacyPhases.ship : legacyPhases[phase];
+    return [phase, isPhaseStatus(status) ? status : undefined];
+  })) as Record<WorkflowPhase, PhaseStatus | undefined>;
+  if (!WORKFLOW_PHASES.every((phase) => phases[phase])) return undefined;
+
+  return { ...candidate, current, phases: phases as Record<WorkflowPhase, PhaseStatus>, warnings: candidate.warnings };
 }
 
 function parsePersistedWorkflowState(value: unknown): WorkflowState | undefined {
-  if (isWorkflowState(value)) return parseWorkflowState(value);
+  const directState = coerceWorkflowState(value);
+  if (directState) return parseWorkflowState(directState);
 
   if (typeof value !== "string") return undefined;
 
   try {
     const parsed = JSON.parse(value);
-    if (parsed?.type === WORKFLOW_STATE_ENTRY_TYPE && isWorkflowState(parsed.state)) return parseWorkflowState(parsed.state);
-    if (isWorkflowState(parsed)) return parseWorkflowState(parsed);
+    const parsedState = parsed?.type === WORKFLOW_STATE_ENTRY_TYPE ? coerceWorkflowState(parsed.state) : coerceWorkflowState(parsed);
+    if (parsedState) return parseWorkflowState(parsedState);
   } catch {
     return undefined;
   }

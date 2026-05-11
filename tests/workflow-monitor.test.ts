@@ -74,7 +74,7 @@ test("next command parses args, transitions, persists, prefills, and continues",
   assert.equal(ctx.state.activePlan, "diff.md");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
   assert.equal(effects.at(0)?.[0], "pi-addy-workflow");
-  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → ship | diff.md"]);
+  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → finish | diff.md"]);
   assert.deepEqual(effects.at(1), ["prefill", "/addy-review diff.md"]);
 });
 
@@ -138,7 +138,7 @@ test("workflow state round-trips from persisted append entries", () => {
 });
 
 test("workflow state skips malformed latest entries", () => {
-  const validState = { current: "build", phases: { define: "pending", plan: "pending", build: "active", simplify: "pending", verify: "pending", review: "pending", ship: "pending" }, warnings: [] };
+  const validState = { current: "build", phases: { define: "pending", plan: "pending", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" }, warnings: [] };
   const ctx: any = {
     sessionManager: {
       getBranch: () => [
@@ -155,11 +155,24 @@ test("workflow state skips malformed latest entries", () => {
 test("workflow state reads custom session entries", () => {
   const ctx: any = {
     sessionManager: {
-      getBranch: () => [{ type: "custom", customType: WORKFLOW_STATE_ENTRY_TYPE, data: { current: "build", phases: { define: "pending", plan: "pending", build: "active", simplify: "pending", verify: "pending", review: "pending", ship: "pending" }, warnings: [] } }],
+      getBranch: () => [{ type: "custom", customType: WORKFLOW_STATE_ENTRY_TYPE, data: { current: "build", phases: { define: "pending", plan: "pending", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" }, warnings: [] } }],
     },
   };
 
   assert.equal(getContextWorkflowState(ctx).current, "build");
+});
+
+test("workflow state migrates legacy ship phase to finish", () => {
+  const ctx: any = {
+    sessionManager: {
+      getBranch: () => [{ type: "custom", customType: WORKFLOW_STATE_ENTRY_TYPE, data: { current: "ship", phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "complete", ship: "active" }, warnings: [] } }],
+    },
+  };
+
+  const state = getContextWorkflowState(ctx);
+
+  assert.equal(state.current, "finish");
+  assert.equal(state.phases.finish, "active");
 });
 
 test("write tool calls drive file-write transitions", async () => {
@@ -173,5 +186,5 @@ test("write tool calls drive file-write transitions", async () => {
   assert.equal(ctx.state.current, "verify");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
   assert.equal(effects.at(-1)?.[0], "pi-addy-workflow");
-  assert.deepEqual((effects.at(-1)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → [verify] → review → ship"]);
+  assert.deepEqual((effects.at(-1)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → [verify] → review → finish"]);
 });

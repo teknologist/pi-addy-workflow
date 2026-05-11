@@ -1,4 +1,4 @@
-export const WORKFLOW_PHASES = ["define", "plan", "build", "simplify", "verify", "review", "ship"] as const;
+export const WORKFLOW_PHASES = ["define", "plan", "build", "simplify", "verify", "review", "finish"] as const;
 export const ENFORCED_WORKFLOW_PHASES = ["build", "verify", "review"] as const;
 
 export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
@@ -61,7 +61,7 @@ function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPh
   if (matchesAny(normalized, [/(^|\/)[^/]+\.(test|spec)\.[^/]+$/, /^tests\//])) {
     return current && phaseIndex(current) > phaseIndex("verify") ? undefined : "verify";
   }
-  if (matchesAny(normalized, [/^CHANGELOG/, /^RELEASE/, /^docs\/releases\//, /^docs\/deploy\//])) return "ship";
+  if (matchesAny(normalized, [/^CHANGELOG/, /^RELEASE/, /^docs\/releases\//, /^docs\/deploy\//])) return "finish";
   if (!matchesAny(normalized, [/^tests\//, /^docs\//, /^tasks\//, /^agents\//, /^skills\//, /^prompts\//, /^extensions\//])) {
     return current && phaseIndex(current) > phaseIndex("build") ? undefined : "build";
   }
@@ -101,7 +101,7 @@ export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase
   const text = event.text ?? "";
 
   if (event.source === "user-input" || event.source === "command") {
-    const workflowNext = text.match(/\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|ship)\b/);
+    const workflowNext = text.match(/\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|finish)\b/);
     if (workflowNext) return workflowNext[1] as WorkflowPhase;
     if (text.includes("/addy-code-simplify")) return "simplify";
     if (text.includes("/addy-define")) return "define";
@@ -109,7 +109,7 @@ export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase
     if (text.includes("/addy-build")) return "build";
     if (text.includes("/addy-verify")) return "verify";
     if (text.includes("/addy-review")) return "review";
-    if (text.includes("/addy-ship")) return "ship";
+    if (text.includes("/addy-finish")) return "finish";
   }
 
   if (event.source === "file-write" && event.artifact) return fileWriteTargetPhase(event.artifact, current);
