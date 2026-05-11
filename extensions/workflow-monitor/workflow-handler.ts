@@ -152,7 +152,7 @@ export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowSta
   writeStoredWorkflowState(key, state);
   writeStoredWorkflowState(projectKey, state);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
-  ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowWidget(state));
+  ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowWidget(state, ctx.cwd));
   const warning = workflowWarningText(state);
   if (warning) ctx.ui?.notify?.(warning, "warning");
 }

@@ -124,6 +124,7 @@ test("active plan written during plan phase survives fresh sessions for next bui
 test("workflow state stores current and next task from active plan", () => {
   const cwd = join(stateDir, "task-state-project");
   const relativePlanPath = join("docs", "plans", "task-state.md");
+  const referencedPlanPath = `@${relativePlanPath}`;
   const planPath = join(cwd, relativePlanPath);
   mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
   writeFileSync(planPath, [
@@ -144,10 +145,10 @@ test("workflow state stores current and next task from active plan", () => {
   ].join("\n"));
 
   const ctx: any = { cwd, id: "task-state-session", ui: { setWidget() {} } };
-  const planned = handleWorkflowEvent(ctx, { source: "file-write", artifact: relativePlanPath });
+  const planned = handleWorkflowEvent(ctx, { source: "file-write", artifact: referencedPlanPath });
   const build = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-build" });
 
-  assert.equal(planned.activePlan, relativePlanPath);
+  assert.equal(planned.activePlan, referencedPlanPath);
   assert.equal(build.currentTask, "Current");
   assert.equal(build.nextTask, "Next");
   assert.equal(ctx.state.currentTask, "Current");

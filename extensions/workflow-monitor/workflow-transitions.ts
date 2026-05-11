@@ -69,7 +69,7 @@ function matchesAny(path: string, patterns: RegExp[]): boolean {
 }
 
 function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPhase | undefined {
-  const normalized = path.replace(/\\/g, "/");
+  const normalized = path.replace(/\\/g, "/").replace(/^@/, "");
 
   if (matchesAny(normalized, [/(^|\/)(SPEC|spec)\.md$/, /(^|\/)docs\/specs\//, /(^|\/)docs\/prd\//])) return "define";
   if (matchesAny(normalized, [/(^|\/)docs\/plans\//])) return "plan";

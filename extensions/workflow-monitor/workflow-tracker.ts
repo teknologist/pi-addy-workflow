@@ -88,7 +88,8 @@ function taskCompleteFromStatuses(statuses: string[]): boolean {
 }
 
 function resolvePlanPath(planPath: string, baseCwd?: string): string {
-  return isAbsolute(planPath) ? planPath : resolve(baseCwd ?? process.cwd(), planPath);
+  const filesystemPath = planPath.startsWith("@") ? planPath.slice(1) : planPath;
+  return isAbsolute(filesystemPath) ? filesystemPath : resolve(baseCwd ?? process.cwd(), filesystemPath);
 }
 
 function readPlanMarkdown(planPath: string, baseCwd?: string): string | undefined {
@@ -174,7 +175,7 @@ export function promptArtifactForPhase(state: WorkflowState, phase: WorkflowPhas
   return undefined;
 }
 
-export function renderWorkflowWidget(state: WorkflowState) {
+export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   return (_tui?: unknown, theme?: { fg?: (name: string, text: string) => string }) => ({
     invalidate() {},
     render(width?: number): string[] {
@@ -184,7 +185,7 @@ export function renderWorkflowWidget(state: WorkflowState) {
       const styledArtifactName = artifactName ? (theme?.fg?.("mdLinkUrl", artifactName) ?? theme?.fg?.("accent", artifactName) ?? artifactName) : undefined;
       const artifactSuffix = styledArtifactName ? ` | ${styledArtifactName}` : "";
       const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
-      const taskLine = state.currentTask ? `Current task: ${state.currentTask} | Next task: ${state.nextTask ?? "none"}` : workflowTaskFooterLine(state.activePlan);
+      const taskLine = state.currentTask ? `Current task: ${state.currentTask} | Next task: ${state.nextTask ?? "none"}` : workflowTaskFooterLine(state.activePlan, baseCwd);
       const lines = taskLine ? [line, taskLine] : [line];
       return width ? lines.map((value) => truncateToWidth(value, Math.max(1, width), "", true)) : lines;
     },

@@ -228,6 +228,31 @@ test("workflow widget renders current and next task from active plan", () => {
   ]);
 });
 
+test("workflow widget resolves Pi @-referenced active plan paths", () => {
+  const cwd = join(taskFooterDir, "at-reference-project");
+  const planPath = join(cwd, "docs", "plans", "task-footer.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(planPath, [
+    "## Task 1: Parse invoice rows",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: "build",
+    phases: { ...createInitialWorkflowState().phases, define: "complete", plan: "complete", build: "active" },
+    activePlan: "@docs/plans/task-footer.md",
+  }, cwd);
+
+  assert.equal(state.currentTask, "Parse invoice rows");
+  assert.deepEqual(renderWorkflowWidget({ ...state, currentTask: undefined, nextTask: undefined }, cwd)().render(), [
+    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "Current task: Parse invoice rows | Next task: none",
+  ]);
+});
+
 test("workflow widget uses persisted task state when plan file is unavailable", () => {
   const state = {
     ...createInitialWorkflowState(),
