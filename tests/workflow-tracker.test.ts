@@ -334,6 +334,23 @@ test("workflow widget colors footer artifact name light blue", () => {
   assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [`Addy Workflow: define → [plan] → build → simplify → verify → review → finish | <light-blue>2026-05-11-better-workflow.md</light-blue>`]);
 });
 
+test("workflow widget colors task labels like workflow label", () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    current: "build" as const,
+    phases: { ...createInitialWorkflowState().phases, define: "complete" as const, plan: "complete" as const, build: "active" as const },
+    activePlan: "docs/plans/task-footer.md",
+    currentTask: "Parse invoice rows",
+    nextTask: "Persist invoice payloads",
+  };
+  const theme = { fg: (name: string, text: string) => name === "accent" ? `<accent>${text}</accent>` : text };
+
+  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [
+    "<accent>Addy Workflow: </accent>✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "<accent>Current task: </accent>Parse invoice rows | <accent>Next task: </accent>Persist invoice payloads",
+  ]);
+});
+
 test("workflow widget dims simplify but not finish", () => {
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
   const theme = { fg: (name: string, text: string) => name === "dim" ? `<dim>${text}</dim>` : text };

@@ -140,7 +140,7 @@ export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   return tasks.filter((task) => task.title.length > 0);
 }
 
-export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: string): string | undefined {
+export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: string, theme?: { fg?: (name: string, text: string) => string }): string | undefined {
   if (!planPath) return undefined;
   const markdown = readPlanMarkdown(planPath, baseCwd);
   if (!markdown) return undefined;
@@ -151,7 +151,8 @@ export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: s
 
   const current = tasks[currentIndex];
   const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
-  return `Current task: ${current.title} | Next task: ${next?.title ?? "none"}`;
+  const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
+  return `${styleLabel("Current task: ")}${current.title} | ${styleLabel("Next task: ")}${next?.title ?? "none"}`;
 }
 
 export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: string): WorkflowState {
@@ -199,7 +200,8 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   return (_tui?: unknown, theme?: { fg?: (name: string, text: string) => string }) => ({
     invalidate() {},
     render(width?: number): string[] {
-      const label = theme?.fg?.("accent", "Addy Workflow: ") ?? theme?.fg?.("blue", "Addy Workflow: ") ?? "Addy Workflow: ";
+      const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
+      const label = styleLabel("Addy Workflow: ");
       const artifact = workflowArtifactForFooter(state);
       const artifactName = artifact ? workflowArtifactName(artifact) : undefined;
       const styledArtifactName = artifactName ? (theme?.fg?.("mdLinkUrl", artifactName) ?? theme?.fg?.("accent", artifactName) ?? artifactName) : undefined;
@@ -207,7 +209,9 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
       const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
       const currentTask = state.currentTaskSummary ?? state.currentTask;
       const nextTask = state.nextTaskSummary ?? state.nextTask;
-      const taskLine = currentTask ? `Current task: ${currentTask} | Next task: ${nextTask ?? "none"}` : workflowTaskFooterLine(state.activePlan, baseCwd);
+      const taskLine = currentTask
+        ? `${styleLabel("Current task: ")}${currentTask} | ${styleLabel("Next task: ")}${nextTask ?? "none"}`
+        : workflowTaskFooterLine(state.activePlan, baseCwd, theme);
       const lines = taskLine ? [line, taskLine] : [line];
       return width ? lines.map((value) => truncateToWidth(value, Math.max(1, width), "", true)) : lines;
     },
