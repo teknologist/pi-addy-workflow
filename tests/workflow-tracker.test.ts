@@ -4,7 +4,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInitialWorkflowState, resolveTargetPhase, transitionWorkflow, type WorkflowPhase } from "../extensions/workflow-monitor/workflow-transitions.ts";
-import { nextPromptForPhase, parseWorkflowState, planTasksFromMarkdown, refreshWorkflowTasksFromPlan, renderWorkflowStrip, renderWorkflowWidget } from "../extensions/workflow-monitor/workflow-tracker.ts";
+import { nextPromptForPhase, parseWorkflowState, planTasksFromMarkdown, refreshWorkflowTasksFromPlan, renderWorkflowStrip, renderWorkflowWidget, unfinishedLifecycleStepsFromMarkdown } from "../extensions/workflow-monitor/workflow-tracker.ts";
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
 
 const taskFooterDir = "/tmp/pi-addy-workflow-task-footer-test";
@@ -92,12 +92,28 @@ test("returning to optional simplify preserves completed build", () => {
   assert.deepEqual(verifyAgain.warnings, []);
 });
 
-test("finish is optional and does not enforce earlier phases", () => {
+test("finish warns when required build verify review phases are skipped", () => {
   const finish = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-finish" });
   assert.equal(finish.current, "finish");
   assert.equal(finish.phases.define, "complete");
   assert.equal(finish.phases.plan, "complete");
-  assert.deepEqual(finish.warnings, []);
+  assert.match(finish.warnings[0], /build/);
+});
+
+test("finish warns about both verify and review when started after build", () => {
+  const build = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
+  const finish = transitionWorkflow(build, { source: "user-input", text: "/addy-finish" });
+
+  assert.equal(finish.current, "finish");
+  assert.match(finish.warnings[0], /verify and review/);
+});
+
+test("review warns when verify is skipped after build", () => {
+  const build = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
+  const review = transitionWorkflow(build, { source: "user-input", text: "/addy-review" });
+
+  assert.equal(review.current, "review");
+  assert.match(review.warnings[0], /verify/);
 });
 
 test("backward transition resets state", () => {
@@ -315,6 +331,45 @@ test("plan task parser supports checklist tasks", () => {
   ]);
 });
 
+test("plan task parser keeps status tasks current until implemented verified and reviewed", () => {
+  assert.deepEqual(planTasksFromMarkdown([
+    "## Task 1: Build finished but not verified",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 2: Fully complete task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n")), [
+    { title: "Build finished but not verified", complete: false, missingStatuses: ["Verified", "Reviewed"] },
+    { title: "Fully complete task", complete: true, missingStatuses: [] },
+  ]);
+});
+
+test("unfinished lifecycle step helper reports missing finish prerequisites", () => {
+  assert.deepEqual(unfinishedLifecycleStepsFromMarkdown([
+    "## Task 0: Not started",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 1: Build finished but not verified",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 2: Verified but not reviewed",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n")), [
+    { title: "Build finished but not verified", missingStatuses: ["Verified", "Reviewed"] },
+    { title: "Verified but not reviewed", missingStatuses: ["Reviewed"] },
+  ]);
+});
+
 test("plan task parser ignores nested checklist items when status task headings exist", () => {
   assert.deepEqual(planTasksFromMarkdown([
     "## Task 1: Parse invoice rows",
@@ -323,7 +378,7 @@ test("plan task parser ignores nested checklist items when status task headings 
     "- [ ] Reviewed",
     "- [ ] Acceptance criterion that is not a task",
   ].join("\n")), [
-    { title: "Parse invoice rows", complete: false },
+    { title: "Parse invoice rows", complete: false, missingStatuses: ["Implemented", "Verified", "Reviewed"] },
   ]);
 });
 

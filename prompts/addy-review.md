@@ -13,6 +13,13 @@ Argument: `/addy-review [plan-path]`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, then review the current staged, unstaged, or recent changes against that plan.
 
+Before reviewing, check whether this would skip required workflow steps after build. If the active/supplied plan or Addy workflow state shows implemented work that has not been verified, warn the user that `/addy-review` would skip `/addy-verify`. Then call `ask_user_question` with one single-select question asking whether to run verification first or intentionally skip it. Options:
+
+- `run verify` — run `/addy-verify <plan-path>` before reviewing.
+- `skip verify` — intentionally continue to review without verified status.
+
+Recommend `run verify`. Only continue review after the user explicitly chooses `skip verify`, or after verification has run and the plan has been rechecked. Never silently skip verify between build and review.
+
 When an active/supplied plan exists, keep its task status checkboxes synchronized with evidence. Mark `[x] Reviewed` only for tasks covered by this review. If the review finds blocking issues for a task, leave that task unchecked for review until fixes are verified or clearly record the blocker next to the checkbox.
 
 This checkbox synchronization is mandatory after every `/addy-review` run. Before reporting completion, re-open the active/supplied plan and update each affected slice task so:

@@ -47,6 +47,10 @@ test("finish prompt advances tasks and slices with commit prompts", async () => 
   const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
 
   assert.match(content, /ask_user_question/);
+  assert.match(content, /missing lifecycle steps/);
+  assert.match(content, /skip missing steps/);
+  assert.match(content, /Never silently skip missing verify or review steps/);
+  assert.match(content, /Never silently skip workflow phases between build and finish/);
   assert.match(content, /current slice has unfinished tasks/);
   assert.match(content, /current slice is complete and a next unfinished slice exists/);
   assert.match(content, /all slices are complete/);
@@ -118,6 +122,19 @@ test("verify and review require checkbox synchronization after every run", async
   }
 });
 
+test("plan and build define lifecycle task completion semantics", async () => {
+  const planPrompt = await readFile(join("prompts", "addy-plan.md"), "utf8");
+  const buildPrompt = await readFile(join("prompts", "addy-build.md"), "utf8");
+
+  assert.match(planPrompt, /exact heading\/status layout/i);
+  assert.match(planPrompt, /Task N: Short imperative task name/);
+  assert.match(planPrompt, /complete only when all three lifecycle checkboxes are checked/i);
+  assert.match(planPrompt, /legacy layout is still readable/i);
+  assert.match(buildPrompt, /may mark only the current task's `\[x\] Implemented` checkbox/i);
+  assert.match(buildPrompt, /same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked/i);
+  assert.match(buildPrompt, /Legacy checklist-only plans remain supported/i);
+});
+
 test("ambiguous spec and plan selection uses structured questions", async () => {
   const planPrompt = await readFile(join("prompts", "addy-plan.md"), "utf8");
   const buildPrompt = await readFile(join("prompts", "addy-build.md"), "utf8");
@@ -134,6 +151,9 @@ test("ambiguous spec and plan selection uses structured questions", async () => 
 test("review may update plan checkboxes without editing source files", async () => {
   const content = await readFile(join("prompts", "addy-review.md"), "utf8");
 
+  assert.match(content, /would skip `\/addy-verify`/);
+  assert.match(content, /ask_user_question/);
+  assert.match(content, /Never silently skip verify between build and review/);
   assert.match(content, /do not edit source files unless the user asks/i);
   assert.match(content, /Updating the active\/supplied plan status checkboxes is required/);
 });

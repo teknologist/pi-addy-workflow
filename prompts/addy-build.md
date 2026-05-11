@@ -24,6 +24,8 @@ When asking for a plan, include the active plan as the recommended option unless
 
 Before changing code, read the active/supplied plan and reconcile the current task's status checkboxes with real evidence. Do not mark work done just because it is intended.
 
+For heading/status slice plans, `/addy-build` may mark only the current task's `[x] Implemented` checkbox after the implementation exists and checks pass. Do not mark `[x] Verified` or `[x] Reviewed`, and do not treat a task as complete just because it is implemented. The same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked. Legacy checklist-only plans remain supported: each top-level task checkbox represents the whole task completion state.
+
 Pick the next pending task from the plan. For each task:
 
 1. Read the task's acceptance criteria

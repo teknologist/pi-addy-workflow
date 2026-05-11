@@ -72,8 +72,10 @@ export function workflowArtifactName(path: string): string {
   return path.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? path;
 }
 
-type PlanTask = { title: string; complete: boolean };
+type PlanTaskStatus = "Implemented" | "Verified" | "Reviewed";
+type PlanTask = { title: string; complete: boolean; missingStatuses?: PlanTaskStatus[] };
 
+const REQUIRED_TASK_STATUSES: PlanTaskStatus[] = ["Implemented", "Verified", "Reviewed"];
 const STATUS_CHECKBOX = /^\s*[-*]\s+\[[ xX]\]\s+(Implemented|Verified|Reviewed)\b/;
 const TASK_CHECKBOX = /^\s*[-*]\s+\[([ xX])\]\s+(.+)$/;
 const TASK_HEADING = /^#{2,4}\s+(.+)$/;
@@ -85,8 +87,8 @@ function cleanTaskTitle(title: string): string {
     .trim();
 }
 
-function taskCompleteFromStatuses(statuses: string[]): boolean {
-  return ["Implemented", "Verified", "Reviewed"].every((label) => statuses.includes(label));
+function taskMissingStatuses(statuses: PlanTaskStatus[]): PlanTaskStatus[] {
+  return REQUIRED_TASK_STATUSES.filter((label) => !statuses.includes(label));
 }
 
 function resolvePlanPath(planPath: string, baseCwd?: string): string {
@@ -107,11 +109,12 @@ function readPlanMarkdown(planPath: string, baseCwd?: string): string | undefine
 export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   const headingTasks: PlanTask[] = [];
   const checkboxTasks: PlanTask[] = [];
-  let currentHeading: { title: string; statuses: string[]; sawStatus: boolean } | undefined;
+  let currentHeading: { title: string; statuses: PlanTaskStatus[]; sawStatus: boolean } | undefined;
 
   function flushHeadingTask() {
     if (!currentHeading || !currentHeading.sawStatus) return;
-    headingTasks.push({ title: cleanTaskTitle(currentHeading.title), complete: taskCompleteFromStatuses(currentHeading.statuses) });
+    const missingStatuses = taskMissingStatuses(currentHeading.statuses);
+    headingTasks.push({ title: cleanTaskTitle(currentHeading.title), complete: missingStatuses.length === 0, missingStatuses });
   }
 
   for (const line of markdown.split(/\r?\n/)) {
@@ -125,7 +128,7 @@ export function planTasksFromMarkdown(markdown: string): PlanTask[] {
     const status = line.match(STATUS_CHECKBOX);
     if (status && currentHeading) {
       currentHeading.sawStatus = true;
-      if (/\[[xX]\]/.test(line)) currentHeading.statuses.push(status[1]);
+      if (/\[[xX]\]/.test(line)) currentHeading.statuses.push(status[1] as PlanTaskStatus);
       continue;
     }
 
@@ -138,6 +141,20 @@ export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   flushHeadingTask();
   const tasks = headingTasks.length > 0 ? headingTasks : checkboxTasks;
   return tasks.filter((task) => task.title.length > 0);
+}
+
+export function unfinishedLifecycleStepsFromMarkdown(markdown: string): Array<{ title: string; missingStatuses: PlanTaskStatus[] }> {
+  return planTasksFromMarkdown(markdown)
+    .map((task) => ({
+      title: task.title,
+      allMissingStatuses: task.missingStatuses ?? [],
+    }))
+    .filter((task) => !task.allMissingStatuses.includes("Implemented"))
+    .map((task) => ({
+      title: task.title,
+      missingStatuses: task.allMissingStatuses.filter((status) => status !== "Implemented"),
+    }))
+    .filter((task) => task.missingStatuses.length > 0);
 }
 
 export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: string, theme?: { fg?: (name: string, text: string) => string }): string | undefined {

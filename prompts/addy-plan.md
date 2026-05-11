@@ -19,7 +19,21 @@ Then read the relevant codebase sections and:
 2. Identify the dependency graph between components
 3. Slice work vertically (one complete path per task, not horizontal layers)
 4. Write tasks with acceptance criteria and verification steps
-5. For every slice task, include status checkboxes that can stay synchronized with execution:
+5. For every slice task, use this exact heading/status layout so workflow commands can keep the plan synchronized:
+
+   ```md
+   ## Task N: Short imperative task name
+
+   - [ ] Implemented
+   - [ ] Verified
+   - [ ] Reviewed
+
+   ### Acceptance criteria
+
+   - ...
+   ```
+
+   The task is complete only when all three lifecycle checkboxes are checked:
    - `[ ] Implemented`
    - `[ ] Verified`
    - `[ ] Reviewed`
@@ -31,5 +45,6 @@ Save durable plans under `docs/plans/` using the same naming convention as specs
 Pi-specific execution notes:
 
 - Keep plans extremely concise.
+- Do not use top-level `- [ ] Task name` checkboxes for new slice tasks; that legacy layout is still readable, but new plans must use the heading/status layout above.
 - Ask clarifying questions only when ambiguity blocks correctness.
 - Do not implement the plan unless the user explicitly orders implementation.

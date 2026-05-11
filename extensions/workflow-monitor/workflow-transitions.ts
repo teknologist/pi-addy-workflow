@@ -43,11 +43,11 @@ function enforcedPhaseIndex(phase: WorkflowPhase): number {
   return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).indexOf(phase);
 }
 
-function firstSkippedEnforcedPhase(state: WorkflowState, target: WorkflowPhase, next: WorkflowState): WorkflowPhase | undefined {
-  const targetIndex = enforcedPhaseIndex(target);
-  if (targetIndex === -1) return undefined;
+function skippedEnforcedPhases(state: WorkflowState, target: WorkflowPhase, next: WorkflowState): WorkflowPhase[] {
+  const targetIndex = target === "finish" ? ENFORCED_WORKFLOW_PHASES.length : enforcedPhaseIndex(target);
+  if (targetIndex === -1) return [];
 
-  return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).find((phase) => {
+  return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).filter((phase) => {
     const index = enforcedPhaseIndex(phase);
     return index < targetIndex && state.phases[phase] !== "complete" && next.phases[phase] !== "complete";
   });
@@ -171,8 +171,8 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
     if (phaseIndex(target) > phaseIndex(current)) next.phases[current] = "complete";
   }
 
-  const firstSkipped = firstSkippedEnforcedPhase(state, target, next);
-  if (firstSkipped) warnings.push(`Workflow warning: ${target} started before ${firstSkipped}.`);
+  const skippedPhases = skippedEnforcedPhases(state, target, next);
+  if (skippedPhases.length > 0) warnings.push(`Workflow warning: ${target} started before ${skippedPhases.join(" and ")}.`);
 
   next.current = target;
   next.phases[target] = "active";

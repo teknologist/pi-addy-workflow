@@ -18,6 +18,24 @@ Inspect the active/supplied plan before asking the user anything. First reconcil
 3. The next unfinished task in the current slice, when one exists.
 4. The next unfinished slice and its plan path, when the current slice is complete.
 
+Before offering commit, next task, next slice, or ship actions, use the new heading/status plan layout to detect skipped lifecycle steps. A task is finish-ready only when all three checkboxes are checked:
+
+- `[x] Implemented`
+- `[x] Verified`
+- `[x] Reviewed`
+
+If any task in the active/supplied plan has `[x] Implemented` but missing `[x] Verified` or `[x] Reviewed`, warn the user with the task name and missing steps. Then call `ask_user_question` with one single-select question asking whether to run the missing workflow step or intentionally skip it. Include options for the missing step(s), for example:
+
+- `run verify` — run `/addy-verify <current-slice-plan-path>` before finishing.
+- `run review` — run `/addy-review <current-slice-plan-path>` before finishing.
+- `skip missing steps` — intentionally continue finishing even though the listed task has missing lifecycle steps.
+
+If both verify and review are missing, recommend `run verify`. If only review is missing, recommend `run review`. Only continue with the normal finish decision flow after the user explicitly chooses `skip missing steps`, or after the chosen missing workflow step has run and the plan has been rechecked. Never silently skip missing verify or review steps.
+
+Also warn when the Addy workflow state itself shows a phase jump between build and finish, even if the plan is missing or uses a legacy layout. Examples: going directly from build to review skips verify; going from build or verify directly to finish skips verify and/or review. In these cases, call `ask_user_question` before continuing with options to run the skipped step or intentionally skip it. Never silently skip workflow phases between build and finish.
+
+Legacy checklist-only plans remain supported: a checked top-level task is treated as complete, and an unchecked top-level task is treated as unfinished, but there are no per-step skip warnings because those plans do not encode `Implemented`/`Verified`/`Reviewed` separately.
+
 If the current slice has unfinished tasks:
 
 1. Call the `ask_user_question` tool with one single-select question asking whether to commit the current work before moving to the next task.
