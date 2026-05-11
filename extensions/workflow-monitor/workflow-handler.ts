@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
-import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, renderWorkflowWidget } from "./workflow-tracker.ts";
+import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
 type SessionEntry = { type?: string; customType?: string; data?: unknown } | [string, unknown];
@@ -40,6 +40,8 @@ function isWorkflowState(value: unknown): value is WorkflowState {
   const candidate = value as Partial<WorkflowState>;
   if (candidate.current !== undefined && !WORKFLOW_PHASES.includes(candidate.current)) return false;
   if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return false;
+  if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return false;
+  if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return false;
   if (typeof candidate.phases !== "object" || candidate.phases === null) return false;
 
   return WORKFLOW_PHASES.every((phase) => isPhaseStatus(candidate.phases?.[phase]));
@@ -151,7 +153,7 @@ export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): 
 }
 
 export function openNextWorkflowPrompt(ctx: WorkflowContext, phase: WorkflowPhase, artifact?: string): string {
-  const prompt = nextPromptForPhase(phase, artifact);
+  const prompt = nextPromptForPhase(phase, artifact ?? promptArtifactForPhase(getContextWorkflowState(ctx), phase));
   ctx.input?.prefill?.(prompt);
   return prompt;
 }

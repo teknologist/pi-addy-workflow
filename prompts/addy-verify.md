@@ -9,6 +9,10 @@ Pi adaptation of Addy Osmani's `verify` command.
 
 Use the Pi `test-driven-development` skill.
 
+Argument: `/addy-verify [plan-path]`.
+
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise verify the current implementation or bug context.
+
 For new features:
 
 1. Write tests that describe the expected behavior (they should FAIL)

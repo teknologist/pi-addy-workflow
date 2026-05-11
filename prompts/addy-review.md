@@ -9,6 +9,10 @@ Pi adaptation of Addy Osmani's `review` command.
 
 Use the Pi `code-review-and-quality` skill.
 
+Argument: `/addy-review [plan-path]`.
+
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, then review the current staged, unstaged, or recent changes against that plan.
+
 Review the current changes (staged, unstaged, or recent commits) across all five axes:
 
 1. **Correctness** — Does it match the spec? Edge cases handled? Tests adequate?

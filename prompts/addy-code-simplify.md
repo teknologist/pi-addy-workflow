@@ -9,6 +9,10 @@ Pi adaptation of Addy Osmani's `code-simplify` command.
 
 Use the Pi `code-simplification` skill.
 
+Argument: `/addy-code-simplify [plan-path]`.
+
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise simplify the specified/recent change scope.
+
 Simplify recently changed code (or the specified scope) while preserving exact behavior:
 
 1. Read `AGENTS.md` and study project conventions

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createInitialWorkflowState, resolveTargetPhase, transitionWorkflow, type WorkflowPhase } from "../extensions/workflow-monitor/workflow-transitions.ts";
-import { nextPromptForPhase, renderWorkflowStrip } from "../extensions/workflow-monitor/workflow-tracker.ts";
+import { nextPromptForPhase, renderWorkflowStrip, renderWorkflowWidget } from "../extensions/workflow-monitor/workflow-tracker.ts";
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
 
 test("prompt triggers map to phases", () => {
@@ -110,6 +110,63 @@ test("renders phase strip and next prompt", () => {
   assert.equal(nextPromptForPhase("ship", "release-notes.md"), "/addy-ship release-notes.md");
 });
 
+test("tracks active spec and plan artifacts", () => {
+  const specPath = "docs/specs/2026-05-11-better-workflow.md";
+  const planPath = "docs/plans/2026-05-11-better-workflow.md";
+
+  const define = transitionWorkflow(createInitialWorkflowState(), { source: "file-write", artifact: specPath });
+  assert.equal(define.activeSpec, specPath);
+
+  const plan = transitionWorkflow(define, { source: "user-input", text: `/addy-plan ${specPath}` });
+  assert.equal(plan.activeSpec, specPath);
+
+  const planned = transitionWorkflow(plan, { source: "file-write", artifact: planPath });
+  assert.equal(planned.activePlan, planPath);
+
+  const build = transitionWorkflow(planned, { source: "user-input", text: "/addy-build" });
+  assert.equal(build.activeSpec, specPath);
+  assert.equal(build.activePlan, planPath);
+
+  const override = transitionWorkflow(build, { source: "user-input", text: "/addy-review docs/plans/override-plan.md" });
+  assert.equal(override.activePlan, "docs/plans/override-plan.md");
+});
+
+test("only command-leading arguments update active artifacts", () => {
+  const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "please run /addy-plan for the current spec" });
+
+  assert.equal(state.current, "plan");
+  assert.equal(state.activeSpec, undefined);
+});
+
+test("absolute spec and plan file writes update active artifacts", () => {
+  const specPath = "/Users/eric/Dev/pi-addy-workflow/docs/specs/2026-05-11-better-workflow.md";
+  const planPath = "/Users/eric/Dev/pi-addy-workflow/docs/plans/2026-05-11-better-workflow.md";
+
+  const define = transitionWorkflow(createInitialWorkflowState(), { source: "file-write", artifact: specPath });
+  assert.equal(define.activeSpec, specPath);
+
+  const plan = transitionWorkflow(define, { source: "file-write", artifact: planPath });
+  assert.equal(plan.activeSpec, specPath);
+  assert.equal(plan.activePlan, planPath);
+});
+
+test("workflow widget renders spec or plan name footer", () => {
+  const specPath = "docs/specs/2026-05-11-better-workflow.md";
+  const planPath = "docs/plans/2026-05-11-better-workflow.md";
+  const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: `/addy-plan ${specPath}` });
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [`Addy Workflow: define → [plan] → build → simplify → verify → review → ship | 2026-05-11-better-workflow.md`]);
+
+  const build = transitionWorkflow({ ...state, activePlan: planPath }, { source: "user-input", text: "/addy-build" });
+  assert.deepEqual(renderWorkflowWidget(build)().render(), [`Addy Workflow: define → ✓plan → [build] → simplify → verify → review → ship | 2026-05-11-better-workflow.md`]);
+});
+
+test("workflow widget colors footer artifact name light blue", () => {
+  const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-plan docs/specs/2026-05-11-better-workflow.md" });
+  const theme = { fg: (name: string, text: string) => name === "mdLinkUrl" ? `<light-blue>${text}</light-blue>` : text };
+
+  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [`Addy Workflow: define → [plan] → build → simplify → verify → review → ship | <light-blue>2026-05-11-better-workflow.md</light-blue>`]);
+});
+
 test("workflow handler sets widget, reset clears widget, next opens prompt", () => {
   const widgets: Array<[string, unknown]> = [];
   const ctx: any = {
@@ -124,7 +181,20 @@ test("workflow handler sets widget, reset clears widget, next opens prompt", () 
   resetWorkflow(ctx);
 
   assert.equal(widgets.at(0)?.[0], "pi-addy-workflow");
-  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → ship"]);
+  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → ship | diff.md"]);
   assert.deepEqual(widgets.at(1), ["prefill", "/addy-review diff.md"]);
   assert.deepEqual(widgets.at(2), ["pi-addy-workflow", undefined]);
+});
+
+test("workflow next prompt falls back to active artifacts", () => {
+  const specPath = "docs/specs/2026-05-11-better-workflow.md";
+  const planPath = "docs/plans/2026-05-11-better-workflow.md";
+  const widgets: Array<[string, unknown]> = [];
+  const ctx: any = {
+    state: { ...createInitialWorkflowState(), activeSpec: specPath, activePlan: planPath },
+    input: { prefill: (value: string) => widgets.push(["prefill", value]) },
+  };
+
+  assert.equal(openNextWorkflowPrompt(ctx, "plan"), `/addy-plan ${specPath}`);
+  assert.equal(openNextWorkflowPrompt(ctx, "build"), `/addy-build ${planPath}`);
 });

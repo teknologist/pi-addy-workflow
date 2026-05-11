@@ -71,9 +71,10 @@ test("next command parses args, transitions, persists, prefills, and continues",
 
   assert.deepEqual(result, { action: "continue" });
   assert.equal(ctx.state.current, "review");
+  assert.equal(ctx.state.activePlan, "diff.md");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
   assert.equal(effects.at(0)?.[0], "pi-addy-workflow");
-  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → ship"]);
+  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → [review] → ship | diff.md"]);
   assert.deepEqual(effects.at(1), ["prefill", "/addy-review diff.md"]);
 });
 

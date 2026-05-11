@@ -9,6 +9,10 @@ Pi adaptation of Addy Osmani's `ship` command.
 
 Use the Pi `shipping-and-launch` skill.
 
+Argument: `/addy-ship [plan-path]`.
+
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, then evaluate the current change against that plan.
+
 `addy-ship` is a **fan-out orchestrator**. It runs three specialist personas in parallel against the current change, then merges their reports into a single go/no-go decision with a rollback plan. The personas operate independently — no shared state, no ordering — which is what makes parallel execution safe and useful here.
 
 ## Phase A — Parallel fan-out

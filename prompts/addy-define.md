@@ -9,6 +9,10 @@ Pi adaptation of Addy Osmani's `define` command.
 
 Use the Pi `spec-driven-development` skill.
 
+Argument: `/addy-define [spec-path]`.
+
+If a spec path is supplied, treat it as the active spec to create or revise and update the Addy workflow state's active spec. If no path is supplied, create a new spec using the naming rules below.
+
 Begin by understanding what the user wants to build. Ask clarifying questions about:
 
 1. The objective and target users
@@ -18,7 +22,7 @@ Begin by understanding what the user wants to build. Ask clarifying questions ab
 
 Then generate a structured spec covering all six core areas: objective, commands, project structure, code style, testing strategy, and boundaries.
 
-Save the spec as `SPEC.md` in the project root and confirm with the user before proceeding.
+Save the spec under `docs/specs/` using a meaningful, kebab-case filename with a date prefix: `YYYY-MM-DD-<meaningful-name>.md`. Do not save `/addy-define` specs as `SPEC.md` in the project root. Confirm the generated spec path with the user before proceeding.
 
 Pi-specific execution notes:
 

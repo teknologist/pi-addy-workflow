@@ -9,6 +9,10 @@ Pi adaptation of Addy Osmani's `build` command.
 
 Use the Pi `incremental-implementation` skill alongside `test-driven-development`.
 
+Argument: `/addy-build [plan-path]`.
+
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state. If neither exists, ask which plan to build from before changing code.
+
 Pick the next pending task from the plan. For each task:
 
 1. Read the task's acceptance criteria

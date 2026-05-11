@@ -9,7 +9,11 @@ Pi adaptation of Addy Osmani's `plan` command.
 
 Use the Pi `planning-and-task-breakdown` skill.
 
-Read the existing spec (`SPEC.md` or equivalent) and the relevant codebase sections. Then:
+Argument: `/addy-plan [spec-path]`.
+
+Read the supplied spec path. If no path is supplied, use the active spec from the Addy workflow state. If neither exists, ask the user which `docs/specs/YYYY-MM-DD-<meaningful-name>.md` spec to plan from before writing the plan.
+
+Then read the relevant codebase sections and:
 
 1. Enter plan mode — read only, no code changes
 2. Identify the dependency graph between components
@@ -18,7 +22,7 @@ Read the existing spec (`SPEC.md` or equivalent) and the relevant codebase secti
 5. Add checkpoints between phases
 6. Present the plan for human review
 
-Save the plan to `tasks/plan.md` and task list to `tasks/todo.md` when the user wants durable plan files or the project already uses that convention.
+Save durable plans under `docs/plans/` using the same naming convention as specs: a meaningful, kebab-case filename with a date prefix, `YYYY-MM-DD-<meaningful-name>.md`. Use `tasks/plan.md` and `tasks/todo.md` only when the project already uses that convention or the user explicitly requests it.
 
 Pi-specific execution notes:
 

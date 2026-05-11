@@ -8,6 +8,8 @@ export type WorkflowState = {
   current?: WorkflowPhase;
   phases: Record<WorkflowPhase, PhaseStatus>;
   warnings: string[];
+  activeSpec?: string;
+  activePlan?: string;
   lastTrigger?: string;
   lastArtifact?: string;
   testStatus?: "detected" | "passed" | "failed";
@@ -54,8 +56,8 @@ function matchesAny(path: string, patterns: RegExp[]): boolean {
 function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPhase | undefined {
   const normalized = path.replace(/\\/g, "/");
 
-  if (matchesAny(normalized, [/^(SPEC|spec)\.md$/, /^docs\/specs\//, /^docs\/prd\//])) return "define";
-  if (matchesAny(normalized, [/^tasks\/(plan|todo)\.md$/, /^docs\/plans\//])) return "plan";
+  if (matchesAny(normalized, [/(^|\/)(SPEC|spec)\.md$/, /(^|\/)docs\/specs\//, /(^|\/)docs\/prd\//])) return "define";
+  if (matchesAny(normalized, [/(^|\/)tasks\/(plan|todo)\.md$/, /(^|\/)docs\/plans\//])) return "plan";
   if (matchesAny(normalized, [/(^|\/)[^/]+\.(test|spec)\.[^/]+$/, /^tests\//])) {
     return current && phaseIndex(current) > phaseIndex("verify") ? undefined : "verify";
   }
@@ -65,6 +67,34 @@ function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPh
   }
 
   return undefined;
+}
+
+function artifactFromText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const parts = text.trim().split(/\s+/);
+  if (!parts[0]?.startsWith("/addy-")) return undefined;
+  if (parts[0] === "/addy-workflow-next") return parts.slice(2).join(" ") || undefined;
+  return parts.slice(1).join(" ") || undefined;
+}
+
+function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target: WorkflowPhase): WorkflowState {
+  const artifact = event.artifact ?? artifactFromText(event.text);
+  if (!artifact) return state;
+
+  const normalized = artifact.replace(/\\/g, "/");
+  const targetFromArtifact = fileWriteTargetPhase(normalized, state.current);
+
+  if (event.source === "file-write") {
+    if (targetFromArtifact === "define") return { ...state, activeSpec: artifact };
+    if (targetFromArtifact === "plan") return { ...state, activePlan: artifact };
+    return state;
+  }
+
+  if (targetFromArtifact === "plan") return { ...state, activePlan: artifact };
+  if (targetFromArtifact === "define" || target === "define" || target === "plan") return { ...state, activeSpec: artifact };
+  if (phaseIndex(target) > phaseIndex("plan")) return { ...state, activePlan: artifact };
+
+  return state;
 }
 
 export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase): WorkflowPhase | undefined {
@@ -102,13 +132,13 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
 
   const current = state.current;
   if (current === target) {
-    return {
+    return applyActiveArtifact({
       ...state,
       warnings: [],
       lastTrigger: event.text ?? event.command ?? event.agentName,
       lastArtifact: event.artifact ?? state.lastArtifact,
       testStatus: target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus,
-    };
+    }, event, target);
   }
 
   const next = createInitialWorkflowState();
@@ -130,9 +160,11 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.current = target;
   next.phases[target] = "active";
   next.warnings = warnings;
+  next.activeSpec = state.activeSpec;
+  next.activePlan = state.activePlan;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
   next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus;
 
-  return next;
+  return applyActiveArtifact(next, event, target);
 }
