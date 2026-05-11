@@ -3,6 +3,7 @@ import { WORKFLOW_PHASES, type WorkflowPhase, type WorkflowState, createInitialW
 
 export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
 export const WORKFLOW_STATE_ENTRY_TYPE = "pi-addy-workflow-state";
+const OPTIONAL_PHASES = new Set<WorkflowPhase>(["simplify", "ship"]);
 
 export function serializeWorkflowState(state: WorkflowState): string {
   return JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state });
@@ -70,6 +71,7 @@ function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: 
     const text = `[${phase}]`;
     return theme?.fg?.("success", text) ?? theme?.fg?.("green", text) ?? text;
   }
+  if (OPTIONAL_PHASES.has(phase)) return theme?.fg?.("gray", phase) ?? theme?.fg?.("grey", phase) ?? theme?.fg?.("muted", phase) ?? theme?.fg?.("dim", phase) ?? phase;
   return phase;
 }
 
