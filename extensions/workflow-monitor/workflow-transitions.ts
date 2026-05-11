@@ -57,7 +57,7 @@ function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPh
   const normalized = path.replace(/\\/g, "/");
 
   if (matchesAny(normalized, [/(^|\/)(SPEC|spec)\.md$/, /(^|\/)docs\/specs\//, /(^|\/)docs\/prd\//])) return "define";
-  if (matchesAny(normalized, [/(^|\/)tasks\/(plan|todo)\.md$/, /(^|\/)docs\/plans\//])) return "plan";
+  if (matchesAny(normalized, [/(^|\/)docs\/plans\//])) return "plan";
   if (matchesAny(normalized, [/(^|\/)[^/]+\.(test|spec)\.[^/]+$/, /^tests\//])) {
     return current && phaseIndex(current) > phaseIndex("verify") ? undefined : "verify";
   }

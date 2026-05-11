@@ -22,7 +22,7 @@ Then read the relevant codebase sections and:
 5. Add checkpoints between phases
 6. Present the plan for human review
 
-Save durable plans under `docs/plans/` using the same naming convention as specs: a meaningful, kebab-case filename with a date prefix, `YYYY-MM-DD-<meaningful-name>.md`. Use `tasks/plan.md` and `tasks/todo.md` only when the project already uses that convention or the user explicitly requests it.
+Save durable plans under `docs/plans/` using the same naming convention as specs: a meaningful, kebab-case filename with a date prefix, `YYYY-MM-DD-<meaningful-name>.md`. Do not save `/addy-plan` output as `tasks/plan.md` or `tasks/todo.md`.
 
 Pi-specific execution notes:
 

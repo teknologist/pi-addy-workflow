@@ -75,8 +75,6 @@ test("file write triggers map to lifecycle phases", () => {
     ["spec.md", "define"],
     ["docs/specs/feature.md", "define"],
     ["docs/prd/feature.md", "define"],
-    ["tasks/plan.md", "plan"],
-    ["tasks/todo.md", "plan"],
     ["docs/plans/feature.md", "plan"],
     ["src/index.ts", "build"],
     ["src/index.test.ts", "verify"],
