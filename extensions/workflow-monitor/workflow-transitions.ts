@@ -26,6 +26,8 @@ export type WorkflowEvent = {
   agentName?: string;
   success?: boolean;
   artifact?: string;
+  skipConfirmed?: boolean;
+  confirmedSkippedPhases?: WorkflowPhase[];
 };
 
 export function createInitialWorkflowState(): WorkflowState {
@@ -114,6 +116,21 @@ function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target:
   return state;
 }
 
+function skippedPhaseWarningConfirmed(event: WorkflowEvent, target: WorkflowPhase, skippedPhases: WorkflowPhase[]): boolean {
+  if (event.skipConfirmed) return true;
+  if (skippedPhases.length === 0) return true;
+
+  const confirmed = event.confirmedSkippedPhases ?? [];
+  if (skippedPhases.every((phase) => confirmed.includes(phase))) return true;
+
+  const text = `${event.text ?? ""} ${event.command ?? ""}`;
+  if (/--skip-workflow-warning-confirmed\b/.test(text)) return true;
+  if (target === "review" && skippedPhases.includes("verify") && /--skip-verify-confirmed\b/.test(text)) return true;
+  if (target === "finish" && /--skip-missing-steps-confirmed\b/.test(text)) return true;
+
+  return false;
+}
+
 export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase): WorkflowPhase | undefined {
   const text = event.text ?? "";
 
@@ -173,6 +190,15 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
 
   const skippedPhases = skippedEnforcedPhases(state, target, next);
   if (skippedPhases.length > 0) warnings.push(`Workflow warning: ${target} started before ${skippedPhases.join(" and ")}.`);
+
+  if (current && warnings.length > 0 && (target === "review" || target === "finish") && !skippedPhaseWarningConfirmed(event, target, skippedPhases)) {
+    return applyActiveArtifact({
+      ...state,
+      warnings,
+      lastTrigger: event.text ?? event.command ?? event.agentName,
+      lastArtifact: event.artifact ?? state.lastArtifact,
+    }, event, target);
+  }
 
   next.current = target;
   next.phases[target] = "active";

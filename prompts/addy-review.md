@@ -18,17 +18,16 @@ Before reviewing, check whether this would skip required workflow steps after bu
 - `run verify` — run `/addy-verify <plan-path>` before reviewing.
 - `skip verify` — intentionally continue to review without verified status.
 
-Recommend `run verify`. Only continue review after the user explicitly chooses `skip verify`, or after verification has run and the plan has been rechecked. Never silently skip verify between build and review.
+Recommend `run verify`. Only continue review after the user explicitly chooses `skip verify`, or after verification has run and the plan has been rechecked. If the user explicitly chooses `skip verify`, continue the review with the workflow transition confirmation flag `--skip-verify-confirmed` so the footer may move from build to review after confirmation. Never silently skip verify between build and review.
 
-When an active/supplied plan exists, keep its task status checkboxes synchronized with evidence. Mark `[x] Reviewed` only for tasks covered by this review. If the review finds blocking issues for a task, leave that task unchecked for review until fixes are verified or clearly record the blocker next to the checkbox.
+When an active/supplied plan exists, read it before reviewing to identify the current verified task, but do not update the plan yet. Status checkbox updates happen only after review finishes. Mark `[x] Reviewed` only for tasks covered by this review. If the review finds blocking issues for a task, leave that task unchecked for review until fixes are verified or clearly record the blocker next to the checkbox.
 
 This checkbox synchronization is mandatory after every `/addy-review` run. Before reporting completion, re-open the active/supplied plan and update each affected slice task so:
 
-- `[x] Implemented` means the implementation exists in the working tree or recent commits.
-- `[x] Verified` means verification has actually passed for that task.
 - `[x] Reviewed` means this review covered the task and found no unresolved blocking issues.
+- Do not mark, unmark, or otherwise edit `[ ] Implemented` or `[ ] Verified` during review. Those checkboxes belong exclusively to `/addy-build` and `/addy-verify`.
 
-If any status is uncertain, leave it unchecked and add a short note next to the task explaining what evidence is missing.
+If review status is uncertain or blocking issues remain, leave `[ ] Reviewed` unchecked and add a short note next to the task explaining what evidence is missing.
 
 Review the current changes (staged, unstaged, or recent commits) across all five axes:
 
@@ -44,6 +43,6 @@ Output a structured review with specific `file:line` references and fix recommen
 Pi-specific execution notes:
 
 - Prefer `review_git_diff` for local changes.
-- Before reporting completion, update the active/supplied plan so implemented, verified, and reviewed checkboxes match the review scope and findings. This is required for every `/addy-review` run.
+- Before reporting completion, update only the review-owned `[ ] Reviewed` checkbox for the task this review covered and passed. This is required for every `/addy-review` run. Do not update implemented/verified checkboxes from `/addy-review`.
 - Review only; do not edit source files unless the user asks. Updating the active/supplied plan status checkboxes is required.
 - If no issues are found, say `No issues found` and include the checked scope.

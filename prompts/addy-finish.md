@@ -30,7 +30,7 @@ If any task in the active/supplied plan has `[x] Implemented` but missing `[x] V
 - `run review` — run `/addy-review <current-slice-plan-path>` before finishing.
 - `skip missing steps` — intentionally continue finishing even though the listed task has missing lifecycle steps.
 
-If both verify and review are missing, recommend `run verify`. If only review is missing, recommend `run review`. Only continue with the normal finish decision flow after the user explicitly chooses `skip missing steps`, or after the chosen missing workflow step has run and the plan has been rechecked. Never silently skip missing verify or review steps.
+If both verify and review are missing, recommend `run verify`. If only review is missing, recommend `run review`. Only continue with the normal finish decision flow after the user explicitly chooses `skip missing steps`, or after the chosen missing workflow step has run and the plan has been rechecked. If the user explicitly chooses `skip missing steps`, continue with the workflow transition confirmation flag `--skip-missing-steps-confirmed` so the footer may move to finish after confirmation. Never silently skip missing verify or review steps.
 
 Also warn when the Addy workflow state itself shows a phase jump between build and finish, even if the plan is missing or uses a legacy layout. Examples: going directly from build to review skips verify; going from build or verify directly to finish skips verify and/or review. In these cases, call `ask_user_question` before continuing with options to run the skipped step or intentionally skip it. Never silently skip workflow phases between build and finish.
 

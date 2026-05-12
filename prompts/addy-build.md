@@ -22,9 +22,9 @@ Plan selection rules:
 
 When asking for a plan, include the active plan as the recommended option unless you have already confirmed it is fully implemented. Do not skip an unfinished active plan in favor of a later slice.
 
-Before changing code, read the active/supplied plan and reconcile the current task's status checkboxes with real evidence. Do not mark work done just because it is intended.
+Before changing code, read the active/supplied plan to identify the current task, but do not update the plan yet. Status checkbox updates happen only after the task phase finishes successfully.
 
-For heading/status slice plans, `/addy-build` may mark only the current task's `[x] Implemented` checkbox after the implementation exists and checks pass. Do not mark `[x] Verified` or `[x] Reviewed`, and do not treat a task as complete just because it is implemented. The same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked. Legacy checklist-only plans remain supported: each top-level task checkbox represents the whole task completion state.
+For heading/status slice plans, `/addy-build` may mark only the current task's `[x] Implemented` checkbox after the implementation exists and checks pass. Do not mark, unmark, or otherwise edit `[ ] Verified` or `[ ] Reviewed` during build, even if you believe verification or review evidence exists. Those checkboxes belong exclusively to `/addy-verify` and `/addy-review`. Do not treat a task as complete just because it is implemented. The same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked. Legacy checklist-only plans remain supported: each top-level task checkbox represents the whole task completion state.
 
 Pick the next pending task from the plan. For each task:
 
@@ -34,9 +34,9 @@ Pick the next pending task from the plan. For each task:
 4. Implement the minimum code to pass the test (GREEN)
 5. Run the full test suite to check for regressions
 6. Run the build to verify compilation
-7. Update the active/supplied plan so the task's `[ ] Implemented` checkbox becomes `[x] Implemented` only after the implementation exists and the relevant checks pass. Leave `[ ] Verified` and `[ ] Reviewed` unchanged unless those steps have actually happened.
+7. After the build work for the task is complete, update the active/supplied plan so only the task's `[ ] Implemented` checkbox becomes `[x] Implemented`. Leave `[ ] Verified` and `[ ] Reviewed` unchanged.
 8. Prepare a descriptive commit message, but do not commit unless the user explicitly asks
-9. Move to the next task only after the plan checkboxes match what was implemented, verified, and reviewed
+9. Move or report progress only after the build-owned `[x] Implemented` checkbox matches the completed build work. Leave `Verified` and `Reviewed` unchanged for later workflow phases.
 
 If any step fails, follow the Pi `debugging-and-error-recovery` skill.
 
@@ -44,5 +44,5 @@ Pi-specific execution notes:
 
 - Use `todo` for task tracking when there are multiple steps.
 - Use `process` for long-running dev servers, watchers, or log tails.
-- Keep task status checkboxes in the active plan synchronized with the real implementation state before reporting progress.
+- Keep only the build-owned `[ ] Implemented` checkbox synchronized before reporting progress. Do not update verify/review-owned checkboxes from `/addy-build`.
 - Before claiming completion, follow `verification-before-completion` and report the exact checks run.

@@ -49,6 +49,7 @@ test("finish prompt advances tasks and slices with commit prompts", async () => 
   assert.match(content, /ask_user_question/);
   assert.match(content, /missing lifecycle steps/);
   assert.match(content, /skip missing steps/);
+  assert.match(content, /--skip-missing-steps-confirmed/);
   assert.match(content, /Never silently skip missing verify or review steps/);
   assert.match(content, /Never silently skip workflow phases between build and finish/);
   assert.match(content, /current slice has unfinished tasks/);
@@ -114,12 +115,17 @@ test("workflow guidance requires plan checkbox synchronization", async () => {
 });
 
 test("verify and review require checkbox synchronization after every run", async () => {
-  for (const prompt of ["addy-verify", "addy-review"]) {
-    const content = await readFile(join("prompts", `${prompt}.md`), "utf8");
-    assert.match(content, new RegExp(`mandatory after every \\\`\\/${prompt}\\\` run`), prompt);
-    assert.match(content, /Before reporting completion, re-open the active\/supplied plan/, prompt);
-    assert.match(content, /If any status is uncertain, leave it unchecked/, prompt);
-  }
+  const verify = await readFile(join("prompts", "addy-verify.md"), "utf8");
+  assert.match(verify, /mandatory after every `\/addy-verify` run/);
+  assert.match(verify, /Before reporting completion, re-open the active\/supplied plan/);
+  assert.match(verify, /update only the verify-owned `\[ \] Verified` checkbox/);
+  assert.match(verify, /Do not update implemented\/reviewed checkboxes from `\/addy-verify`/);
+
+  const review = await readFile(join("prompts", "addy-review.md"), "utf8");
+  assert.match(review, /mandatory after every `\/addy-review` run/);
+  assert.match(review, /Before reporting completion, re-open the active\/supplied plan/);
+  assert.match(review, /update only the review-owned `\[ \] Reviewed` checkbox/);
+  assert.match(review, /Do not update implemented\/verified checkboxes from `\/addy-review`/);
 });
 
 test("plan and build define lifecycle task completion semantics", async () => {
@@ -131,6 +137,7 @@ test("plan and build define lifecycle task completion semantics", async () => {
   assert.match(planPrompt, /complete only when all three lifecycle checkboxes are checked/i);
   assert.match(planPrompt, /legacy layout is still readable/i);
   assert.match(buildPrompt, /may mark only the current task's `\[x\] Implemented` checkbox/i);
+  assert.match(buildPrompt, /Do not mark, unmark, or otherwise edit `\[ \] Verified` or `\[ \] Reviewed` during build/i);
   assert.match(buildPrompt, /same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked/i);
   assert.match(buildPrompt, /Legacy checklist-only plans remain supported/i);
 });
@@ -153,6 +160,7 @@ test("review may update plan checkboxes without editing source files", async () 
 
   assert.match(content, /would skip `\/addy-verify`/);
   assert.match(content, /ask_user_question/);
+  assert.match(content, /--skip-verify-confirmed/);
   assert.match(content, /Never silently skip verify between build and review/);
   assert.match(content, /do not edit source files unless the user asks/i);
   assert.match(content, /Updating the active\/supplied plan status checkboxes is required/);
