@@ -35,6 +35,7 @@ test("registers workflow commands and handlers", () => {
 
   addyWorkflowMonitor(pi as never);
 
+  assert.ok(events.has("session_start"));
   assert.ok(events.has("input"));
   assert.ok(events.has("tool_result"));
   assert.ok(events.has("tool_call"));
@@ -42,6 +43,35 @@ test("registers workflow commands and handlers", () => {
   assert.ok(events.has("before_agent_start"));
   assert.ok(commands.has("addy-workflow-reset"));
   assert.ok(commands.has("addy-workflow-next"));
+});
+
+test("session start renders workflow widget before first workflow instruction", async () => {
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+
+  const widgets: Array<[string, unknown]> = [];
+  await events.get("session_start")?.({}, { id: "startup-widget-test", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } });
+
+  assert.equal(widgets.at(-1)?.[0], "pi-addy-workflow");
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → review → finish"]);
+});
+
+test("session start restores persisted workflow widget state", async () => {
+  const cwd = join(stateDir, "startup-restore-project");
+  const planPath = "docs/plans/startup-restore.md";
+  const firstCtx: any = { cwd, id: "startup-restore-first", ui: { setWidget() {} } };
+  handleWorkflowEvent(firstCtx, { source: "user-input", text: `/addy-build ${planPath}` });
+
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+
+  const widgets: Array<[string, unknown]> = [];
+  const nextCtx: any = { cwd, id: "startup-restore-next", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } };
+  await events.get("session_start")?.({}, nextCtx);
+
+  assert.equal(nextCtx.state.current, "build");
+  assert.equal(nextCtx.state.activePlan, planPath);
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | startup-restore.md"]);
 });
 
 test("reset command clears widget, persists reset state, and continues", async () => {

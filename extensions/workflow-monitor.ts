@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "./workflow-monitor/workflow-handler.ts";
+import { handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, resetWorkflow } from "./workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_PHASES, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
 
 type CommandEvent = string | { args?: string[]; input?: string };
@@ -35,6 +35,10 @@ function extractWriteArtifact(event: ToolCallEvent): string | undefined {
 }
 
 export default function addyWorkflowMonitor(pi: ExtensionAPI) {
+  pi.on("session_start", async (_event: unknown, ctx: unknown) => {
+    initializeWorkflowWidget(ctx as never);
+  });
+
   pi.on("input", async (event: InputEvent, ctx: unknown) => {
     handleWorkflowEvent(ctx as never, { source: "user-input", text: event.input ?? event.text ?? "" }, appendWorkflowEntry(pi));
     return { action: "continue" as const };

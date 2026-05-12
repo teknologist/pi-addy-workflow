@@ -253,6 +253,12 @@ export function handleWorkflowEvent(ctx: WorkflowContext, event: WorkflowEvent, 
   return ctx.state ?? next;
 }
 
+export function initializeWorkflowWidget(ctx: WorkflowContext): WorkflowState {
+  const state = getContextWorkflowState(ctx);
+  setContextWorkflowState(ctx, state);
+  return ctx.state ?? state;
+}
+
 export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): WorkflowState {
   const state = createInitialWorkflowState();
   ctx.state = state;
