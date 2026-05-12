@@ -151,6 +151,43 @@ test("active plan written during plan phase survives fresh sessions for next bui
   assert.deepEqual(prefills, [`/addy-build ${planPath}`]);
 });
 
+test("auto mode input preserves plan and task progress while toggling footer label", () => {
+  const widgets: Array<[string, unknown]> = [];
+  const ctx: any = { id: "auto-mode-toggle", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } };
+  const build = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-build docs/plans/auto-mode.md" });
+  const withTask = {
+    ...build,
+    currentTask: "Current task",
+    nextTask: "Next task",
+    currentTaskIndex: 1,
+    taskCount: 2,
+  };
+  ctx.state = withTask;
+
+  const auto = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-auto" });
+  assert.equal(auto.autoMode, true);
+  assert.equal(auto.activePlan, "docs/plans/auto-mode.md");
+  assert.equal(auto.currentTask, "Current task");
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
+    "🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | auto-mode.md",
+    "Current task: Current task | Next task: Next task | Task 1/2",
+  ]);
+
+  const stopped = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-auto stop" });
+
+  assert.equal(stopped.autoMode, false);
+  assert.equal(stopped.activePlan, "docs/plans/auto-mode.md");
+  assert.equal(stopped.currentTask, "Current task");
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | auto-mode.md",
+    "Current task: Current task | Next task: Next task | Task 1/2",
+  ]);
+
+  const nextCtx: any = { id: "auto-mode-toggle", sessionManager: { getBranch: () => [] } };
+  assert.equal(getContextWorkflowState(nextCtx).autoMode, false);
+  assert.equal(getContextWorkflowState(nextCtx).activePlan, "docs/plans/auto-mode.md");
+});
+
 test("workflow state stores current and next task from active plan", () => {
   const cwd = join(stateDir, "task-state-project");
   const relativePlanPath = join("docs", "plans", "task-state.md");

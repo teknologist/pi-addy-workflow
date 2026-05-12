@@ -19,6 +19,32 @@ test("prompt triggers map to phases", () => {
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-finish" }), "finish");
 });
 
+test("auto mode toggles without changing lifecycle phase", () => {
+  const build = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build docs/plans/slice-01.md" });
+  const auto = transitionWorkflow({ ...build, warnings: ["keep warning"] }, { source: "user-input", text: "/addy-auto docs/plans/slice-02.md" });
+
+  assert.equal(auto.current, "build");
+  assert.equal(auto.activePlan, "docs/plans/slice-02.md");
+  assert.equal(auto.autoMode, true);
+  assert.deepEqual(auto.warnings, ["keep warning"]);
+  assert.deepEqual(renderWorkflowWidget(auto)().render(), [
+    "🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | slice-02.md",
+  ]);
+
+  const stopped = transitionWorkflow(auto, { source: "user-input", text: "/addy-auto stop" });
+  assert.equal(stopped.current, "build");
+  assert.equal(stopped.activePlan, "docs/plans/slice-02.md");
+  assert.equal(stopped.autoMode, false);
+  assert.deepEqual(stopped.warnings, ["keep warning"]);
+  assert.deepEqual(renderWorkflowWidget(stopped)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | slice-02.md",
+  ]);
+
+  const unrelated = transitionWorkflow(build, { source: "user-input", text: "/addy-autofoo docs/plans/slice-03.md" });
+  assert.equal(unrelated.autoMode, undefined);
+  assert.equal(unrelated.activePlan, "docs/plans/slice-01.md");
+});
+
 test("forward transition shows spec and plan checked once building", () => {
   const define = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-define" });
   const build = transitionWorkflow(define, { source: "user-input", text: "/addy-build" });

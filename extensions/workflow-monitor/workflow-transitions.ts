@@ -21,6 +21,7 @@ export type WorkflowState = {
   lastTrigger?: string;
   lastArtifact?: string;
   testStatus?: "detected" | "passed" | "failed";
+  autoMode?: boolean;
 };
 
 export type WorkflowEvent = {
@@ -124,6 +125,36 @@ function artifactFromText(text: string | undefined): string | undefined {
   return parts.slice(1).join(" ") || undefined;
 }
 
+function autoModeArtifactFromText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const parts = text.trim().split(/\s+/);
+  if (parts[0] !== "/addy-auto") return undefined;
+  if (parts[1] === "stop") return undefined;
+  return parts.slice(1).join(" ") || undefined;
+}
+
+function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): WorkflowState | undefined {
+  const text = event.text ?? event.command ?? "";
+  if (!/^\/addy-auto(?:\s|$)/.test(text.trim())) return undefined;
+
+  const lastTrigger = event.text ?? event.command ?? event.agentName;
+  if (/^\/addy-auto\s+stop\b/.test(text.trim())) {
+    return {
+      ...state,
+      autoMode: false,
+      lastTrigger,
+    };
+  }
+
+  return {
+    ...state,
+    autoMode: true,
+    activePlan: event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
+    lastTrigger,
+    lastArtifact: event.artifact ?? state.lastArtifact,
+  };
+}
+
 function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target: WorkflowPhase): WorkflowState {
   const artifact = event.artifact ?? artifactFromText(event.text);
   if (!artifact) return state;
@@ -191,6 +222,9 @@ export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase
 }
 
 export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): WorkflowState {
+  const autoModeState = applyAutoModeEvent(state, event);
+  if (autoModeState) return autoModeState;
+
   const target = resolveTargetPhase(event, state.current);
   if (!target) return state;
 

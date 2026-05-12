@@ -25,6 +25,7 @@ Prompts:
 - `/addy-verify` — run TDD or Prove-It bug workflow
 - `/addy-review` — review correctness, quality, security, performance
 - `/addy-fix-all` — fix surfaced review issues and suggestions, then rerun review
+- `/addy-auto [plan-path]` — autonomously build, verify, review, and commit tasks from a slice plan
 - `/addy-finish` — commit current work, continue the next task or slice, or ship when all slices are complete
 
 ## Runtime behavior

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-finish", "addy-ship"];
+const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-auto", "addy-finish", "addy-ship"];
 const agents = [
   "addy-planner",
   "addy-implementer",
@@ -42,7 +42,6 @@ test("all Addy prompts exist and workflow commands are not prompt files", async 
   assert.equal(promptFiles.includes("addy-workflow-reset.md"), false);
   assert.equal(promptFiles.includes("addy-workflow-next.md"), false);
 });
-
 
 test("define prompt accepts either a spec path or build idea", async () => {
   const content = await readFile(join("prompts", "addy-define.md"), "utf8");
@@ -208,6 +207,49 @@ test("fix-all prompt fixes surfaced items and reruns review", async () => {
   assert.match(content, /\/addy-review <plan-path>/);
   assert.match(content, /Do not merely print `\/addy-verify` or `\/addy-review` and stop/);
   assert.match(content, /Do not commit unless the user explicitly asks/);
+});
+
+test("auto prompt documents autonomous plan execution", async () => {
+  const content = await readFile(join("prompts", "addy-auto.md"), "utf8");
+  const readme = await readFile("README.md", "utf8");
+
+  assert.match(content, /`\/addy-auto \[plan-path\]`/);
+  assert.match(content, /`\/addy-auto stop`/);
+  assert.match(content, /active plan/i);
+  assert.match(content, /plan-selection rules/i);
+  assert.match(content, /build.*verify.*review.*pass/i);
+  assert.match(content, /may commit/i);
+  assert.match(readme, /\/addy-auto/);
+});
+
+test("auto prompt defines autonomous task loop boundaries", async () => {
+  const content = await readFile(join("prompts", "addy-auto.md"), "utf8");
+
+  assert.match(content, /repeat build.*verify.*review.*commit/i);
+  assert.match(content, /re-read the active\/supplied plan after every phase/i);
+  assert.match(content, /build owns `Implemented`, verify owns `Verified`, and review owns `Reviewed`/);
+  assert.match(content, /forward-reference link/i);
+  assert.match(content, /same-directory index/i);
+  assert.match(content, /ordered slice filename/i);
+  assert.match(content, /failed tests/i);
+  assert.match(content, /typecheck/i);
+  assert.match(content, /review blockers/i);
+  assert.match(content, /expected git state/i);
+  assert.match(content, /ambiguous-but-inferable next slices/i);
+  assert.match(content, /unsafe, destructive, external, or genuinely undecidable/i);
+});
+
+test("auto workflow end-to-end validation evidence is recorded", async () => {
+  const assetTests = await readFile(join("tests", "validate-assets.test.ts"), "utf8");
+  const monitorTests = await readFile(join("tests", "workflow-monitor.test.ts"), "utf8");
+  const trackerTests = await readFile(join("tests", "workflow-tracker.test.ts"), "utf8");
+  const plan = await readFile(join("docs", "plans", "2026-05-12-addy-auto-command.md"), "utf8");
+
+  assert.match(assetTests, /auto prompt documents autonomous plan execution/);
+  assert.match(trackerTests, /auto mode toggles without changing lifecycle phase/);
+  assert.match(monitorTests, /auto mode input preserves plan and task progress while toggling footer label/);
+  assert.match(plan, /Manual smoke notes/i);
+  assert.match(plan, /Final report checklist/i);
 });
 
 test("required lifecycle skills exist", async () => {

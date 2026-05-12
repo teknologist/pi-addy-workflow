@@ -54,6 +54,7 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return undefined;
   if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return undefined;
   if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
+  if (candidate.autoMode !== undefined && typeof candidate.autoMode !== "boolean") return undefined;
   if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
   if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
   if (candidate.currentTaskIndex !== undefined && !isPositiveSafeInteger(candidate.currentTaskIndex)) return undefined;

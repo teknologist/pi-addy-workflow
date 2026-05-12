@@ -357,7 +357,7 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
     invalidate() {},
     render(width?: number): string[] {
       const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
-      const label = styleLabel("Addy Workflow: ");
+      const label = styleLabel(state.autoMode ? "🔁 Addy Workflow: " : "Addy Workflow: ");
       const artifact = workflowArtifactForFooter(state);
       const artifactName = artifact ? workflowArtifactName(artifact) : undefined;
       const styledArtifactName = artifactName ? (theme?.fg?.("mdLinkUrl", artifactName) ?? theme?.fg?.("accent", artifactName) ?? artifactName) : undefined;
