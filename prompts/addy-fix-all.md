@@ -11,11 +11,11 @@ Argument: `/addy-fix-all [plan-path]`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available.
 
-This command is a fix pass, not a review pass. Fix only the issues and suggestions explicitly surfaced in the immediately preceding `/addy-review` result. That review result may include Crit comments, failing checks, or review notes; treat those as fix targets only when they were included in the immediately preceding review result. Do not use older conversation context, unrelated comments, or newly discovered findings as fix targets.
+This command is a fix pass, not a review pass. Fix only the issues and suggestions explicitly surfaced in the immediately preceding `/addy-review` result. That review result may include Crit comments, failing checks, or review notes; treat those as fix targets only when they were included in the immediately preceding review result. If the immediately preceding `/addy-review` result was clean but the active plan still has the current task's `Reviewed` checkbox unchecked, the only fix target is synchronizing that checkbox with the clean review evidence. Do not use older conversation context, unrelated comments, or newly discovered findings as fix targets.
 
 Treat Critical and Important findings as required fixes. Treat Suggestions as applicable unless they are unsafe, conflicting, out of scope, or would add speculative complexity.
 
-Do not invent issues. Do not search for new review findings. If the immediately preceding assistant turn was not a `/addy-review` result with actionable issues or suggestions, stop and ask the user to run `/addy-review` first.
+Do not invent issues. Do not search for new review findings. If the immediately preceding assistant turn was not a `/addy-review` result with actionable issues or suggestions, or a clean `/addy-review` result whose only unresolved work is an unchecked `Reviewed` checkbox for the current task, stop and ask the user to run `/addy-review` first.
 
 For each surfaced item:
 

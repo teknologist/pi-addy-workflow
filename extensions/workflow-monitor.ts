@@ -290,11 +290,20 @@ function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: Agent
   if (lastCommand !== "/addy-review") return false;
 
   const reviewText = latestAssistantText(event);
-  if (!reviewTextHasActionableFindings(reviewText)) return false;
+  const hasActionableFindings = reviewTextHasActionableFindings(reviewText);
+  const cleanReviewNeedsPlanSync = Boolean(
+    reviewText.trim()
+    && !hasActionableFindings
+    && commandFromPrompt(action?.prompt) === "/addy-review"
+    && action?.missingStatuses?.includes("Reviewed")
+    && action?.taskTitle
+    && state.currentTask === action.taskTitle,
+  );
+  if (!hasActionableFindings && !cleanReviewNeedsPlanSync) return false;
 
   const key = reviewFixKey(state);
   const fixCount = state.autoReviewFixKey === key ? state.autoReviewFixCount ?? 0 : 0;
-  const fingerprint = reviewFindingsFingerprint(reviewText);
+  const fingerprint = cleanReviewNeedsPlanSync ? reviewFindingsFingerprint(`Reviewed checkbox still unchecked for ${key}.`) : reviewFindingsFingerprint(reviewText);
   const notify = (message: string) => (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(message, "warning");
 
   if (fixCount > 0 && state.autoReviewFindingFingerprint === fingerprint) {

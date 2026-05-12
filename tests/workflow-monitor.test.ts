@@ -520,6 +520,48 @@ test("auto loop treats clean structured review output as clean", async () => {
   assert.match(sentMessages[0], /^# Addy Auto Commit/);
 });
 
+test("auto loop runs fix-all when clean review leaves reviewed unchecked", async () => {
+  const cwd = join(stateDir, "auto-loop-clean-review-unchecked-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-clean-review-unchecked",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
+  assert.equal(ctx.state.autoReviewFixCount, 1);
+});
+
 test("auto loop continues after task commit succeeds", async () => {
   const cwd = join(stateDir, "auto-loop-task-commit-continue-project");
   const planPath = join("docs", "plans", "auto-loop.md");
