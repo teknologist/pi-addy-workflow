@@ -17,6 +17,7 @@ test("prompt triggers map to phases", () => {
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-verify" }), "verify");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-review" }), "review");
   assert.equal(resolveTargetPhase({ source: "user-input", text: "/addy-finish" }), "finish");
+  assert.equal(resolveTargetPhase({ source: "user-input", text: "commit all changes just like /addy-finish would do" }), undefined);
 });
 
 test("auto mode toggles without changing lifecycle phase", () => {
@@ -257,10 +258,10 @@ test("define prompt distinguishes spec arguments from build explanations", () =>
   assert.equal(explanationWithPathWords.activeSpec, undefined);
 });
 
-test("only command-leading arguments update active artifacts", () => {
+test("only command-leading user text starts workflow commands", () => {
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "please run /addy-plan for the current spec" });
 
-  assert.equal(state.current, "plan");
+  assert.equal(state.current, undefined);
   assert.equal(state.activeSpec, undefined);
 });
 

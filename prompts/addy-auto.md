@@ -40,6 +40,20 @@ Autonomous task loop:
 5. Try safe autonomous recovery before stopping for failed tests, typecheck failures, review blockers, expected git state issues, and ambiguous-but-inferable next slices.
 6. Ask the user only for unsafe, destructive, external, or genuinely undecidable choices.
 
+Review fix loop guardrails:
+
+- If `/addy-review` surfaces actionable Critical/Important findings or safe scoped Suggestions and leaves `Reviewed` unchecked, run `/addy-fix-all <plan-path>` for the immediately preceding review result, then rerun `/addy-verify <plan-path>` and `/addy-review <plan-path>`.
+- Repeat review → fix-all → verify → review until review passes and checks `Reviewed`, or until a guardrail stops the loop.
+- Stop instead of looping when the same finding repeats after a fix attempt, validation cannot be fixed safely, the review requires product/security/architecture judgment, the fix would be broad/destructive/out of scope, or the task reaches 5 review fix loops.
+- Treat 5 as the default maximum review fix loops per task unless the user explicitly raises or lowers it.
+
+Task commit policy:
+
+- After a task has all three lifecycle checkboxes checked (`Implemented`, `Verified`, and `Reviewed`), commit the completed task work before moving to the next task or slice.
+- Do not call `ask_user_question` for this auto-task commit. `/addy-auto` is explicit permission to commit completed, verified, reviewed task work.
+- Use the same direct commit workflow as `/addy-finish`: inspect `git status`, stage all current changed files for the completed task including the plan checkbox update, review the staged diff, create one concise commit, and report the commit hash.
+- After the commit is complete, continue to the next lifecycle action automatically.
+
 Pi-specific execution notes:
 
 - Treat `/addy-auto` as a supervised automation loop, not permission for destructive operations.

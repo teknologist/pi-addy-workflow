@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +33,16 @@ function createPiMock() {
   return { pi, events, commands, entries, sentMessages };
 }
 
+function assertSentWorkflowPrompt(message: string | undefined, command: string, heading: string) {
+  assert.ok(message, "expected a dispatched workflow prompt");
+  assert.match(message, new RegExp(`# ${heading}`));
+  assert.ok(message.includes(`Invocation: \`${command}\``), `expected invocation for ${command}`);
+}
+
+function reviewFingerprintForTest(lines: string[]): string {
+  return createHash("sha256").update(lines.map((line) => line.trim().toLowerCase()).join("\n")).digest("hex").slice(0, 16);
+}
+
 test("registers workflow commands and handlers", () => {
   const { pi, events, commands } = createPiMock();
 
@@ -59,7 +70,8 @@ test("auto command dispatches the real next workflow command", async () => {
   assert.deepEqual(result, { action: "continue" });
   assert.equal(ctx.state.autoMode, true);
   assert.equal(ctx.state.activePlan, "docs/plans/auto.md");
-  assert.deepEqual(sentMessages, ["/addy-build docs/plans/auto.md"]);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], "/addy-build docs/plans/auto.md", "Addy Build");
 });
 
 test("auto loop dispatches verify after the current task is implemented", async () => {
@@ -91,7 +103,8 @@ test("auto loop dispatches verify after the current task is implemented", async 
 
   await events.get("agent_end")?.({}, ctx);
 
-  assert.deepEqual(sentMessages, [`/addy-verify ${planPath}`]);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-verify ${planPath}`, "Addy Verify");
 });
 
 test("real workflow commands preserve auto mode so the loop can continue", async () => {
@@ -110,7 +123,8 @@ test("real workflow commands preserve auto mode so the loop can continue", async
   const ctx: any = { cwd, id: "auto-loop-preserve", ui: { setWidget() {} }, isIdle: () => true };
 
   await commands.get("addy-auto")?.handler(planPath, ctx);
-  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`]);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
 
   await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
   assert.equal(ctx.state.autoMode, true);
@@ -124,7 +138,8 @@ test("real workflow commands preserve auto mode so the loop can continue", async
   ].join("\n"));
 
   await events.get("agent_end")?.({}, ctx);
-  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`, `/addy-verify ${planPath}`]);
+  assert.equal(sentMessages.length, 2);
+  assertSentWorkflowPrompt(sentMessages[1], `/addy-verify ${planPath}`, "Addy Verify");
 });
 
 test("auto loop retries one incomplete same-phase step before pausing", async () => {
@@ -157,12 +172,13 @@ test("auto loop retries one incomplete same-phase step before pausing", async ()
 
   await events.get("agent_end")?.({}, ctx);
 
-  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`]);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
 
   await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
   await events.get("agent_end")?.({}, ctx);
 
-  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`]);
+  assert.equal(sentMessages.length, 1);
   assert.match(notices.at(-1)?.[0] ?? "", /paused at \/addy-build/);
   assert.equal(notices.at(-1)?.[1], "warning");
 });
@@ -205,14 +221,542 @@ test("auto loop same-phase retry works for verify and review too", async () => {
     };
 
     await events.get("agent_end")?.({}, ctx);
-    assert.deepEqual(sentMessages, [`${testCase.command} ${planPath}`]);
+    assert.equal(sentMessages.length, 1);
+    assertSentWorkflowPrompt(sentMessages[0], `${testCase.command} ${planPath}`, testCase.phase === "verify" ? "Addy Verify" : "Addy Review");
 
     await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
     await events.get("agent_end")?.({}, ctx);
-    assert.deepEqual(sentMessages, [`${testCase.command} ${planPath}`]);
+    assert.equal(sentMessages.length, 1);
     assert.match(notices.at(-1)?.[0] ?? "", new RegExp(`paused at ${testCase.command}`));
     assert.equal(notices.at(-1)?.[1], "warning");
   }
+});
+
+test("auto loop runs fix-all when review surfaces actionable findings", async () => {
+  const cwd = join(stateDir, "auto-loop-review-fix-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-review-fix",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix tests/unit/example.test.ts:12 before review can pass." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
+  assert.equal(ctx.state.autoReviewFixCount, 1);
+});
+
+test("auto loop verifies again after fix-all", async () => {
+  const cwd = join(stateDir, "auto-loop-fix-verify-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-fix-verify",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      autoMode: true,
+      autoLastPrompt: `/addy-fix-all ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Fixed surfaced review findings." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-verify ${planPath}`, "Addy Verify");
+  assert.equal(ctx.state.autoReviewFixNeedsReview, true);
+});
+
+test("auto loop reviews again after post-fix verify even when plan is already reviewed", async () => {
+  const cwd = join(stateDir, "auto-loop-fix-verify-review-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-fix-verify-review",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "active", review: "complete", finish: "pending" },
+      warnings: [],
+      current: "verify",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-verify ${planPath}`,
+      autoReviewFixNeedsReview: true,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verification passed after review fixes." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-review ${planPath}`, "Addy Review");
+  assert.equal(ctx.state.autoReviewFixNeedsReview, false);
+});
+
+test("auto loop commits a completed reviewed task before moving to the next task", async () => {
+  const cwd = join(stateDir, "auto-loop-task-commit-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-task-commit",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found. Marked Reviewed." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.match(sentMessages[0], /Completed task: Current/);
+  assert.match(sentMessages[0], /Invocation: `__addy-auto-task-commit__`/);
+  assert.match(sentMessages[0], /Do not call ask_user_question/);
+});
+
+test("auto loop fixes review findings even when plan was incorrectly marked reviewed", async () => {
+  const cwd = join(stateDir, "auto-loop-reviewed-with-findings-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-reviewed-with-findings",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Critical: fix src/foo.ts:10 before review can pass." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
+});
+
+test("auto loop fixes mixed clean and warning review output", async () => {
+  const cwd = join(stateDir, "auto-loop-reviewed-with-warning-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const cases = [
+    "No issues found in Critical issues.\nWarnings:\n- Retry counter is stale.",
+    "Critical issues: none\nWarnings:\n- This can auto-commit unrelated changes.",
+    "No actionable findings\nSuggestions:\n- Prefer a smaller guard.",
+  ];
+
+  for (const [index, reviewText] of cases.entries()) {
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      cwd,
+      id: `auto-loop-reviewed-with-warning-${index}`,
+      state: {
+        phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+        warnings: [],
+        current: "review",
+        currentTask: "Current",
+        currentTaskIndex: 1,
+        taskCount: 2,
+        autoMode: true,
+        autoLastPrompt: `/addy-review ${planPath}`,
+        activePlan: planPath,
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: reviewText }] }] }, ctx);
+
+    assert.equal(sentMessages.length, 1, reviewText);
+    assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
+  }
+});
+
+test("auto loop treats clean structured review output as clean", async () => {
+  const cwd = join(stateDir, "auto-loop-clean-structured-review-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-clean-structured-review",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Critical issues: none\nWarnings: none\nSuggestions: none" }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+});
+
+test("auto loop continues after task commit succeeds", async () => {
+  const cwd = join(stateDir, "auto-loop-task-commit-continue-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-task-commit-continue",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      autoMode: true,
+      autoLastPrompt: [
+        "# Addy Auto Commit",
+        "",
+        "Invocation: `__addy-auto-task-commit__`",
+      ].join("\n"),
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
+});
+
+test("auto loop does not commit after review when plan cannot prove task completion", async () => {
+  const cwd = join(stateDir, "auto-loop-missing-plan-no-commit-project");
+  const planPath = join("docs", "plans", "missing.md");
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-missing-plan-no-commit",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
+});
+
+test("auto loop pauses after unclear commit output even when it contains a hash", async () => {
+  const cwd = join(stateDir, "auto-loop-task-commit-unclear-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-task-commit-unclear",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      autoMode: true,
+      autoLastPrompt: [
+        "# Addy Auto Commit",
+        "",
+        "Invocation: `__addy-auto-task-commit__`",
+      ].join("\n"),
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Commit failed. HEAD is abc1234." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? "", /commit result was unclear/);
+  assert.equal(notices.at(-1)?.[1], "warning");
+});
+
+test("auto loop stops review fix loop after five attempts", async () => {
+  const cwd = join(stateDir, "auto-loop-review-fix-max-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-review-fix-max",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
+      autoReviewFixCount: 5,
+      autoReviewFindingFingerprint: "previous",
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/new-location.ts:42 before review can pass." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? "", /5 review fix loops/);
+  assert.equal(notices.at(-1)?.[1], "warning");
+});
+
+test("auto loop stops when the same review finding repeats after a fix attempt", async () => {
+  const cwd = join(stateDir, "auto-loop-review-repeat-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-review-repeat",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
+      autoReviewFixCount: 1,
+      autoReviewFindingFingerprint: reviewFingerprintForTest(["Important: fix src/repeated.ts:12 before review can pass."]),
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/repeated.ts:12 before review can pass." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? "", /same review finding repeated/);
+  assert.equal(notices.at(-1)?.[1], "warning");
+});
+
+test("auto loop does not treat different warning bullets as repeated findings", async () => {
+  const cwd = join(stateDir, "auto-loop-review-different-warning-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-review-different-warning",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
+      autoReviewFixCount: 1,
+      autoReviewFindingFingerprint: reviewFingerprintForTest(["- retry counter is stale."]),
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Warnings:\n- This can auto-commit unrelated changes." }] }] }, ctx);
+
+  assert.equal(notices.length, 0);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
 });
 
 test("auto retry state restored from session entries pauses duplicate dispatch", async () => {

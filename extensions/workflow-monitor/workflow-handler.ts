@@ -62,6 +62,10 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.autoLastPrompt !== undefined && typeof candidate.autoLastPrompt !== "string") return undefined;
   if (candidate.autoRetryKey !== undefined && typeof candidate.autoRetryKey !== "string") return undefined;
   if (candidate.autoRetryCount !== undefined && !isNonNegativeSafeInteger(candidate.autoRetryCount)) return undefined;
+  if (candidate.autoReviewFixKey !== undefined && typeof candidate.autoReviewFixKey !== "string") return undefined;
+  if (candidate.autoReviewFixCount !== undefined && !isNonNegativeSafeInteger(candidate.autoReviewFixCount)) return undefined;
+  if (candidate.autoReviewFindingFingerprint !== undefined && typeof candidate.autoReviewFindingFingerprint !== "string") return undefined;
+  if (candidate.autoReviewFixNeedsReview !== undefined && typeof candidate.autoReviewFixNeedsReview !== "boolean") return undefined;
   if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
   if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
   if (candidate.currentTaskIndex !== undefined && !isPositiveSafeInteger(candidate.currentTaskIndex)) return undefined;

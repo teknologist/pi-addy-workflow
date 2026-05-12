@@ -402,19 +402,23 @@ export function nextPromptForPhase(phase: WorkflowPhase, artifact?: string): str
 }
 
 export function nextPromptForActivePlanLifecycle(state: WorkflowState, baseCwd?: string): string | undefined {
+  return nextWorkflowActionForActivePlanLifecycle(state, baseCwd)?.prompt;
+}
+
+export function nextWorkflowActionForActivePlanLifecycle(state: WorkflowState, baseCwd?: string): { prompt: string; taskTitle?: string; missingStatuses?: PlanTaskStatus[] } | undefined {
   if (!state.activePlan) return undefined;
 
   const markdown = readPlanMarkdown(state.activePlan, baseCwd);
-  if (!markdown) return nextPromptForPhase("build", state.activePlan);
+  if (!markdown) return { prompt: nextPromptForPhase("build", state.activePlan) };
 
   const tasks = planTasksFromMarkdown(markdown);
   const task = tasks.find((candidate) => !candidate.complete);
-  if (!task) return tasks.length > 0 ? nextPromptForPhase("finish", state.activePlan) : nextPromptForPhase("build", state.activePlan);
+  if (!task) return { prompt: tasks.length > 0 ? nextPromptForPhase("finish", state.activePlan) : nextPromptForPhase("build", state.activePlan) };
 
   const missingStatuses = task.missingStatuses ?? ["Implemented"];
-  if (missingStatuses.includes("Implemented")) return nextPromptForPhase("build", state.activePlan);
-  if (missingStatuses.includes("Verified")) return nextPromptForPhase("verify", state.activePlan);
-  if (missingStatuses.includes("Reviewed")) return nextPromptForPhase("review", state.activePlan);
+  if (missingStatuses.includes("Implemented")) return { prompt: nextPromptForPhase("build", state.activePlan), taskTitle: task.title, missingStatuses };
+  if (missingStatuses.includes("Verified")) return { prompt: nextPromptForPhase("verify", state.activePlan), taskTitle: task.title, missingStatuses };
+  if (missingStatuses.includes("Reviewed")) return { prompt: nextPromptForPhase("review", state.activePlan), taskTitle: task.title, missingStatuses };
 
-  return nextPromptForPhase("build", state.activePlan);
+  return { prompt: nextPromptForPhase("build", state.activePlan), taskTitle: task.title, missingStatuses };
 }

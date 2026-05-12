@@ -25,6 +25,10 @@ export type WorkflowState = {
   autoLastPrompt?: string;
   autoRetryKey?: string;
   autoRetryCount?: number;
+  autoReviewFixKey?: string;
+  autoReviewFixCount?: number;
+  autoReviewFindingFingerprint?: string;
+  autoReviewFixNeedsReview?: boolean;
 };
 
 export type WorkflowEvent = {
@@ -148,6 +152,10 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
       autoLastPrompt: undefined,
       autoRetryKey: undefined,
       autoRetryCount: undefined,
+      autoReviewFixKey: undefined,
+      autoReviewFixCount: undefined,
+      autoReviewFindingFingerprint: undefined,
+      autoReviewFixNeedsReview: undefined,
       lastTrigger,
     };
   }
@@ -158,6 +166,10 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
+    autoReviewFixKey: undefined,
+    autoReviewFixCount: undefined,
+    autoReviewFindingFingerprint: undefined,
+    autoReviewFixNeedsReview: undefined,
     activePlan: event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
     lastTrigger,
     lastArtifact: event.artifact ?? state.lastArtifact,
@@ -205,15 +217,16 @@ export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase
   const text = event.text ?? "";
 
   if (event.source === "user-input" || event.source === "command") {
-    const workflowNext = text.match(/\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|finish)\b/);
+    const workflowNext = text.trim().match(/^\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|finish)\b/);
     if (workflowNext) return workflowNext[1] as WorkflowPhase;
-    if (text.includes("/addy-code-simplify")) return "simplify";
-    if (text.includes("/addy-define")) return "define";
-    if (text.includes("/addy-plan")) return "plan";
-    if (text.includes("/addy-build")) return "build";
-    if (text.includes("/addy-verify")) return "verify";
-    if (text.includes("/addy-review")) return "review";
-    if (text.includes("/addy-finish")) return "finish";
+    const commandName = commandNameFromText(text);
+    if (commandName === "/addy-code-simplify") return "simplify";
+    if (commandName === "/addy-define") return "define";
+    if (commandName === "/addy-plan") return "plan";
+    if (commandName === "/addy-build") return "build";
+    if (commandName === "/addy-verify") return "verify";
+    if (commandName === "/addy-review") return "review";
+    if (commandName === "/addy-finish") return "finish";
   }
 
   if (event.source === "file-write" && event.artifact) return fileWriteTargetPhase(event.artifact, current);
@@ -262,7 +275,7 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   }
 
   const skippedPhases = skippedEnforcedPhases(state, target, next);
-  if (skippedPhases.length > 0) warnings.push(`Workflow warning: ${target} started before ${skippedPhases.join(" and ")}.`);
+  if (skippedPhases.length > 0) warnings.push(`${target} started before ${skippedPhases.join(" and ")}.`);
 
   if (current && warnings.length > 0 && (target === "review" || target === "finish") && !skippedPhaseWarningConfirmed(event, target, skippedPhases)) {
     return applyActiveArtifact({
@@ -282,6 +295,10 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.autoLastPrompt = state.autoLastPrompt;
   next.autoRetryKey = state.autoRetryKey;
   next.autoRetryCount = state.autoRetryCount;
+  next.autoReviewFixKey = state.autoReviewFixKey;
+  next.autoReviewFixCount = state.autoReviewFixCount;
+  next.autoReviewFindingFingerprint = state.autoReviewFindingFingerprint;
+  next.autoReviewFixNeedsReview = state.autoReviewFixNeedsReview;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
   next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus;

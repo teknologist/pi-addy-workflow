@@ -234,6 +234,9 @@ test("auto prompt defines autonomous task loop boundaries", async () => {
   assert.match(content, /failed tests/i);
   assert.match(content, /typecheck/i);
   assert.match(content, /review blockers/i);
+  assert.match(content, /5 review fix loops/i);
+  assert.match(content, /Task commit policy/i);
+  assert.match(content, /Do not call `ask_user_question` for this auto-task commit/i);
   assert.match(content, /expected git state/i);
   assert.match(content, /ambiguous-but-inferable next slices/i);
   assert.match(content, /unsafe, destructive, external, or genuinely undecidable/i);
@@ -248,6 +251,7 @@ test("auto workflow end-to-end validation evidence is recorded", async () => {
   assert.match(assetTests, /auto prompt documents autonomous plan execution/);
   assert.match(trackerTests, /auto mode toggles without changing lifecycle phase/);
   assert.match(monitorTests, /auto mode input preserves plan and task progress while toggling footer label/);
+  assert.match(monitorTests, /auto loop commits a completed reviewed task before moving to the next task/);
   assert.match(plan, /Manual smoke notes/i);
   assert.match(plan, /Final report checklist/i);
 });
