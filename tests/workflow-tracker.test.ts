@@ -370,6 +370,45 @@ test("workflow widget renders task and slice progress for complete direct plan f
   ]);
 });
 
+test("workflow widget does not treat date-prefixed plan names as slice progress", () => {
+  const cwd = join(taskFooterDir, "date-prefixed-plan-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "2026-05-12-addy-auto-command.md"), [
+    "## Task 1: Add packaged auto prompt",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 2: Store/render auto mode",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 3: Wire auto command",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 4: Finish auto prompt",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = {
+    ...createInitialWorkflowState(),
+    current: "build" as const,
+    phases: { ...createInitialWorkflowState().phases, define: "complete" as const, plan: "complete" as const, build: "active" as const },
+    activePlan: "@docs/plans/2026-05-12-addy-auto-command.md",
+  };
+
+  assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-12-addy-auto-command.md",
+    "Current task: Add packaged auto prompt | Next task: Store/render auto mode | Task 1/4",
+  ]);
+});
+
 test("workflow widget uses persisted task state when plan file is unavailable", () => {
   const state = {
     ...createInitialWorkflowState(),

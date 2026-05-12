@@ -122,7 +122,8 @@ function planPathForDisplay(resolvedPlanPath: string, previousPlanPath: string, 
 
 function numberedSliceParts(planPath: string): { prefix: string; number: number; width: number } | undefined {
   const name = basename(planPath);
-  const match = name.match(/^(.*?slice[-_]?)(\d+)(.*\.md)$/i) ?? name.match(/^()(\d+)([-_].*\.md)$/i);
+  const sliceMatch = name.match(/^(.*?slice[-_]?)(\d+)(.*\.md)$/i);
+  const match = sliceMatch ?? (/^\d{4}[-_]\d{2}[-_]\d{2}/.test(name) ? undefined : name.match(/^()(\d+)([-_].*\.md)$/i));
   if (!match) return undefined;
 
   return {
