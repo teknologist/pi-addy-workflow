@@ -14,13 +14,15 @@ Argument: `/addy-build [plan-path]`.
 Plan selection rules:
 
 1. Use the supplied plan path when present and update the Addy workflow state's active plan.
-2. If no path is supplied, always use the active plan from workflow state when it exists. Do not ask which plan to use just because other slice plans exist.
-3. Read that active/supplied slice plan and decide whether it has unfinished implementation work.
-4. If the active/supplied slice plan still has unfinished implementation work, continue that plan.
-5. If the active/supplied slice plan is fully implemented, move to the next slice plan only when the next slice is unambiguous from the plan index or neighboring slice filenames.
-6. If neither an active/supplied plan exists, or if the active/supplied slice is complete and the next slice is ambiguous, call `ask_user_question` with bounded candidate plan paths before changing code.
+2. If no path is supplied, always use the active plan from workflow state when it exists. The active plan may appear in the Addy Workflow footer after the phase strip, for example `| 2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md`; treat that footer plan as the active plan even if no explicit argument was supplied. Do not ask which plan to use just because other slice plans exist.
+3. When an active plan exists, read it immediately and pick the next unfinished task in that active plan. Do not call `ask_user_question` before reading the active plan. Do not say there is no active plan when the workflow footer names one.
+4. If the active/supplied slice plan still has unfinished implementation work, continue that plan. Do not prompt for a different slice.
+5. If the active/supplied slice plan is fully implemented, move to the next slice plan automatically when it is unambiguous:
+   - Prefer a forward-reference link within the active plan, or a separate index file in the same directory, that names the next slice plan path.
+   - Otherwise, if the active filename has an ordered slice number such as `slice-03`, `slice-3`, `03-...`, or `3-...`, look in the same directory for the next numbered slice (`04`/`4`). Use it when exactly one matching next slice exists.
+6. Only call `ask_user_question` with bounded candidate plan paths when neither an active/supplied plan exists, or when the active/supplied slice is fully implemented and the next slice cannot be inferred uniquely from an index or next numbered slice filename.
 
-When asking for a plan, include the active plan as the recommended option unless you have already confirmed it is fully implemented. Do not skip an unfinished active plan in favor of a later slice.
+When asking for a plan, include the active plan as the recommended option unless you have already confirmed it is fully implemented. Do not skip an unfinished active plan in favor of a later slice. In fresh sessions, the persisted active plan from workflow state or the Addy Workflow footer is authoritative; do not rediscover plans or ask for a plan unless that active plan is absent or finished.
 
 Before changing code, read the active/supplied plan to identify the current task, but do not update the plan yet. Status checkbox updates happen only after the task phase finishes successfully.
 
