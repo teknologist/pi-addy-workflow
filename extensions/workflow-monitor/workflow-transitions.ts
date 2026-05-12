@@ -29,6 +29,8 @@ export type WorkflowState = {
   autoReviewFixCount?: number;
   autoReviewFindingFingerprint?: string;
   autoReviewFixNeedsReview?: boolean;
+  autoReviewTask?: string;
+  autoReviewTaskIndex?: number;
 };
 
 export type WorkflowEvent = {
@@ -156,6 +158,8 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
       autoReviewFixCount: undefined,
       autoReviewFindingFingerprint: undefined,
       autoReviewFixNeedsReview: undefined,
+      autoReviewTask: undefined,
+      autoReviewTaskIndex: undefined,
       lastTrigger,
     };
   }
@@ -170,6 +174,8 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     autoReviewFixCount: undefined,
     autoReviewFindingFingerprint: undefined,
     autoReviewFixNeedsReview: undefined,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
     activePlan: event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
     lastTrigger,
     lastArtifact: event.artifact ?? state.lastArtifact,
@@ -299,6 +305,8 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.autoReviewFixCount = state.autoReviewFixCount;
   next.autoReviewFindingFingerprint = state.autoReviewFindingFingerprint;
   next.autoReviewFixNeedsReview = state.autoReviewFixNeedsReview;
+  next.autoReviewTask = state.autoReviewTask;
+  next.autoReviewTaskIndex = state.autoReviewTaskIndex;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
   next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus;

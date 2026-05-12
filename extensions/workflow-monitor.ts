@@ -208,8 +208,8 @@ function reviewedTaskWasCompleted(previousState: ReturnType<typeof getContextWor
     || state.taskCount !== previousState.taskCount;
 }
 
-function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>): string {
-  const task = state.currentTask && state.currentTask !== "none" ? state.currentTask : "the completed task";
+function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>, taskTitle?: string): string {
+  const task = taskTitle ?? (state.currentTask && state.currentTask !== "none" ? state.currentTask : "the completed task");
   const plan = state.activePlan ? `Plan: ${state.activePlan}` : "Plan: active Addy workflow plan";
   return [
     "# Addy Auto Commit",
@@ -326,13 +326,21 @@ function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: Agent
   return true;
 }
 
-function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, previousState: ReturnType<typeof getContextWorkflowState>, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): boolean {
+function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, previousState: ReturnType<typeof getContextWorkflowState>, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): boolean {
   if (commandFromPrompt(previousState.autoLastPrompt) !== "/addy-review") return false;
-  if (commandFromPrompt(action?.prompt) === "/addy-review") return false;
-  if (!reviewedTaskWasCompleted(previousState, state)) return false;
+  const reviewText = latestAssistantText(event);
+  if (!reviewText.trim() || reviewTextHasActionableFindings(reviewText)) return false;
+  const nextCommand = commandFromPrompt(action?.prompt);
+  if (nextCommand === "/addy-review") return false;
 
-  dispatchAutoPrompt(pi, ctx, autoTaskCommitPrompt(previousState), state, {
+  const reviewedTask = previousState.autoReviewTask && previousState.autoReviewTask !== "none" ? previousState.autoReviewTask : previousState.currentTask;
+  const planMovedPastReviewTarget = Boolean(reviewedTask && reviewedTask !== "none" && action?.taskTitle && action.taskTitle !== reviewedTask);
+  if (!planMovedPastReviewTarget && !reviewedTaskWasCompleted(previousState, state)) return false;
+
+  dispatchAutoPrompt(pi, ctx, autoTaskCommitPrompt(previousState, reviewedTask), state, {
     autoLastPrompt: AUTO_TASK_COMMIT_PROMPT,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
   });
   return true;
 }
@@ -379,6 +387,8 @@ function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSam
     autoLastPrompt: prompt,
     autoRetryKey: retryKey,
     autoRetryCount: isSameIncompletePhase ? retryCount + 1 : 0,
+    autoReviewTask: phase === "review" ? action.taskTitle ?? refreshedState.currentTask : refreshedState.autoReviewTask,
+    autoReviewTaskIndex: phase === "review" ? refreshedState.currentTaskIndex : refreshedState.autoReviewTaskIndex,
   }, appendWorkflowEntry(pi));
 
   sendUserMessage(pi, ctx, prompt);
@@ -392,7 +402,7 @@ function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unkn
   const refreshedState = getContextWorkflowState(workflowCtx);
   const action = nextWorkflowActionForActivePlanLifecycle(refreshedState, (ctx as { cwd?: string }).cwd);
   if (maybeDispatchReviewFixLoop(pi, ctx, event, refreshedState, action)) return;
-  if (maybeDispatchTaskCommit(pi, ctx, state, refreshedState, action)) return;
+  if (maybeDispatchTaskCommit(pi, ctx, event, state, refreshedState, action)) return;
   dispatchNextAutoWorkflowPrompt(pi, ctx);
 }
 

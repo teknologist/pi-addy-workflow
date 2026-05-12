@@ -389,6 +389,51 @@ test("auto loop commits a completed reviewed task before moving to the next task
   assert.match(sentMessages[0], /Do not call ask_user_question/);
 });
 
+test("auto loop commits reviewed task even when refreshed state already points at next task", async () => {
+  const cwd = join(stateDir, "auto-loop-task-commit-advanced-state-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 18: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 19: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-task-commit-advanced-state",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Next",
+      currentTaskIndex: 2,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewTask: "Current",
+      autoReviewTaskIndex: 1,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found. Marked Reviewed." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.match(sentMessages[0], /Completed task: Current/);
+  assert.doesNotMatch(sentMessages[0], /Completed task: Next/);
+});
+
 test("auto loop fixes review findings even when plan was incorrectly marked reviewed", async () => {
   const cwd = join(stateDir, "auto-loop-reviewed-with-findings-project");
   const planPath = join("docs", "plans", "auto-loop.md");
