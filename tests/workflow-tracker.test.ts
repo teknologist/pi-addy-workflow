@@ -293,6 +293,49 @@ test("workflow widget resolves Pi @-referenced active plan paths", () => {
   ]);
 });
 
+test("completed active slice advances footer tasks to next numbered slice", () => {
+  const cwd = join(taskFooterDir, "next-slice-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md"), [
+    "## Task 1: Finished slice task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md"), [
+    "## Task 1: Finished next task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "",
+    "## Task 2: TRESO2 4xx body read fully",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 3: Report row has summarized error fields",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: "verify",
+    phases: { ...createInitialWorkflowState().phases, define: "complete", plan: "complete", build: "complete", verify: "active" },
+    activePlan: "@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md",
+  }, cwd);
+
+  assert.equal(state.activePlan, "@docs/plans/2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md");
+  assert.equal(state.currentTask, "TRESO2 4xx body read fully");
+  assert.equal(state.nextTask, "Report row has summarized error fields");
+  assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md",
+    "Current task: TRESO2 4xx body read fully | Next task: Report row has summarized error fields",
+  ]);
+});
+
 test("workflow widget uses persisted task state when plan file is unavailable", () => {
   const state = {
     ...createInitialWorkflowState(),

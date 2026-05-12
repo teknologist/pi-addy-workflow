@@ -158,7 +158,16 @@ test("ambiguous spec and plan selection uses structured questions", async () => 
   assert.match(buildPrompt, /separate index file in the same directory/i);
   assert.match(buildPrompt, /next numbered slice/i);
   assert.match(buildPrompt, /exactly one matching next slice exists/i);
+  assert.match(buildPrompt, /workflow state's active plan is synchronized/i);
   assert.match(finishPrompt, /ask_user_question.*bounded options/i);
+});
+
+test("verify and review prompts avoid completed stale active plans", async () => {
+  const verifyPrompt = await readFile(join("prompts", "addy-verify.md"), "utf8");
+  const reviewPrompt = await readFile(join("prompts", "addy-review.md"), "utf8");
+
+  assert.match(verifyPrompt, /bare `\/addy-verify` must not keep using a completed stale slice/i);
+  assert.match(reviewPrompt, /bare `\/addy-review` must not keep using a completed stale slice/i);
 });
 
 test("review may update plan checkboxes without editing source files", async () => {

@@ -20,6 +20,7 @@ Plan selection rules:
 5. If the active/supplied slice plan is fully implemented, move to the next slice plan automatically when it is unambiguous:
    - Prefer a forward-reference link within the active plan, or a separate index file in the same directory, that names the next slice plan path.
    - Otherwise, if the active filename has an ordered slice number such as `slice-03`, `slice-3`, `03-...`, or `3-...`, look in the same directory for the next numbered slice (`04`/`4`). Use it when exactly one matching next slice exists.
+   - When you move to the next slice, immediately continue the Addy Build workflow as if invoked with `/addy-build <next-slice-plan-path>` so the workflow state's active plan is synchronized. Do not keep working under the completed previous slice's footer state.
 6. Only call `ask_user_question` with bounded candidate plan paths when neither an active/supplied plan exists, or when the active/supplied slice is fully implemented and the next slice cannot be inferred uniquely from an index or next numbered slice filename.
 
 When asking for a plan, include the active plan as the recommended option unless you have already confirmed it is fully implemented. Do not skip an unfinished active plan in favor of a later slice. In fresh sessions, the persisted active plan from workflow state or the Addy Workflow footer is authoritative; do not rediscover plans or ask for a plan unless that active plan is absent or finished.

@@ -13,6 +13,8 @@ Argument: `/addy-verify [plan-path]`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise verify the current implementation or bug context.
 
+If no path is supplied and the active plan is already fully complete while the current turn, recent context, or same-directory slice index clearly identifies the next unfinished slice, verify against that next slice path and make it the active plan. A bare `/addy-verify` must not keep using a completed stale slice when the work has moved to the next slice.
+
 When an active/supplied plan exists, read it before verifying to identify the current implemented task, but do not update the plan yet. Status checkbox updates happen only after verification finishes successfully. Mark `[x] Verified` only for tasks whose verification was actually run and passed.
 
 This checkbox synchronization is mandatory after every `/addy-verify` run. Before reporting completion, re-open the active/supplied plan and update each affected slice task so:

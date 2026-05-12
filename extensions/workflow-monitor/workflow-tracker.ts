@@ -1,6 +1,6 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { WORKFLOW_PHASES, type WorkflowPhase, type WorkflowState, createInitialWorkflowState } from "./workflow-transitions.ts";
 
 export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
@@ -108,6 +108,54 @@ function readPlanMarkdown(planPath: string, baseCwd?: string): string | undefine
   }
 }
 
+function planPathForDisplay(resolvedPlanPath: string, previousPlanPath: string, baseCwd?: string): string {
+  if (isAbsolute(previousPlanPath.replace(/^@/, ""))) return resolvedPlanPath;
+
+  const cwd = baseCwd ?? process.cwd();
+  const relativePath = relative(cwd, resolvedPlanPath).replace(/\\/g, "/");
+  return previousPlanPath.startsWith("@") ? `@${relativePath}` : relativePath;
+}
+
+function numberedSliceParts(planPath: string): { prefix: string; number: number; width: number } | undefined {
+  const name = basename(planPath);
+  const match = name.match(/^(.*?slice[-_]?)(\d+)(.*\.md)$/i) ?? name.match(/^()(\d+)([-_].*\.md)$/i);
+  if (!match) return undefined;
+
+  return {
+    prefix: match[1],
+    number: Number.parseInt(match[2], 10),
+    width: match[2].length,
+  };
+}
+
+function findNextNumberedPlanPath(planPath: string, baseCwd?: string): string | undefined {
+  const resolved = resolvePlanPath(planPath, baseCwd);
+  const current = numberedSliceParts(resolved);
+  if (!current) return undefined;
+
+  const nextNumber = current.number + 1;
+  const padded = String(nextNumber).padStart(current.width, "0");
+
+  let candidates: string[];
+  try {
+    candidates = readdirSync(dirname(resolved))
+      .filter((entry) => entry.endsWith(".md"))
+      .map((entry) => resolve(dirname(resolved), entry));
+  } catch {
+    return undefined;
+  }
+
+  const matches = candidates.filter((candidate) => {
+    const parts = numberedSliceParts(candidate);
+    if (!parts || parts.number !== nextNumber) return false;
+    if (parts.prefix.toLowerCase() !== current.prefix.toLowerCase()) return false;
+    const name = basename(candidate).toLowerCase();
+    return name.includes(`slice-${padded}`) || name.includes(`slice_${padded}`) || name.includes(`slice-${nextNumber}`) || name.includes(`slice_${nextNumber}`);
+  });
+
+  return matches.length === 1 ? planPathForDisplay(matches[0], planPath, baseCwd) : undefined;
+}
+
 export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   const headingTasks: PlanTask[] = [];
   const checkboxTasks: PlanTask[] = [];
@@ -185,6 +233,28 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
 
   const currentIndex = tasks.findIndex((task) => !task.complete);
   if (currentIndex === -1) {
+    const nextPlan = findNextNumberedPlanPath(state.activePlan, baseCwd);
+    if (nextPlan) {
+      const nextMarkdown = readPlanMarkdown(nextPlan, baseCwd);
+      const nextTasks = nextMarkdown ? planTasksFromMarkdown(nextMarkdown) : [];
+      const nextCurrentIndex = nextTasks.findIndex((task) => !task.complete);
+
+      if (nextCurrentIndex !== -1) {
+        const current = nextTasks[nextCurrentIndex];
+        const next = nextTasks.slice(nextCurrentIndex + 1).find((task) => !task.complete);
+        const currentTask = current.title;
+        const nextTask = next?.title ?? "none";
+        return {
+          ...state,
+          activePlan: nextPlan,
+          currentTask,
+          nextTask,
+          currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
+          nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
+        };
+      }
+    }
+
     const currentTask = "all tasks complete";
     const nextTask = "none";
     return {

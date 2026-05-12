@@ -185,6 +185,38 @@ test("workflow state stores current and next task from active plan", () => {
   assert.equal(ctx.state.nextTask, "Next");
 });
 
+test("bare verify advances stale completed active plan to next unfinished slice", () => {
+  const cwd = join(stateDir, "stale-active-plan-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md"), [
+    "## Task 1: Done",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md"), [
+    "## Task 1: Reviewed already",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "",
+    "## Task 2: Verify Slice 06 Task 2",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const ctx: any = { cwd, id: "stale-active-plan-session", ui: { setWidget() {} } };
+  handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-build @docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md" });
+  const verify = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-verify" });
+
+  assert.equal(verify.current, "verify");
+  assert.equal(verify.activePlan, "@docs/plans/2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md");
+  assert.equal(verify.currentTask, "Verify Slice 06 Task 2");
+  assert.equal(verify.nextTask, "none");
+});
+
 test("late task summaries do not overwrite newer workflow state", async () => {
   const cwd = join(stateDir, "task-summary-race-project");
   const firstPlan = join(cwd, "docs", "plans", "first.md");
