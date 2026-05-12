@@ -40,6 +40,10 @@ function isPhaseStatus(value: unknown): value is PhaseStatus {
   return value === "pending" || value === "active" || value === "complete";
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (typeof value !== "object" || value === null || !("phases" in value) || !("warnings" in value)) return undefined;
 
@@ -52,6 +56,12 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
   if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
   if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
+  if (candidate.currentTaskIndex !== undefined && !isPositiveSafeInteger(candidate.currentTaskIndex)) return undefined;
+  if (candidate.taskCount !== undefined && !isPositiveSafeInteger(candidate.taskCount)) return undefined;
+  if (candidate.currentTaskIndex !== undefined && candidate.taskCount !== undefined && candidate.currentTaskIndex > candidate.taskCount) return undefined;
+  if (candidate.currentSliceIndex !== undefined && !isPositiveSafeInteger(candidate.currentSliceIndex)) return undefined;
+  if (candidate.sliceCount !== undefined && !isPositiveSafeInteger(candidate.sliceCount)) return undefined;
+  if (candidate.currentSliceIndex !== undefined && candidate.sliceCount !== undefined && candidate.currentSliceIndex > candidate.sliceCount) return undefined;
   if (candidate.currentTaskSummary !== undefined && typeof candidate.currentTaskSummary !== "string") return undefined;
   if (candidate.nextTaskSummary !== undefined && typeof candidate.nextTaskSummary !== "string") return undefined;
   if (typeof candidate.phases !== "object" || candidate.phases === null) return undefined;

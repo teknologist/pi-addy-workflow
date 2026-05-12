@@ -12,6 +12,10 @@ export type WorkflowState = {
   activePlan?: string;
   currentTask?: string;
   nextTask?: string;
+  currentTaskIndex?: number;
+  taskCount?: number;
+  currentSliceIndex?: number;
+  sliceCount?: number;
   currentTaskSummary?: string;
   nextTaskSummary?: string;
   lastTrigger?: string;

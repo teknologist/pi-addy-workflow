@@ -16,6 +16,10 @@ function normalizeWorkflowState(state: WorkflowState): WorkflowState {
     ? {
       currentTask: state.currentTask,
       nextTask: state.nextTask,
+      currentTaskIndex: state.currentTaskIndex,
+      taskCount: state.taskCount,
+      currentSliceIndex: state.currentSliceIndex,
+      sliceCount: state.sliceCount,
       currentTaskSummary: state.currentTaskSummary,
       nextTaskSummary: state.nextTaskSummary,
     }
@@ -156,6 +160,40 @@ function findNextNumberedPlanPath(planPath: string, baseCwd?: string): string | 
   return matches.length === 1 ? planPathForDisplay(matches[0], planPath, baseCwd) : undefined;
 }
 
+function sliceProgressForPlanPath(planPath: string, baseCwd?: string): { currentSliceIndex: number; sliceCount: number } | undefined {
+  const resolved = resolvePlanPath(planPath, baseCwd);
+  const current = numberedSliceParts(resolved);
+  if (!current || current.number <= 0) return undefined;
+
+  let candidates: string[];
+  try {
+    candidates = readdirSync(dirname(resolved)).filter((entry) => entry.endsWith(".md"));
+  } catch {
+    return undefined;
+  }
+
+  const sliceNumbers = candidates
+    .map((candidate) => numberedSliceParts(candidate))
+    .filter((parts): parts is NonNullable<ReturnType<typeof numberedSliceParts>> => !!parts && parts.number > 0 && parts.prefix.toLowerCase() === current.prefix.toLowerCase())
+    .map((parts) => parts.number);
+  const sliceCount = Math.max(...sliceNumbers, 0);
+
+  return sliceCount >= current.number ? { currentSliceIndex: current.number, sliceCount } : undefined;
+}
+
+function isValidProgress(index: number | undefined, count: number | undefined): index is number {
+  return Number.isSafeInteger(index) && Number.isSafeInteger(count) && !!index && !!count && index > 0 && count > 0 && index <= count;
+}
+
+function progressSuffix(label: string, index: number | undefined, count: number | undefined, styleLabel: (text: string) => string): string {
+  return isValidProgress(index, count) ? ` | ${styleLabel(label)}${index}/${count}` : "";
+}
+
+function sliceProgressSuffix(planPath: string | undefined, baseCwd: string | undefined, styleLabel: (text: string) => string): string {
+  const progress = planPath ? sliceProgressForPlanPath(planPath, baseCwd) : undefined;
+  return progressSuffix("Slice ", progress?.currentSliceIndex, progress?.sliceCount, styleLabel);
+}
+
 export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   const headingTasks: PlanTask[] = [];
   const checkboxTasks: PlanTask[] = [];
@@ -213,23 +251,38 @@ export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: s
   if (!markdown) return undefined;
 
   const tasks = planTasksFromMarkdown(markdown);
+  const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
+  const sliceProgress = sliceProgressSuffix(planPath, baseCwd, styleLabel);
   const currentIndex = tasks.findIndex((task) => !task.complete);
-  if (currentIndex === -1) return tasks.length > 0 ? "Current task: all tasks complete | Next task: none" : undefined;
+  if (currentIndex === -1) return tasks.length > 0 ? `${styleLabel("Current task: ")}all tasks complete | ${styleLabel("Next task: ")}none${sliceProgress}${progressSuffix("Task ", tasks.length, tasks.length, styleLabel)}` : undefined;
 
   const current = tasks[currentIndex];
   const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
-  const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
-  return `${styleLabel("Current task: ")}${current.title} | ${styleLabel("Next task: ")}${next?.title ?? "none"}`;
+  return `${styleLabel("Current task: ")}${current.title} | ${styleLabel("Next task: ")}${next?.title ?? "none"}${sliceProgress}${progressSuffix("Task ", currentIndex + 1, tasks.length, styleLabel)}`;
 }
 
 export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: string): WorkflowState {
   if (!state.activePlan || !state.current || phaseIndex(state.current) <= phaseIndex("plan")) return state;
 
+  const sliceProgress = sliceProgressForPlanPath(state.activePlan, baseCwd);
+
   const markdown = readPlanMarkdown(state.activePlan, baseCwd);
   if (!markdown) return state;
 
   const tasks = planTasksFromMarkdown(markdown);
-  if (tasks.length === 0) return { ...state, currentTask: undefined, nextTask: undefined, currentTaskSummary: undefined, nextTaskSummary: undefined };
+  if (tasks.length === 0) {
+    return {
+      ...state,
+      currentTask: undefined,
+      nextTask: undefined,
+      currentTaskIndex: undefined,
+      taskCount: undefined,
+      currentSliceIndex: sliceProgress?.currentSliceIndex,
+      sliceCount: sliceProgress?.sliceCount,
+      currentTaskSummary: undefined,
+      nextTaskSummary: undefined,
+    };
+  }
 
   const currentIndex = tasks.findIndex((task) => !task.complete);
   if (currentIndex === -1) {
@@ -238,6 +291,7 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
       const nextMarkdown = readPlanMarkdown(nextPlan, baseCwd);
       const nextTasks = nextMarkdown ? planTasksFromMarkdown(nextMarkdown) : [];
       const nextCurrentIndex = nextTasks.findIndex((task) => !task.complete);
+      const nextSliceProgress = sliceProgressForPlanPath(nextPlan, baseCwd);
 
       if (nextCurrentIndex !== -1) {
         const current = nextTasks[nextCurrentIndex];
@@ -249,6 +303,10 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
           activePlan: nextPlan,
           currentTask,
           nextTask,
+          currentTaskIndex: nextCurrentIndex + 1,
+          taskCount: nextTasks.length,
+          currentSliceIndex: nextSliceProgress?.currentSliceIndex,
+          sliceCount: nextSliceProgress?.sliceCount,
           currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
           nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
         };
@@ -261,6 +319,10 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
       ...state,
       currentTask,
       nextTask,
+      currentTaskIndex: tasks.length,
+      taskCount: tasks.length,
+      currentSliceIndex: sliceProgress?.currentSliceIndex,
+      sliceCount: sliceProgress?.sliceCount,
       currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
       nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
     };
@@ -274,6 +336,10 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
     ...state,
     currentTask,
     nextTask,
+    currentTaskIndex: currentIndex + 1,
+    taskCount: tasks.length,
+    currentSliceIndex: sliceProgress?.currentSliceIndex,
+    sliceCount: sliceProgress?.sliceCount,
     currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
     nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
   };
@@ -298,8 +364,10 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
       const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
       const currentTask = state.currentTaskSummary ?? state.currentTask;
       const nextTask = state.nextTaskSummary ?? state.nextTask;
+      const taskProgress = progressSuffix("Task ", state.currentTaskIndex, state.taskCount, styleLabel);
+      const sliceProgress = progressSuffix("Slice ", state.currentSliceIndex, state.sliceCount, styleLabel);
       const taskLine = currentTask
-        ? `${styleLabel("Current task: ")}${currentTask} | ${styleLabel("Next task: ")}${nextTask ?? "none"}`
+        ? `${styleLabel("Current task: ")}${currentTask} | ${styleLabel("Next task: ")}${nextTask ?? "none"}${sliceProgress}${taskProgress}`
         : workflowTaskFooterLine(state.activePlan, baseCwd, theme);
       const lines = taskLine ? [line, taskLine] : [line];
       return width ? lines.map((value) => truncateToWidth(value, Math.max(1, width), "", true)) : lines;

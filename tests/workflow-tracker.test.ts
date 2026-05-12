@@ -264,7 +264,7 @@ test("workflow widget renders current and next task from active plan", () => {
   assert.equal(state.nextTask, "Persist invoice payloads");
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
     "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
-    "Current task: Parse invoice rows | Next task: Persist invoice payloads",
+    "Current task: Parse invoice rows | Next task: Persist invoice payloads | Task 2/3",
   ]);
 });
 
@@ -289,7 +289,7 @@ test("workflow widget resolves Pi @-referenced active plan paths", () => {
   assert.equal(state.currentTask, "Parse invoice rows");
   assert.deepEqual(renderWorkflowWidget({ ...state, currentTask: undefined, nextTask: undefined }, cwd)().render(), [
     "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
-    "Current task: Parse invoice rows | Next task: none",
+    "Current task: Parse invoice rows | Next task: none | Task 1/1",
   ]);
 });
 
@@ -297,6 +297,14 @@ test("completed active slice advances footer tasks to next numbered slice", () =
   const cwd = join(taskFooterDir, "next-slice-project");
   const plansDir = join(cwd, "docs", "plans");
   mkdirSync(plansDir, { recursive: true });
+  for (const sliceNumber of [1, 2, 3, 4, 7, 8]) {
+    writeFileSync(join(plansDir, `2026-05-08-invoice-csv-etl-slice-${String(sliceNumber).padStart(2, "0")}-placeholder.md`), [
+      "## Task 1: Placeholder complete task",
+      "- [x] Implemented",
+      "- [x] Verified",
+      "- [x] Reviewed",
+    ].join("\n"));
+  }
   writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md"), [
     "## Task 1: Finished slice task",
     "- [x] Implemented",
@@ -332,7 +340,33 @@ test("completed active slice advances footer tasks to next numbered slice", () =
   assert.equal(state.nextTask, "Report row has summarized error fields");
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     "Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md",
-    "Current task: TRESO2 4xx body read fully | Next task: Report row has summarized error fields",
+    "Current task: TRESO2 4xx body read fully | Next task: Report row has summarized error fields | Slice 6/8 | Task 2/3",
+  ]);
+});
+
+test("workflow widget renders task and slice progress for complete direct plan footer", () => {
+  const cwd = join(taskFooterDir, "complete-slice-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  for (const sliceNumber of [1, 2, 3]) {
+    writeFileSync(join(plansDir, `2026-05-08-invoice-csv-etl-slice-${String(sliceNumber).padStart(2, "0")}-test.md`), [
+      "## Task 1: Complete task",
+      "- [x] Implemented",
+      "- [x] Verified",
+      "- [x] Reviewed",
+    ].join("\n"));
+  }
+
+  const state = {
+    ...createInitialWorkflowState(),
+    current: "build" as const,
+    phases: { ...createInitialWorkflowState().phases, define: "complete" as const, plan: "complete" as const, build: "active" as const },
+    activePlan: "@docs/plans/2026-05-08-invoice-csv-etl-slice-02-test.md",
+  };
+
+  assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-08-invoice-csv-etl-slice-02-test.md",
+    "Current task: all tasks complete | Next task: none | Slice 2/3 | Task 1/1",
   ]);
 });
 
@@ -360,13 +394,15 @@ test("workflow widget prefers summarized task labels", () => {
     activePlan: "docs/plans/task-footer.md",
     currentTask: "Runtime wires per-invoice state transitions parsed converted submitted",
     nextTask: "Submit endpoint chooses draft live based on CSV isDraft",
+    currentTaskIndex: 6,
+    taskCount: 18,
     currentTaskSummary: "Wire state transitions",
     nextTaskSummary: "Route draft/live submits",
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
     "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
-    "Current task: Wire state transitions | Next task: Route draft/live submits",
+    "Current task: Wire state transitions | Next task: Route draft/live submits | Task 6/18",
   ]);
 });
 
@@ -464,12 +500,14 @@ test("workflow widget colors task labels like workflow label", () => {
     activePlan: "docs/plans/task-footer.md",
     currentTask: "Parse invoice rows",
     nextTask: "Persist invoice payloads",
+    currentTaskIndex: 2,
+    taskCount: 3,
   };
   const theme = { fg: (name: string, text: string) => name === "accent" ? `<accent>${text}</accent>` : text };
 
   assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [
     "<accent>Addy Workflow: </accent>✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
-    "<accent>Current task: </accent>Parse invoice rows | <accent>Next task: </accent>Persist invoice payloads",
+    "<accent>Current task: </accent>Parse invoice rows | <accent>Next task: </accent>Persist invoice payloads | <accent>Task </accent>2/3",
   ]);
 });
 
