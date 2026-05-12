@@ -92,6 +92,30 @@ function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPh
   return undefined;
 }
 
+function unquoteArgument(value: string): string {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  return trimmed.length >= 2 && (quote === '"' || quote === "'") && trimmed.endsWith(quote) ? trimmed.slice(1, -1).trim() : trimmed;
+}
+
+function isLikelySpecArgument(value: string): boolean {
+  const trimmed = value.trim();
+  const quote = trimmed[0];
+  const isQuoted = (quote === '"' || quote === "'") && trimmed.endsWith(quote);
+  const unquoted = unquoteArgument(value);
+  if (!unquoted) return false;
+  if (/\.md$/i.test(unquoted)) return true;
+  if (isQuoted && /\s/.test(unquoted)) return false;
+  if (unquoted.includes("/") || unquoted.includes("\\") || unquoted.startsWith("@")) return true;
+  return !/\s/.test(unquoted);
+}
+
+function commandNameFromText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const [command] = text.trim().split(/\s+/, 1);
+  return command?.startsWith("/addy-") ? command : undefined;
+}
+
 function artifactFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const parts = text.trim().split(/\s+/);
@@ -106,6 +130,7 @@ function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target:
 
   const normalized = artifact.replace(/\\/g, "/");
   const targetFromArtifact = fileWriteTargetPhase(normalized, state.current);
+  const commandName = commandNameFromText(event.text);
 
   if (event.source === "file-write") {
     if (targetFromArtifact === "define") return { ...state, activeSpec: artifact };
@@ -114,7 +139,8 @@ function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target:
   }
 
   if (targetFromArtifact === "plan") return { ...state, activePlan: artifact };
-  if (targetFromArtifact === "define" || target === "define" || target === "plan") return { ...state, activeSpec: artifact };
+  if (targetFromArtifact === "define" || target === "plan") return { ...state, activeSpec: artifact };
+  if (target === "define" && (commandName !== "/addy-define" || isLikelySpecArgument(artifact))) return { ...state, activeSpec: unquoteArgument(artifact) };
   if (phaseIndex(target) > phaseIndex("plan")) return { ...state, activePlan: artifact };
 
   return state;

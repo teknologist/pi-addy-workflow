@@ -209,6 +209,28 @@ test("tracks active spec and plan artifacts", () => {
   assert.equal(override.activePlan, "docs/plans/override-plan.md");
 });
 
+test("define prompt distinguishes spec arguments from build explanations", () => {
+  const specPath = "docs/specs/2026-05-12-204500-autonomous-slice-plan.md";
+
+  const fromPath = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: `/addy-define ${specPath}` });
+  assert.equal(fromPath.current, "define");
+  assert.equal(fromPath.activeSpec, specPath);
+
+  const explanation = transitionWorkflow(createInitialWorkflowState(), {
+    source: "user-input",
+    text: '/addy-define "The main goal here is to automate grinding through a slice plan."',
+  });
+  assert.equal(explanation.current, "define");
+  assert.equal(explanation.activeSpec, undefined);
+
+  const explanationWithPathWords = transitionWorkflow(createInitialWorkflowState(), {
+    source: "user-input",
+    text: '/addy-define "I want to build a docs/specs/ tool"',
+  });
+  assert.equal(explanationWithPathWords.current, "define");
+  assert.equal(explanationWithPathWords.activeSpec, undefined);
+});
+
 test("only command-leading arguments update active artifacts", () => {
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "please run /addy-plan for the current spec" });
 

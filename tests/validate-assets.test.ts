@@ -43,6 +43,16 @@ test("all Addy prompts exist and workflow commands are not prompt files", async 
   assert.equal(promptFiles.includes("addy-workflow-next.md"), false);
 });
 
+
+test("define prompt accepts either a spec path or build idea", async () => {
+  const content = await readFile(join("prompts", "addy-define.md"), "utf8");
+
+  assert.match(content, /`\/addy-define \[spec-path\]`/);
+  assert.match(content, /`\/addy-define "what you want to build"`/);
+  assert.match(content, /quoted build explanation/i);
+  assert.match(content, /YYYY-MM-DD-HHMMSS-<meaningful-name>\.md/);
+});
+
 test("finish prompt advances tasks and slices with commit prompts", async () => {
   const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
 

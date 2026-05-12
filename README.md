@@ -18,7 +18,7 @@ Only `BUILD → VERIFY → REVIEW` is enforced. `DEFINE`, `PLAN`, `SIMPLIFY`, `F
 
 Prompts:
 
-- `/addy-define` — clarify requirements and write a spec
+- `/addy-define [spec-path|"build idea"]` — clarify requirements and write a timestamped spec
 - `/addy-plan` — break spec into small verifiable tasks
 - `/addy-build` — implement incrementally with tests
 - `/addy-code-simplify` — simplify code without changing behavior
