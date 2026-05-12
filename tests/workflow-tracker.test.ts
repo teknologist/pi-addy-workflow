@@ -77,7 +77,7 @@ test("parsed legacy after-plan state checks spec and plan before rendering", () 
 
   assert.equal(state.phases.define, "complete");
   assert.equal(state.phases.plan, "complete");
-  assert.deepEqual(renderWorkflowWidget(state)().render(), ["Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish"]);
+  assert.deepEqual(renderWorkflowWidget(state)().render(), ["Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }"]);
 });
 
 test("returning to optional simplify preserves completed build", () => {
@@ -232,10 +232,10 @@ test("workflow widget renders spec or plan name footer", () => {
   const specPath = "docs/specs/2026-05-11-better-workflow.md";
   const planPath = "docs/plans/2026-05-11-better-workflow.md";
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: `/addy-plan ${specPath}` });
-  assert.deepEqual(renderWorkflowWidget(state)().render(), [`Addy Workflow: define → [plan] → build → simplify → verify → review → finish | 2026-05-11-better-workflow.md`]);
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [`Addy Workflow: define → [plan] => { build → simplify → verify → review → finish } | 2026-05-11-better-workflow.md`]);
 
   const build = transitionWorkflow({ ...state, activePlan: planPath }, { source: "user-input", text: "/addy-build" });
-  assert.deepEqual(renderWorkflowWidget(build)().render(), [`Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | 2026-05-11-better-workflow.md`]);
+  assert.deepEqual(renderWorkflowWidget(build)().render(), [`Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-11-better-workflow.md`]);
 });
 
 test("workflow widget renders current and next task from active plan", () => {
@@ -263,7 +263,7 @@ test("workflow widget renders current and next task from active plan", () => {
   assert.equal(state.currentTask, "Parse invoice rows");
   assert.equal(state.nextTask, "Persist invoice payloads");
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
     "Current task: Parse invoice rows | Next task: Persist invoice payloads",
   ]);
 });
@@ -288,7 +288,7 @@ test("workflow widget resolves Pi @-referenced active plan paths", () => {
 
   assert.equal(state.currentTask, "Parse invoice rows");
   assert.deepEqual(renderWorkflowWidget({ ...state, currentTask: undefined, nextTask: undefined }, cwd)().render(), [
-    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
     "Current task: Parse invoice rows | Next task: none",
   ]);
 });
@@ -304,7 +304,7 @@ test("workflow widget uses persisted task state when plan file is unavailable", 
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | missing.md",
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | missing.md",
     "Current task: Parse invoice rows | Next task: Persist invoice payloads",
   ]);
 });
@@ -322,7 +322,7 @@ test("workflow widget prefers summarized task labels", () => {
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    "Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
     "Current task: Wire state transitions | Next task: Route draft/live submits",
   ]);
 });
@@ -410,7 +410,7 @@ test("workflow widget colors footer artifact name light blue", () => {
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-plan docs/specs/2026-05-11-better-workflow.md" });
   const theme = { fg: (name: string, text: string) => name === "mdLinkUrl" ? `<light-blue>${text}</light-blue>` : text };
 
-  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [`Addy Workflow: define → [plan] → build → simplify → verify → review → finish | <light-blue>2026-05-11-better-workflow.md</light-blue>`]);
+  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [`Addy Workflow: define → [plan] => { build → simplify → verify → review → finish } | <light-blue>2026-05-11-better-workflow.md</light-blue>`]);
 });
 
 test("workflow widget colors task labels like workflow label", () => {
@@ -425,7 +425,7 @@ test("workflow widget colors task labels like workflow label", () => {
   const theme = { fg: (name: string, text: string) => name === "accent" ? `<accent>${text}</accent>` : text };
 
   assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [
-    "<accent>Addy Workflow: </accent>✓define → ✓plan → [build] → simplify → verify → review → finish | task-footer.md",
+    "<accent>Addy Workflow: </accent>✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
     "<accent>Current task: </accent>Parse invoice rows | <accent>Next task: </accent>Persist invoice payloads",
   ]);
 });
@@ -434,7 +434,7 @@ test("workflow widget dims simplify but not finish", () => {
   const state = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-build" });
   const theme = { fg: (name: string, text: string) => name === "dim" ? `<dim>${text}</dim>` : text };
 
-  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), ["Addy Workflow: ✓define → ✓plan → [build] → <dim>simplify</dim> → verify → review → finish"]);
+  assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), ["Addy Workflow: ✓define → ✓plan => { [build] → <dim>simplify</dim> → verify → review → finish }"]);
 });
 
 test("workflow widget truncates to render width", () => {
@@ -461,7 +461,7 @@ test("workflow handler sets widget, reset clears widget, next opens prompt", () 
   resetWorkflow(ctx);
 
   assert.equal(widgets.at(0)?.[0], "pi-addy-workflow");
-  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan → build → simplify → verify → [review] → finish | diff.md"]);
+  assert.deepEqual((widgets.at(0)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan => { build → simplify → verify → [review] → finish } | diff.md"]);
   assert.deepEqual(widgets.at(1), ["prefill", "/addy-review diff.md"]);
   assert.deepEqual(widgets.at(2), ["pi-addy-workflow", undefined]);
 });

@@ -53,7 +53,7 @@ test("session start renders workflow widget before first workflow instruction", 
   await events.get("session_start")?.({}, { id: "startup-widget-test", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } });
 
   assert.equal(widgets.at(-1)?.[0], "pi-addy-workflow");
-  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: define → plan → build → simplify → verify → review → finish"]);
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: define → plan => { build → simplify → verify → review → finish }"]);
 });
 
 test("session start restores persisted workflow widget state", async () => {
@@ -71,7 +71,7 @@ test("session start restores persisted workflow widget state", async () => {
 
   assert.equal(nextCtx.state.current, "build");
   assert.equal(nextCtx.state.activePlan, planPath);
-  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan → [build] → simplify → verify → review → finish | startup-restore.md"]);
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | startup-restore.md"]);
 });
 
 test("reset command clears widget, persists reset state, and continues", async () => {
@@ -104,7 +104,7 @@ test("next command parses args, transitions, persists, prefills, and continues",
   assert.equal(ctx.state.activePlan, "diff.md");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
   assert.equal(effects.at(0)?.[0], "pi-addy-workflow");
-  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan → build → simplify → verify → [review] → finish | diff.md"]);
+  assert.deepEqual((effects.at(0)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan => { build → simplify → verify → [review] → finish } | diff.md"]);
   assert.deepEqual(effects.at(1), ["prefill", "/addy-review diff.md"]);
 });
 
@@ -290,5 +290,5 @@ test("write tool calls drive file-write transitions", async () => {
   assert.equal(ctx.state.current, "verify");
   assert.equal(entries.at(-1)?.[0], "pi-addy-workflow-state");
   assert.equal(effects.at(-1)?.[0], "pi-addy-workflow");
-  assert.deepEqual((effects.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan → build → simplify → [verify] → review → finish"]);
+  assert.deepEqual((effects.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan => { build → simplify → [verify] → review → finish }"]);
 });

@@ -56,7 +56,9 @@ export function parseWorkflowState(value: unknown): WorkflowState {
 }
 
 export function renderWorkflowStrip(state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }): string {
-  return WORKFLOW_PHASES.map((phase) => renderPhase(phase, state, theme)).join(" → ");
+  const setupPhases = WORKFLOW_PHASES.slice(0, phaseIndex("build")).map((phase) => renderPhase(phase, state, theme));
+  const loopPhases = WORKFLOW_PHASES.slice(phaseIndex("build")).map((phase) => renderPhase(phase, state, theme));
+  return `${setupPhases.join(" → ")} => { ${loopPhases.join(" → ")} }`;
 }
 
 export function workflowArtifactForFooter(state: WorkflowState): string | undefined {
