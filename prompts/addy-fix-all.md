@@ -9,11 +9,13 @@ Pi adaptation of Addy Osmani's fix-after-review loop.
 
 Argument: `/addy-fix-all [plan-path]`.
 
-Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise fix the current surfaced review scope.
+Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available.
 
-Fix all surfaced issues and implement all applicable surfaced suggestions from the current conversation, latest `/addy-review` output, Crit comments, failing checks, or review notes. Treat Critical and Important findings as required fixes. Treat Suggestions as applicable unless they are unsafe, conflicting, out of scope, or would add speculative complexity.
+This command is a fix pass, not a review pass. Fix only the issues and suggestions explicitly surfaced in the immediately preceding `/addy-review` result. That review result may include Crit comments, failing checks, or review notes; treat those as fix targets only when they were included in the immediately preceding review result. Do not use older conversation context, unrelated comments, or newly discovered findings as fix targets.
 
-Do not invent issues. If no surfaced issues or suggestions are available, run the Addy Review workflow once for the current scope, report that no fixes were applied yet, and stop.
+Treat Critical and Important findings as required fixes. Treat Suggestions as applicable unless they are unsafe, conflicting, out of scope, or would add speculative complexity.
+
+Do not invent issues. Do not search for new review findings. If the immediately preceding assistant turn was not a `/addy-review` result with actionable issues or suggestions, stop and ask the user to run `/addy-review` first.
 
 For each surfaced item:
 
@@ -21,7 +23,7 @@ For each surfaced item:
 2. Make the smallest code, test, prompt, or documentation change that resolves the item.
 3. Preserve user intent and existing style; avoid unrelated refactors, formatting churn, dependency changes, or public API changes unless required by a surfaced issue.
 4. If suggestions conflict, pick the safer simpler option and explain the skipped alternative.
-5. If a suggestion is not implemented, record why it was skipped.
+5. If a previous-review suggestion is not implemented, record why it was skipped.
 
 After fixes:
 

@@ -175,10 +175,13 @@ test("review may update plan checkboxes without editing source files", async () 
 test("fix-all prompt fixes surfaced items and reruns review", async () => {
   const content = await readFile(join("prompts", "addy-fix-all.md"), "utf8");
 
-  assert.match(content, /fix all surfaced issues/i);
-  assert.match(content, /implement all applicable surfaced suggestions/i);
+  assert.match(content, /fix pass, not a review pass/i);
+  assert.match(content, /immediately preceding `\/addy-review` result/i);
+  assert.match(content, /Crit comments, failing checks, or review notes/);
+  assert.match(content, /Do not use older conversation context/);
   assert.match(content, /Do not invent issues/);
-  assert.match(content, /run the Addy Review workflow once/i);
+  assert.match(content, /Do not search for new review findings/);
+  assert.match(content, /ask the user to run `\/addy-review` first/);
   assert.match(content, /rerun the Addy Verify workflow/i);
   assert.match(content, /\/addy-verify <plan-path>/);
   assert.match(content, /invalidate prior `\[x\] Verified` and `\[x\] Reviewed` evidence/);
