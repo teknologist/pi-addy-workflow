@@ -45,6 +45,7 @@ export function buildAddyBootstrap(tools?: BootstrapToolAvailability | string[])
     "- Simplify optionally: `/addy-code-simplify` preserves behavior while reducing complexity.",
     "- Verify behavior: `/addy-verify` follows red-green-refactor or Prove-It bug flow.",
     "- Review before finish: `/addy-review` checks correctness, quality, security, performance.",
+    "- Fix review findings: `/addy-fix-all` resolves surfaced issues and suggestions, then reruns review.",
     "- Finish the slice: `/addy-finish` can commit current work, continue the next task or slice, or ship when complete.",
     "- Keep plan checkboxes synced: implemented, verified, and reviewed must match real evidence.",
     "",

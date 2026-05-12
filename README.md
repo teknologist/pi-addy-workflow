@@ -11,10 +11,10 @@ pi install git:github.com/teknologist/pi-addy-workflow
 ## Workflow
 
 ```text
-[DEFINE] → [PLAN] → BUILD → [SIMPLIFY] → VERIFY → REVIEW → [FINISH]
+[DEFINE] → [PLAN] → BUILD → [SIMPLIFY] → VERIFY → REVIEW → [FIX → VERIFY → REVIEW] → [FINISH]
 ```
 
-Only `BUILD → VERIFY → REVIEW` is enforced. `DEFINE`, `PLAN`, `SIMPLIFY`, and `FINISH` are optional aids; users can run many build/verify/review slices before finishing.
+Only `BUILD → VERIFY → REVIEW` is enforced. `DEFINE`, `PLAN`, `SIMPLIFY`, `FIX`, and `FINISH` are optional aids; users can run many build/verify/review slices or fix/verify/review loops before finishing.
 
 Prompts:
 
@@ -24,6 +24,7 @@ Prompts:
 - `/addy-code-simplify` — simplify code without changing behavior
 - `/addy-verify` — run TDD or Prove-It bug workflow
 - `/addy-review` — review correctness, quality, security, performance
+- `/addy-fix-all` — fix surfaced review issues and suggestions, then rerun review
 - `/addy-finish` — commit current work, continue the next task or slice, or ship when all slices are complete
 
 ## Runtime behavior
@@ -39,6 +40,7 @@ Prompts:
 
 - `/addy-workflow-reset` clears workflow state and widget.
 - `/addy-workflow-next <define|plan|build|simplify|verify|review|finish> [artifact]` opens the matching Addy prompt.
+- `/addy-fix-all` is an optional post-review loop prompt; invoke it directly rather than through `/addy-workflow-next`.
 
 ## Uninstall note
 

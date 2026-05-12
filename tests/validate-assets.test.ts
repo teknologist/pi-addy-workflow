@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-finish", "addy-ship"];
+const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-finish", "addy-ship"];
 const agents = [
   "addy-planner",
   "addy-implementer",
@@ -170,6 +170,22 @@ test("review may update plan checkboxes without editing source files", async () 
   assert.match(content, /Never silently skip verify between build and review/);
   assert.match(content, /do not edit source files unless the user asks/i);
   assert.match(content, /Updating the active\/supplied plan status checkboxes is required/);
+});
+
+test("fix-all prompt fixes surfaced items and reruns review", async () => {
+  const content = await readFile(join("prompts", "addy-fix-all.md"), "utf8");
+
+  assert.match(content, /fix all surfaced issues/i);
+  assert.match(content, /implement all applicable surfaced suggestions/i);
+  assert.match(content, /Do not invent issues/);
+  assert.match(content, /run the Addy Review workflow once/i);
+  assert.match(content, /rerun the Addy Verify workflow/i);
+  assert.match(content, /\/addy-verify <plan-path>/);
+  assert.match(content, /invalidate prior `\[x\] Verified` and `\[x\] Reviewed` evidence/);
+  assert.match(content, /Rerun the Addy Review workflow/i);
+  assert.match(content, /\/addy-review <plan-path>/);
+  assert.match(content, /Do not merely print `\/addy-verify` or `\/addy-review` and stop/);
+  assert.match(content, /Do not commit unless the user explicitly asks/);
 });
 
 test("required lifecycle skills exist", async () => {
