@@ -269,6 +269,7 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.warnings = warnings;
   next.activeSpec = state.activeSpec;
   next.activePlan = state.activePlan;
+  next.autoMode = state.autoMode;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
   next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus;

@@ -22,12 +22,14 @@ function createPiMock() {
   const events = new Map<string, Handler>();
   const commands = new Map<string, CommandConfig>();
   const entries: Array<[string, unknown]> = [];
+  const sentMessages: string[] = [];
   const pi = {
     on: (name: string, handler: Handler) => events.set(name, handler),
     registerCommand: (name: string, config: CommandConfig) => commands.set(name, config),
     appendEntry: (type: string, data: unknown) => entries.push([type, data]),
+    sendUserMessage: (message: string) => sentMessages.push(message),
   };
-  return { pi, events, commands, entries };
+  return { pi, events, commands, entries, sentMessages };
 }
 
 test("registers workflow commands and handlers", () => {
@@ -41,8 +43,123 @@ test("registers workflow commands and handlers", () => {
   assert.ok(events.has("tool_call"));
   assert.equal(events.has("file_write"), false);
   assert.ok(events.has("before_agent_start"));
+  assert.ok(events.has("agent_end"));
+  assert.ok(commands.has("addy-auto"));
   assert.ok(commands.has("addy-workflow-reset"));
   assert.ok(commands.has("addy-workflow-next"));
+});
+
+test("auto command dispatches the real next workflow command", async () => {
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+
+  const ctx: any = { cwd: join(stateDir, "auto-command-dispatch-project"), id: "auto-command-dispatch", ui: { setWidget() {} }, isIdle: () => true };
+  const result = await commands.get("addy-auto")?.handler("docs/plans/auto.md", ctx);
+
+  assert.deepEqual(result, { action: "continue" });
+  assert.equal(ctx.state.autoMode, true);
+  assert.equal(ctx.state.activePlan, "docs/plans/auto.md");
+  assert.deepEqual(sentMessages, ["/addy-build docs/plans/auto.md"]);
+});
+
+test("auto loop dispatches verify after the current task is implemented", async () => {
+  const cwd = join(stateDir, "auto-loop-dispatch-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-dispatch",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "build",
+      autoMode: true,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({}, ctx);
+
+  assert.deepEqual(sentMessages, [`/addy-verify ${planPath}`]);
+});
+
+test("real workflow commands preserve auto mode so the loop can continue", async () => {
+  const cwd = join(stateDir, "auto-loop-preserve-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = { cwd, id: "auto-loop-preserve", ui: { setWidget() {} }, isIdle: () => true };
+
+  await commands.get("addy-auto")?.handler(planPath, ctx);
+  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`]);
+
+  await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
+  assert.equal(ctx.state.autoMode, true);
+  assert.equal(ctx.state.current, "build");
+
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  await events.get("agent_end")?.({}, ctx);
+  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`, `/addy-verify ${planPath}`]);
+});
+
+test("auto loop pauses instead of repeating an incomplete current phase", async () => {
+  const cwd = join(stateDir, "auto-loop-pause-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-pause",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "build",
+      autoMode: true,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({}, ctx);
+
+  assert.deepEqual(sentMessages, []);
+  assert.match(notices.at(-1)?.[0] ?? "", /paused at \/addy-build/);
+  assert.equal(notices.at(-1)?.[1], "warning");
 });
 
 test("session start renders workflow widget before first workflow instruction", async () => {

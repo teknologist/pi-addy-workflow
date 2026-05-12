@@ -400,3 +400,21 @@ export function nextPromptForPhase(phase: WorkflowPhase, artifact?: string): str
 
   return artifact ? `${promptByPhase[phase]} ${artifact}` : promptByPhase[phase];
 }
+
+export function nextPromptForActivePlanLifecycle(state: WorkflowState, baseCwd?: string): string | undefined {
+  if (!state.activePlan) return undefined;
+
+  const markdown = readPlanMarkdown(state.activePlan, baseCwd);
+  if (!markdown) return nextPromptForPhase("build", state.activePlan);
+
+  const tasks = planTasksFromMarkdown(markdown);
+  const task = tasks.find((candidate) => !candidate.complete);
+  if (!task) return tasks.length > 0 ? nextPromptForPhase("finish", state.activePlan) : nextPromptForPhase("build", state.activePlan);
+
+  const missingStatuses = task.missingStatuses ?? ["Implemented"];
+  if (missingStatuses.includes("Implemented")) return nextPromptForPhase("build", state.activePlan);
+  if (missingStatuses.includes("Verified")) return nextPromptForPhase("verify", state.activePlan);
+  if (missingStatuses.includes("Reviewed")) return nextPromptForPhase("review", state.activePlan);
+
+  return nextPromptForPhase("build", state.activePlan);
+}
