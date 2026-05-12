@@ -127,7 +127,7 @@ test("real workflow commands preserve auto mode so the loop can continue", async
   assert.deepEqual(sentMessages, [`/addy-build ${planPath}`, `/addy-verify ${planPath}`]);
 });
 
-test("auto loop pauses instead of repeating an incomplete current phase", async () => {
+test("auto loop retries one incomplete same-phase step before pausing", async () => {
   const cwd = join(stateDir, "auto-loop-pause-project");
   const planPath = join("docs", "plans", "auto-loop.md");
   mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
@@ -157,9 +157,124 @@ test("auto loop pauses instead of repeating an incomplete current phase", async 
 
   await events.get("agent_end")?.({}, ctx);
 
-  assert.deepEqual(sentMessages, []);
+  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`]);
+
+  await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
+  await events.get("agent_end")?.({}, ctx);
+
+  assert.deepEqual(sentMessages, [`/addy-build ${planPath}`]);
   assert.match(notices.at(-1)?.[0] ?? "", /paused at \/addy-build/);
   assert.equal(notices.at(-1)?.[1], "warning");
+});
+
+test("auto loop same-phase retry works for verify and review too", async () => {
+  const cases: Array<{ phase: "verify" | "review"; statuses: string[]; command: string }> = [
+    { phase: "verify", statuses: ["- [x] Implemented", "- [ ] Verified", "- [ ] Reviewed"], command: "/addy-verify" },
+    { phase: "review", statuses: ["- [x] Implemented", "- [x] Verified", "- [ ] Reviewed"], command: "/addy-review" },
+  ];
+
+  for (const testCase of cases) {
+    const cwd = join(stateDir, `auto-loop-${testCase.phase}-retry-project`);
+    const planPath = join("docs", "plans", "auto-loop.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), ["## Task 1: Current", ...testCase.statuses].join("\n"));
+
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const notices: Array<[string, string | undefined]> = [];
+    const ctx: any = {
+      cwd,
+      id: `auto-loop-${testCase.phase}-retry`,
+      state: {
+        phases: {
+          define: "complete",
+          plan: "complete",
+          build: "complete",
+          simplify: "pending",
+          verify: testCase.phase === "verify" ? "active" : "complete",
+          review: testCase.phase === "review" ? "active" : "pending",
+          finish: "pending",
+        },
+        warnings: [],
+        current: testCase.phase,
+        autoMode: true,
+        activePlan: planPath,
+      },
+      ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({}, ctx);
+    assert.deepEqual(sentMessages, [`${testCase.command} ${planPath}`]);
+
+    await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
+    await events.get("agent_end")?.({}, ctx);
+    assert.deepEqual(sentMessages, [`${testCase.command} ${planPath}`]);
+    assert.match(notices.at(-1)?.[0] ?? "", new RegExp(`paused at ${testCase.command}`));
+    assert.equal(notices.at(-1)?.[1], "warning");
+  }
+});
+
+test("auto retry state restored from session entries pauses duplicate dispatch", async () => {
+  const cwd = join(stateDir, "auto-loop-restored-retry-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const retryPrompt = `/addy-build ${planPath}`;
+  const retryKey = [retryPrompt, planPath, 1, "Current", "none"].join("\u001f");
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const restoredState = {
+    phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+    warnings: [],
+    current: "build",
+    autoMode: true,
+    activePlan: planPath,
+    currentTask: "Current",
+    nextTask: "none",
+    currentTaskIndex: 1,
+    taskCount: 1,
+    autoLastPrompt: retryPrompt,
+    autoRetryKey: retryKey,
+    autoRetryCount: 1,
+  };
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-restored-retry",
+    sessionManager: { getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, restoredState]] },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({}, ctx);
+
+  assert.deepEqual(sentMessages, []);
+  assert.match(notices.at(-1)?.[0] ?? "", /paused at \/addy-build/);
+});
+
+test("malformed persisted auto retry state is ignored", () => {
+  const ctx: any = {
+    id: "malformed-auto-retry-state",
+    sessionManager: {
+      getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, {
+        phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+        warnings: [],
+        current: "build",
+        autoMode: true,
+        activePlan: "docs/plans/auto-loop.md",
+        autoRetryCount: "not-a-number",
+      }]],
+    },
+  };
+
+  assert.equal(getContextWorkflowState(ctx).autoMode, undefined);
 });
 
 test("session start renders workflow widget before first workflow instruction", async () => {

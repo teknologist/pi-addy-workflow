@@ -22,6 +22,9 @@ export type WorkflowState = {
   lastArtifact?: string;
   testStatus?: "detected" | "passed" | "failed";
   autoMode?: boolean;
+  autoLastPrompt?: string;
+  autoRetryKey?: string;
+  autoRetryCount?: number;
 };
 
 export type WorkflowEvent = {
@@ -142,6 +145,9 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     return {
       ...state,
       autoMode: false,
+      autoLastPrompt: undefined,
+      autoRetryKey: undefined,
+      autoRetryCount: undefined,
       lastTrigger,
     };
   }
@@ -149,6 +155,9 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
   return {
     ...state,
     autoMode: true,
+    autoLastPrompt: undefined,
+    autoRetryKey: undefined,
+    autoRetryCount: undefined,
     activePlan: event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
     lastTrigger,
     lastArtifact: event.artifact ?? state.lastArtifact,
@@ -270,6 +279,9 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.activeSpec = state.activeSpec;
   next.activePlan = state.activePlan;
   next.autoMode = state.autoMode;
+  next.autoLastPrompt = state.autoLastPrompt;
+  next.autoRetryKey = state.autoRetryKey;
+  next.autoRetryCount = state.autoRetryCount;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
   next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus;

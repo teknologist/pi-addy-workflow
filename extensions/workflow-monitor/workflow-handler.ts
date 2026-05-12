@@ -44,6 +44,10 @@ function isPositiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (typeof value !== "object" || value === null || !("phases" in value) || !("warnings" in value)) return undefined;
 
@@ -55,6 +59,9 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return undefined;
   if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
   if (candidate.autoMode !== undefined && typeof candidate.autoMode !== "boolean") return undefined;
+  if (candidate.autoLastPrompt !== undefined && typeof candidate.autoLastPrompt !== "string") return undefined;
+  if (candidate.autoRetryKey !== undefined && typeof candidate.autoRetryKey !== "string") return undefined;
+  if (candidate.autoRetryCount !== undefined && !isNonNegativeSafeInteger(candidate.autoRetryCount)) return undefined;
   if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
   if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
   if (candidate.currentTaskIndex !== undefined && !isPositiveSafeInteger(candidate.currentTaskIndex)) return undefined;

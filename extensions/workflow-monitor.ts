@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, resetWorkflow } from "./workflow-monitor/workflow-handler.ts";
+import { getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, resetWorkflow, setContextWorkflowState } from "./workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_PHASES, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
 import { nextPromptForActivePlanLifecycle } from "./workflow-monitor/workflow-tracker.ts";
 
@@ -60,20 +60,36 @@ function sendUserMessage(pi: ExtensionAPI, ctx: unknown, message: string): void 
   else sender(message, { deliverAs: "followUp" });
 }
 
+function autoRetryKey(state: ReturnType<typeof getContextWorkflowState>, prompt: string): string {
+  return [prompt, state.activePlan ?? "", state.currentTaskIndex ?? "", state.currentTask ?? "", state.nextTask ?? ""].join("\u001f");
+}
+
 function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSamePhase = false): void {
   const workflowCtx = ctx as never;
   const state = getContextWorkflowState(workflowCtx);
-  const prompt = nextPromptForActivePlanLifecycle(state, (ctx as { cwd?: string }).cwd);
+  setContextWorkflowState(workflowCtx, state, appendWorkflowEntry(pi));
+  const refreshedState = getContextWorkflowState(workflowCtx);
+  const prompt = nextPromptForActivePlanLifecycle(refreshedState, (ctx as { cwd?: string }).cwd);
   if (!prompt) {
     (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.("Addy auto is active, but no active plan is available.", "warning");
     return;
   }
 
   const phase = phaseFromWorkflowPrompt(prompt);
-  if (!allowSamePhase && phase && phase === state.current) {
-    (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(`Addy auto paused at ${prompt}; the current lifecycle step is still incomplete.`, "warning");
+  const retryKey = autoRetryKey(refreshedState, prompt);
+  const isSameIncompletePhase = phase && phase === refreshedState.current;
+  const retryCount = refreshedState.autoRetryKey === retryKey ? refreshedState.autoRetryCount ?? 0 : 0;
+  if (!allowSamePhase && isSameIncompletePhase && retryCount >= 1) {
+    (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(`Addy auto paused at ${prompt}; the current lifecycle step is still incomplete after retry.`, "warning");
     return;
   }
+
+  setContextWorkflowState(workflowCtx, {
+    ...refreshedState,
+    autoLastPrompt: prompt,
+    autoRetryKey: retryKey,
+    autoRetryCount: isSameIncompletePhase ? retryCount + 1 : 0,
+  }, appendWorkflowEntry(pi));
 
   sendUserMessage(pi, ctx, prompt);
 }
