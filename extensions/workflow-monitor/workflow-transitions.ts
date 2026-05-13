@@ -37,6 +37,7 @@ export type WorkflowEvent = {
   source: "user-input" | "file-write" | "tool-result" | "subagent-call" | "command";
   text?: string;
   command?: string;
+  manualAddyCommand?: boolean;
   agentName?: string;
   success?: boolean;
   artifact?: string;
@@ -182,6 +183,22 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
   };
 }
 
+function exitAutoMode(state: WorkflowState): WorkflowState {
+  return {
+    ...state,
+    autoMode: false,
+    autoLastPrompt: undefined,
+    autoRetryKey: undefined,
+    autoRetryCount: undefined,
+    autoReviewFixKey: undefined,
+    autoReviewFixCount: undefined,
+    autoReviewFindingFingerprint: undefined,
+    autoReviewFixNeedsReview: undefined,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
+  };
+}
+
 function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target: WorkflowPhase): WorkflowState {
   const artifact = event.artifact ?? artifactFromText(event.text);
   if (!artifact) return state;
@@ -253,17 +270,21 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   const autoModeState = applyAutoModeEvent(state, event);
   if (autoModeState) return autoModeState;
 
-  const target = resolveTargetPhase(event, state.current);
-  if (!target) return state;
+  const commandName = commandNameFromText(event.text ?? event.command);
+  const manualAddyCommand = event.manualAddyCommand || (event.source === "command" && commandName !== undefined);
+  const baseState = manualAddyCommand ? exitAutoMode(state) : state;
 
-  const current = state.current;
+  const target = resolveTargetPhase(event, baseState.current);
+  if (!target) return baseState;
+
+  const current = baseState.current;
   if (current === target) {
     return applyActiveArtifact(completeSpecAndPlanAfterPlanning({
-      ...state,
+      ...baseState,
       warnings: [],
       lastTrigger: event.text ?? event.command ?? event.agentName,
-      lastArtifact: event.artifact ?? state.lastArtifact,
-      testStatus: target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus,
+      lastArtifact: event.artifact ?? baseState.lastArtifact,
+      testStatus: target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : baseState.testStatus,
     }, target), event, target);
   }
 
@@ -274,42 +295,42 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   if (current) {
     for (const phase of WORKFLOW_PHASES) {
       const index = phaseIndex(phase);
-      if (index < targetIndex && state.phases[phase] === "complete") next.phases[phase] = "complete";
+      if (index < targetIndex && baseState.phases[phase] === "complete") next.phases[phase] = "complete";
     }
 
     if (phaseIndex(target) > phaseIndex(current)) next.phases[current] = "complete";
   }
 
-  const skippedPhases = skippedEnforcedPhases(state, target, next);
+  const skippedPhases = skippedEnforcedPhases(baseState, target, next);
   if (skippedPhases.length > 0) warnings.push(`${target} started before ${skippedPhases.join(" and ")}.`);
 
   if (current && warnings.length > 0 && (target === "review" || target === "finish") && !skippedPhaseWarningConfirmed(event, target, skippedPhases)) {
     return applyActiveArtifact({
-      ...state,
+      ...baseState,
       warnings,
       lastTrigger: event.text ?? event.command ?? event.agentName,
-      lastArtifact: event.artifact ?? state.lastArtifact,
+      lastArtifact: event.artifact ?? baseState.lastArtifact,
     }, event, target);
   }
 
   next.current = target;
   next.phases[target] = "active";
   next.warnings = warnings;
-  next.activeSpec = state.activeSpec;
-  next.activePlan = state.activePlan;
-  next.autoMode = state.autoMode;
-  next.autoLastPrompt = state.autoLastPrompt;
-  next.autoRetryKey = state.autoRetryKey;
-  next.autoRetryCount = state.autoRetryCount;
-  next.autoReviewFixKey = state.autoReviewFixKey;
-  next.autoReviewFixCount = state.autoReviewFixCount;
-  next.autoReviewFindingFingerprint = state.autoReviewFindingFingerprint;
-  next.autoReviewFixNeedsReview = state.autoReviewFixNeedsReview;
-  next.autoReviewTask = state.autoReviewTask;
-  next.autoReviewTaskIndex = state.autoReviewTaskIndex;
+  next.activeSpec = baseState.activeSpec;
+  next.activePlan = baseState.activePlan;
+  next.autoMode = baseState.autoMode;
+  next.autoLastPrompt = baseState.autoLastPrompt;
+  next.autoRetryKey = baseState.autoRetryKey;
+  next.autoRetryCount = baseState.autoRetryCount;
+  next.autoReviewFixKey = baseState.autoReviewFixKey;
+  next.autoReviewFixCount = baseState.autoReviewFixCount;
+  next.autoReviewFindingFingerprint = baseState.autoReviewFindingFingerprint;
+  next.autoReviewFixNeedsReview = baseState.autoReviewFixNeedsReview;
+  next.autoReviewTask = baseState.autoReviewTask;
+  next.autoReviewTaskIndex = baseState.autoReviewTaskIndex;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
-  next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : state.testStatus;
+  next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : baseState.testStatus;
 
   return applyActiveArtifact(next, event, target);
 }

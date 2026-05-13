@@ -46,6 +46,17 @@ test("auto mode toggles without changing lifecycle phase", () => {
   assert.equal(unrelated.activePlan, "docs/plans/slice-01.md");
 });
 
+test("manual Addy command exits auto mode", () => {
+  const auto = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-auto docs/plans/slice-01.md" });
+  const build = transitionWorkflow(auto, { source: "user-input", text: "/addy-build docs/plans/slice-01.md", manualAddyCommand: true });
+
+  assert.equal(build.current, "build");
+  assert.equal(build.activePlan, "docs/plans/slice-01.md");
+  assert.equal(build.autoMode, false);
+  assert.equal(build.autoLastPrompt, undefined);
+  assert.equal(build.autoRetryKey, undefined);
+});
+
 test("forward transition shows spec and plan checked once building", () => {
   const define = transitionWorkflow(createInitialWorkflowState(), { source: "user-input", text: "/addy-define" });
   const build = transitionWorkflow(define, { source: "user-input", text: "/addy-build" });

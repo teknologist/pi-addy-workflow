@@ -142,6 +142,73 @@ test("real workflow commands preserve auto mode so the loop can continue", async
   assertSentWorkflowPrompt(sentMessages[1], `/addy-verify ${planPath}`, "Addy Verify");
 });
 
+test("manual Addy command exits auto mode", async () => {
+  const cwd = join(stateDir, "manual-command-exits-auto-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "manual-command-exits-auto",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "build",
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      autoRetryKey: "retry",
+      autoRetryCount: 1,
+      autoReviewTask: "Current",
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+  };
+
+  await events.get("input")?.({ input: `/addy-verify ${planPath}` }, ctx);
+
+  assert.equal(ctx.state.autoMode, false);
+  assert.equal(ctx.state.autoLastPrompt, undefined);
+  assert.equal(ctx.state.autoRetryKey, undefined);
+  assert.equal(ctx.state.autoRetryCount, undefined);
+  assert.equal(ctx.state.autoReviewTask, undefined);
+  assert.equal(ctx.state.current, "verify");
+});
+
+test("registered workflow next command exits auto mode", async () => {
+  const cwd = join(stateDir, "workflow-next-exits-auto-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const prefills: string[] = [];
+  const ctx: any = {
+    cwd,
+    id: "workflow-next-exits-auto",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "build",
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      autoRetryKey: "retry",
+      autoRetryCount: 1,
+      autoReviewTask: "Current",
+      activePlan: planPath,
+    },
+    input: { prefill: (value: string) => prefills.push(value) },
+    ui: { setWidget() {} },
+  };
+
+  await commands.get("addy-workflow-next")?.handler({ args: ["verify", planPath] }, ctx);
+
+  assert.equal(ctx.state.autoMode, false);
+  assert.equal(ctx.state.autoLastPrompt, undefined);
+  assert.equal(ctx.state.autoRetryKey, undefined);
+  assert.equal(ctx.state.autoRetryCount, undefined);
+  assert.equal(ctx.state.autoReviewTask, undefined);
+  assert.equal(ctx.state.current, "verify");
+  assert.deepEqual(prefills, [`/addy-verify ${planPath}`]);
+});
+
 test("auto loop retries one incomplete same-phase step before pausing", async () => {
   const cwd = join(stateDir, "auto-loop-pause-project");
   const planPath = join("docs", "plans", "auto-loop.md");

@@ -412,7 +412,9 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
   });
 
   pi.on("input", async (event: InputEvent, ctx: unknown) => {
-    handleWorkflowEvent(ctx as never, { source: "user-input", text: workflowTextFromInput(event.input ?? event.text ?? "") }, appendWorkflowEntry(pi));
+    const input = event.input ?? event.text ?? "";
+    const manualAddyCommand = /^\/addy-(?!auto(?:\s|$))/.test(input.trim());
+    handleWorkflowEvent(ctx as never, { source: "user-input", text: workflowTextFromInput(input), manualAddyCommand }, appendWorkflowEntry(pi));
     return { action: "continue" as const };
   });
 
