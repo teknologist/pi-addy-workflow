@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: simplify code for clarity and maintainability without behavior changes"
 thinking: medium
+argument-hint: "[plan-path]"
 ---
 
 # Addy Code Simplify
@@ -10,6 +11,8 @@ Pi adaptation of Addy Osmani's `code-simplify` command.
 Use the Pi `code-simplification` skill.
 
 Argument: `/addy-code-simplify [plan-path]`.
+
+Supplied plan path argument, if any: `$ARGUMENTS`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise simplify the specified/recent change scope.
 

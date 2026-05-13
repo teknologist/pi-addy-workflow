@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: choose how to finish this slice"
 thinking: medium
+argument-hint: "[plan-path]"
 ---
 
 # Addy Finish
@@ -8,6 +9,8 @@ thinking: medium
 Pi adaptation of Addy Osmani's `finish` workflow step.
 
 Argument: `/addy-finish [plan-path]`.
+
+Supplied plan path argument, if any: `$ARGUMENTS`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available.
 

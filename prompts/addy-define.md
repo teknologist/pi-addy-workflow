@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: start spec-driven development before writing code"
 thinking: medium
+argument-hint: "[spec-path|idea]"
 ---
 
 # Addy Define
@@ -10,6 +11,8 @@ Pi adaptation of Addy Osmani's `define` command.
 Use the Pi `spec-driven-development` skill.
 
 Argument forms:
+
+Supplied argument text, if any: `$ARGUMENTS`.
 
 - `/addy-define [spec-path]`
 - `/addy-define "what you want to build"`

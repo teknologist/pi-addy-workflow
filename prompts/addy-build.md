@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: implement next task incrementally with TDD, verification, no auto-commit"
 thinking: medium
+argument-hint: "[plan-path]"
 ---
 
 # Addy Build
@@ -10,6 +11,8 @@ Pi adaptation of Addy Osmani's `build` command.
 Use the Pi `incremental-implementation` skill alongside `test-driven-development`.
 
 Argument: `/addy-build [plan-path]`.
+
+Supplied plan path argument, if any: `$ARGUMENTS`.
 
 Plan selection rules:
 

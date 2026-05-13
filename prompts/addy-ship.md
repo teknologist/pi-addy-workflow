@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: pre-launch checklist via parallel fan-out and go/no-go decision"
 thinking: high
+argument-hint: "[plan-path]"
 ---
 
 # Addy Ship
@@ -10,6 +11,8 @@ Pi adaptation of Addy Osmani's `ship` command.
 Use the Pi `shipping-and-launch` skill.
 
 Argument: `/addy-ship [plan-path]`.
+
+Supplied plan path argument, if any: `$ARGUMENTS`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, then evaluate the current change against that plan.
 

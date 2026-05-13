@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: autonomously build, verify, review, and commit tasks from a slice plan"
 thinking: medium
+argument-hint: "[plan-path|stop]"
 ---
 
 # Addy Auto
@@ -10,6 +11,8 @@ Pi adaptation of Addy Osmani's workflow loop for autonomous slice execution.
 Use the Pi `incremental-implementation`, `test-driven-development`, `debugging-and-error-recovery`, `code-review-and-quality`, and `addy-auto-unblock` skills as the loop requires.
 
 Argument forms:
+
+Supplied argument text, if any: `$ARGUMENTS`.
 
 - `/addy-auto [plan-path]`
 - `/addy-auto stop`

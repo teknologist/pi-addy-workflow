@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: break work into small verifiable tasks with acceptance criteria and dependency ordering"
 thinking: medium
+argument-hint: "[spec-path]"
 ---
 
 # Addy Plan
@@ -10,6 +11,8 @@ Pi adaptation of Addy Osmani's `plan` command.
 Use the Pi `planning-and-task-breakdown` skill.
 
 Argument: `/addy-plan [spec-path]`.
+
+Supplied spec path argument, if any: `$ARGUMENTS`.
 
 Read the supplied spec path. If no path is supplied, use the active spec from the Addy workflow state. If neither exists, call `ask_user_question` with bounded candidate `docs/specs/YYYY-MM-DD-<meaningful-name>.md` spec paths before writing the plan.
 

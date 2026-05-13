@@ -1,6 +1,7 @@
 ---
 description: "Addy workflow: fix surfaced issues, implement suggestions, then rerun review"
 thinking: medium
+argument-hint: "[plan-path]"
 ---
 
 # Addy Fix All
@@ -8,6 +9,8 @@ thinking: medium
 Pi adaptation of Addy Osmani's fix-after-review loop.
 
 Argument: `/addy-fix-all [plan-path]`.
+
+Supplied plan path argument, if any: `$ARGUMENTS`.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available.
 

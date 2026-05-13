@@ -4,6 +4,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-auto", "addy-finish", "addy-ship"];
+const planPathPrompts = ["addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-finish", "addy-ship"];
 const agents = [
   "addy-planner",
   "addy-implementer",
@@ -25,6 +26,14 @@ const requiredSkills = [
   "shipping-and-launch",
 ];
 
+function promptBody(content: string): string {
+  return content.replace(/^---\n[\s\S]*?\n---\n/, "");
+}
+
+function expandArguments(content: string, args: string): string {
+  return promptBody(content).replace(/\$ARGUMENTS/g, args).replace(/\$@/g, args);
+}
+
 test("package manifest exposes Pi resources but not native agents", async () => {
   const manifest = JSON.parse(await readFile("package.json", "utf8"));
   assert.ok(manifest.keywords.includes("pi-package"));
@@ -43,6 +52,26 @@ test("all Addy prompts exist and workflow commands are not prompt files", async 
   const promptFiles = await readdir("prompts");
   assert.equal(promptFiles.includes("addy-workflow-reset.md"), false);
   assert.equal(promptFiles.includes("addy-workflow-next.md"), false);
+});
+
+test("Addy path prompt arguments survive template expansion", async () => {
+  const planPath = "@docs/plans/plan_name.md";
+  for (const prompt of planPathPrompts) {
+    const content = await readFile(join("prompts", `${prompt}.md`), "utf8");
+    assert.match(content, /argument-hint: "\[plan-path\]"/, prompt);
+    assert.match(content, /Supplied plan path argument, if any: `\$ARGUMENTS`\./, prompt);
+    assert.match(expandArguments(content, planPath), new RegExp(planPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), prompt);
+  }
+
+  const plan = await readFile(join("prompts", "addy-plan.md"), "utf8");
+  assert.match(plan, /argument-hint: "\[spec-path\]"/);
+  assert.match(expandArguments(plan, "@docs/specs/spec_name.md"), /@docs\/specs\/spec_name\.md/);
+
+  for (const prompt of ["addy-define", "addy-auto"]) {
+    const content = await readFile(join("prompts", `${prompt}.md`), "utf8");
+    assert.match(content, /Supplied argument text, if any: `\$ARGUMENTS`\./, prompt);
+    assert.match(expandArguments(content, "@docs/plans/plan_name.md"), /@docs\/plans\/plan_name\.md/, prompt);
+  }
 });
 
 test("define prompt accepts either a spec path or build idea", async () => {
