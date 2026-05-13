@@ -539,6 +539,49 @@ test("refreshing workflow tasks clears stale summaries when task changes", () =>
   assert.equal(state.currentTaskSummary, undefined);
 });
 
+test("refreshing workflow repairs stale completed plan state to the next unfinished slice", () => {
+  const cwd = join(taskFooterDir, "repair-stale-complete-plan-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-08-prod-readiness.md"), [
+    "## Task 20: Complete task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "2026-05-08-invoice-csv-etl-slice-09-admin-module-boundaries.md"), [
+    "## Task 1: Admin boundaries",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: "plan",
+    phases: { ...createInitialWorkflowState().phases, define: "complete", plan: "active" },
+    warnings: ["finish started before build and verify and review."],
+    activePlan: "docs/plans/2026-05-08-invoice-csv-etl-slice-08-prod-readiness.md",
+    currentTask: "all tasks complete",
+    nextTask: "none",
+    currentTaskIndex: 20,
+    taskCount: 20,
+    currentSliceIndex: 8,
+    sliceCount: 9,
+  }, cwd);
+
+  assert.equal(state.current, "build");
+  assert.equal(state.phases.plan, "complete");
+  assert.equal(state.phases.build, "active");
+  assert.deepEqual(state.warnings, []);
+  assert.equal(state.activePlan, "docs/plans/2026-05-08-invoice-csv-etl-slice-09-admin-module-boundaries.md");
+  assert.equal(state.currentTask, "Admin boundaries");
+  assert.equal(state.currentTaskIndex, 1);
+  assert.equal(state.taskCount, 1);
+  assert.equal(state.currentSliceIndex, 9);
+  assert.equal(state.sliceCount, 9);
+});
+
 test("plan task parser supports checklist tasks", () => {
   assert.deepEqual(planTasksFromMarkdown("- [x] First task\n- [ ] Second task"), [
     { title: "First task", complete: true },

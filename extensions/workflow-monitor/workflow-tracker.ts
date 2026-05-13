@@ -263,7 +263,7 @@ export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: s
 }
 
 export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: string): WorkflowState {
-  if (!state.activePlan || !state.current || phaseIndex(state.current) <= phaseIndex("plan")) return state;
+  if (!state.activePlan) return state;
 
   const sliceProgress = sliceProgressForPlanPath(state.activePlan, baseCwd);
 
@@ -299,8 +299,14 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
         const next = nextTasks.slice(nextCurrentIndex + 1).find((task) => !task.complete);
         const currentTask = current.title;
         const nextTask = next?.title ?? "none";
+        const nextCurrent = state.current === "plan" ? "build" : state.current;
         return {
           ...state,
+          current: nextCurrent,
+          phases: nextCurrent === "build"
+            ? { ...state.phases, define: "complete", plan: "complete", build: "active" }
+            : state.phases,
+          warnings: nextCurrent === "build" ? [] : state.warnings,
           activePlan: nextPlan,
           currentTask,
           nextTask,
