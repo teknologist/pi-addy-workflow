@@ -57,7 +57,18 @@ If the current slice is complete and a next unfinished slice exists:
 3. If the user chooses `commit first`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
 4. If the user chooses `next slice`, immediately continue with the Addy Build workflow for `<next-slice-plan-path>` in this same turn. Do not merely print `/addy-build <next-slice-plan-path>` or wait for the user to submit it.
 
-If all slices are complete:
+If all slices are complete and Addy Auto Mode is active:
+
+1. Inspect `git status --short`.
+2. If there are no unstaged or uncommitted changes, say `Finished!` and stop. Do not ask to commit, do not ask to ship, and do not run another Addy workflow command.
+3. If there are unstaged or uncommitted changes, call the `ask_user_question` tool once with one single-select question asking whether to commit the completed plan work now.
+4. Options must be exactly:
+   - `commit` — commit unstaged files.
+   - `finish without commit` — stop Addy Auto Mode without committing.
+5. If the user chooses `commit`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, report the commit hash, then say `Finished!` and stop. Do not merely print `/commit`.
+6. If the user chooses `finish without commit`, say `Finished!` and stop. Do not run another Addy workflow command.
+
+If all slices are complete and Addy Auto Mode is not active:
 
 1. Call the `ask_user_question` tool with one single-select question asking whether to commit or ship.
 2. Options must be exactly:

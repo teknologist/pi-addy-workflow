@@ -208,9 +208,10 @@ test("file write triggers map to lifecycle phases", () => {
   }
 });
 
-test("source and test file writes are ignored after build or verify", () => {
+test("source, test, and plan file writes are ignored after their lifecycle phases", () => {
   assert.equal(resolveTargetPhase({ source: "file-write", artifact: "src/index.ts" }, "verify"), undefined);
   assert.equal(resolveTargetPhase({ source: "file-write", artifact: "tests/index.test.ts" }, "review"), undefined);
+  assert.equal(resolveTargetPhase({ source: "file-write", artifact: "docs/plans/feature.md" }, "review"), undefined);
 });
 
 test("tool and subagent triggers map to verify and review", () => {
@@ -245,6 +246,18 @@ test("tracks active spec and plan artifacts", () => {
 
   const override = transitionWorkflow(build, { source: "user-input", text: "/addy-review docs/plans/override-plan.md" });
   assert.equal(override.activePlan, "docs/plans/override-plan.md");
+});
+
+test("active plan writes after planning do not regress the workflow phase", () => {
+  const planPath = "docs/plans/feature.md";
+  const review = transitionWorkflow({ ...createInitialWorkflowState(), activePlan: planPath }, { source: "user-input", text: `/addy-review ${planPath}` });
+
+  const updated = transitionWorkflow(review, { source: "file-write", artifact: planPath });
+
+  assert.equal(updated.current, "review");
+  assert.equal(updated.activePlan, planPath);
+  assert.equal(updated.phases.review, "active");
+  assert.equal(updated.phases.plan, "complete");
 });
 
 test("define prompt distinguishes spec arguments from build explanations", () => {

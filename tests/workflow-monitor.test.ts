@@ -722,6 +722,82 @@ test("auto loop continues after task commit succeeds", async () => {
   assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
 });
 
+test("auto loop stops after finish when all plan tasks are complete", async () => {
+  const cwd = join(stateDir, "auto-loop-finish-complete-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  const notices: Array<[string, string | undefined]> = [];
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-finish-complete",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "complete", finish: "active" },
+      warnings: [],
+      current: "finish",
+      autoMode: true,
+      autoLastPrompt: `/addy-finish ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Finished!" }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.equal(ctx.state.autoMode, false);
+  assert.equal(ctx.state.autoLastPrompt, undefined);
+  assert.equal(ctx.state.phases.finish, "complete");
+  assert.deepEqual(notices.at(-1), ["Finished!", "info"]);
+});
+
+test("auto loop does not stop after finish when the finish result is incomplete", async () => {
+  const cwd = join(stateDir, "auto-loop-finish-incomplete-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  const notices: Array<[string, string | undefined]> = [];
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-finish-incomplete",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "complete", finish: "active" },
+      warnings: [],
+      current: "finish",
+      autoMode: true,
+      autoLastPrompt: `/addy-finish ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Please choose whether to commit." }] }] }, ctx);
+
+  assert.equal(ctx.state.autoMode, true);
+  assert.equal(ctx.state.autoLastPrompt, `/addy-finish ${planPath}`);
+  assert.notDeepEqual(notices.at(-1), ["Finished!", "info"]);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-finish ${planPath}`, "Addy Finish");
+});
+
 test("auto loop does not commit after review when plan cannot prove task completion", async () => {
   const cwd = join(stateDir, "auto-loop-missing-plan-no-commit-project");
   const planPath = join("docs", "plans", "missing.md");

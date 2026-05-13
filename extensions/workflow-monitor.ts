@@ -378,6 +378,36 @@ function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, event: Age
   return true;
 }
 
+function finishTextReportsComplete(text: string): boolean {
+  return /(?:^|\s)Finished!(?:\s|$)/i.test(text) || agentTextReportsCommitComplete(text);
+}
+
+function maybeCompleteAutoFinish(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): boolean {
+  if (commandFromPrompt(state.autoLastPrompt) !== "/addy-finish") return false;
+  if (commandFromPrompt(action?.prompt) !== "/addy-finish") return false;
+  if (!finishTextReportsComplete(latestAssistantText(event))) return false;
+
+  setContextWorkflowState(ctx as never, {
+    ...state,
+    phases: {
+      ...state.phases,
+      finish: "complete",
+    },
+    autoMode: false,
+    autoLastPrompt: undefined,
+    autoRetryKey: undefined,
+    autoRetryCount: undefined,
+    autoReviewFixKey: undefined,
+    autoReviewFixCount: undefined,
+    autoReviewFindingFingerprint: undefined,
+    autoReviewFixNeedsReview: undefined,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
+  }, appendWorkflowEntry(pi));
+  (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.("Finished!", "info");
+  return true;
+}
+
 function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSamePhase = false): void {
   const workflowCtx = ctx as never;
   const state = getContextWorkflowState(workflowCtx);
@@ -418,6 +448,7 @@ function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unkn
   setContextWorkflowState(workflowCtx, state, appendWorkflowEntry(pi));
   const refreshedState = getContextWorkflowState(workflowCtx);
   const action = nextWorkflowActionForActivePlanLifecycle(refreshedState, (ctx as { cwd?: string }).cwd);
+  if (maybeCompleteAutoFinish(pi, ctx, event, refreshedState, action)) return;
   if (maybeDispatchReviewFixLoop(pi, ctx, event, refreshedState, action)) return;
   if (maybeDispatchTaskCommit(pi, ctx, event, state, refreshedState, action)) return;
   dispatchNextAutoWorkflowPrompt(pi, ctx);
