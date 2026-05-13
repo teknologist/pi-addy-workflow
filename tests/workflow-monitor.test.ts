@@ -72,6 +72,9 @@ test("auto command dispatches the real next workflow command", async () => {
   assert.equal(ctx.state.activePlan, "docs/plans/auto.md");
   assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(sentMessages[0], "/addy-build docs/plans/auto.md", "Addy Build");
+  assert.match(sentMessages[0], /Addy Auto Mode Recovery/);
+  assert.match(sentMessages[0], /addy-auto-unblock/);
+  assert.match(sentMessages[0], /do not skip, weaken, or silently reinterpret acceptance criteria/i);
 });
 
 test("auto loop dispatches verify after the current task is implemented", async () => {

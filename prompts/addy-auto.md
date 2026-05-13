@@ -7,7 +7,7 @@ thinking: medium
 
 Pi adaptation of Addy Osmani's workflow loop for autonomous slice execution.
 
-Use the Pi `incremental-implementation`, `test-driven-development`, `debugging-and-error-recovery`, and `code-review-and-quality` skills as the loop requires.
+Use the Pi `incremental-implementation`, `test-driven-development`, `debugging-and-error-recovery`, `code-review-and-quality`, and `addy-auto-unblock` skills as the loop requires.
 
 Argument forms:
 
@@ -39,6 +39,14 @@ Autonomous task loop:
 4. When the current slice is fully complete, advance only to an unambiguous next slice from a forward-reference link, same-directory index, or ordered slice filename.
 5. Try safe autonomous recovery before stopping for failed tests, typecheck failures, review blockers, expected git state issues, and ambiguous-but-inferable next slices.
 6. Ask the user only for unsafe, destructive, external, or genuinely undecidable choices.
+
+Unblock policy:
+
+- While `/addy-auto` is active, use `addy-auto-unblock` before pausing on any build, verify, review, fix, commit, or plan-continuation blocker.
+- `addy-auto-unblock` must apply `debugging-and-error-recovery` to reproduce, classify, and fix safe scoped blockers.
+- Missing tests, fixtures, commands, generated artifacts, or local setup are not automatic user blockers; repair or create them when that is the correct way to satisfy the current acceptance criteria.
+- Do not use unblock recovery to skip, weaken, or silently reinterpret acceptance criteria, verification, or review. Correctness remains higher priority than autonomous progress.
+- Mark `[x] Verified` or `[x] Reviewed` only when that exact step has real evidence from this run.
 
 Review fix loop guardrails:
 

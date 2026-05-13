@@ -91,6 +91,16 @@ function expandPackagedPromptTemplate(prompt: string): string {
   }
 }
 
+function appendAutoUnblockGuidance(message: string): string {
+  return `${message}
+
+## Addy Auto Mode Recovery
+
+Addy Auto Mode is active. If this step blocks, repeats, or finds missing artifacts, use the Pi \`addy-auto-unblock\` skill before pausing. That skill must apply \`debugging-and-error-recovery\` to reproduce, classify, and safely fix scoped blockers.
+
+Critical rule: do not skip, weaken, or silently reinterpret acceptance criteria, verification, or review. Only mark lifecycle checkboxes when there is real evidence from this run.`;
+}
+
 function workflowTextFromInput(text: string): string {
   return text.match(/^Invocation:\s+`([^`]+)`\s*$/m)?.[1] ?? text;
 }
@@ -233,18 +243,19 @@ function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>,
   ].join("\n");
 }
 
-function sendUserMessage(pi: ExtensionAPI, ctx: unknown, message: string): void {
+function sendUserMessage(pi: ExtensionAPI, ctx: unknown, message: string, options: { autoMode?: boolean } = {}): void {
   const expandedMessage = expandPackagedPromptTemplate(message);
+  const deliveredMessage = options.autoMode ? appendAutoUnblockGuidance(expandedMessage) : expandedMessage;
   const sender = (pi as ExtensionAPI & { sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void }).sendUserMessage;
   if (!sender) {
-    (ctx as { ui?: { setEditorText?: (text: string) => void; notify?: (message: string, level?: string) => void } }).ui?.setEditorText?.(expandedMessage);
+    (ctx as { ui?: { setEditorText?: (text: string) => void; notify?: (message: string, level?: string) => void } }).ui?.setEditorText?.(deliveredMessage);
     (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(`Prefilled ${message}; submit it to continue Addy auto.`, "info");
     return;
   }
 
   const isIdle = (ctx as { isIdle?: () => boolean }).isIdle?.() ?? true;
-  if (isIdle) sender(expandedMessage);
-  else sender(expandedMessage, { deliverAs: "followUp" });
+  if (isIdle) sender(deliveredMessage);
+  else sender(deliveredMessage, { deliverAs: "followUp" });
 }
 
 function autoRetryKey(state: ReturnType<typeof getContextWorkflowState>, prompt: string): string {
@@ -267,7 +278,7 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
     autoRetryCount: undefined,
     ...updates,
   }, appendWorkflowEntry(pi));
-  sendUserMessage(pi, ctx, prompt);
+  sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
 }
 
 function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): boolean {
@@ -391,7 +402,7 @@ function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSam
     autoReviewTaskIndex: phase === "review" ? refreshedState.currentTaskIndex : refreshedState.autoReviewTaskIndex,
   }, appendWorkflowEntry(pi));
 
-  sendUserMessage(pi, ctx, prompt);
+  sendUserMessage(pi, ctx, prompt, { autoMode: true });
 }
 
 function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent): void {

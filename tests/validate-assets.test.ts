@@ -18,6 +18,7 @@ const requiredSkills = [
   "spec-driven-development",
   "planning-and-task-breakdown",
   "incremental-implementation",
+  "addy-auto-unblock",
   "debugging-and-error-recovery",
   "code-review-and-quality",
   "code-simplification",
@@ -219,6 +220,9 @@ test("auto prompt documents autonomous plan execution", async () => {
   assert.match(content, /plan-selection rules/i);
   assert.match(content, /build.*verify.*review.*pass/i);
   assert.match(content, /may commit/i);
+  assert.match(content, /addy-auto-unblock/);
+  assert.match(content, /debugging-and-error-recovery/);
+  assert.match(content, /Do not use unblock recovery to skip, weaken, or silently reinterpret acceptance criteria/i);
   assert.match(readme, /\/addy-auto/);
 });
 
