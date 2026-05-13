@@ -33,6 +33,7 @@ Prompts:
 - Bootstrap injects concise `using-addy-workflow` guidance once per session.
 - Workflow monitor renders the phase strip with `ctx.ui.setWidget`.
 - Slice plans track `[ ] Implemented`, `[ ] Verified`, and `[ ] Reviewed`; workflow prompts keep those checkboxes synchronized with real evidence.
+- `/addy-auto` appends scoped recovery guidance to auto-dispatched prompts so routine blockers are investigated with `addy-auto-unblock` before pausing. See [Addy Auto Unblock Flow](docs/addy-auto-unblock-flow.md).
 - Agent installer syncs bundled agents into `~/.pi/agent/agents/pi-addy-workflow/` for pi-subagents discovery.
 
 `todo` and `subagent` are optional companion tools. Missing tools warn but do not block session start.

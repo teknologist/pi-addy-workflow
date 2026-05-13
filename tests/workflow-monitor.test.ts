@@ -334,6 +334,9 @@ test("auto loop runs fix-all when review surfaces actionable findings", async ()
 
   assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
+  assert.match(sentMessages[0], /Addy Auto Fix-All Handoff/);
+  assert.match(sentMessages[0], /Do not invoke or perform `\/addy-verify` or `\/addy-review` inside this `\/addy-fix-all` turn/);
+  assert.match(sentMessages[0], /dispatch `\/addy-verify` first, then `\/addy-review`/);
   assert.equal(ctx.state.autoReviewFixCount, 1);
 });
 

@@ -31,6 +31,7 @@ test("package manifest exposes Pi resources but not native agents", async () => 
   assert.deepEqual(manifest.pi.extensions, ["extensions/bootstrap.ts", "extensions/agent-installer.ts", "extensions/workflow-monitor.ts"]);
   assert.equal(manifest.pi.agents, undefined);
   assert.ok(manifest.files.includes("agents/"));
+  assert.ok(manifest.files.includes("docs/"));
 });
 
 test("all Addy prompts exist and workflow commands are not prompt files", async () => {
@@ -213,6 +214,7 @@ test("fix-all prompt fixes surfaced items and reruns review", async () => {
 test("auto prompt documents autonomous plan execution", async () => {
   const content = await readFile(join("prompts", "addy-auto.md"), "utf8");
   const readme = await readFile("README.md", "utf8");
+  const unblockDoc = await readFile(join("docs", "addy-auto-unblock-flow.md"), "utf8");
 
   assert.match(content, /`\/addy-auto \[plan-path\]`/);
   assert.match(content, /`\/addy-auto stop`/);
@@ -224,6 +226,10 @@ test("auto prompt documents autonomous plan execution", async () => {
   assert.match(content, /debugging-and-error-recovery/);
   assert.match(content, /Do not use unblock recovery to skip, weaken, or silently reinterpret acceptance criteria/i);
   assert.match(readme, /\/addy-auto/);
+  assert.match(readme, /docs\/addy-auto-unblock-flow\.md/);
+  assert.match(unblockDoc, /Autonomous recovery must not weaken the workflow/);
+  assert.match(unblockDoc, /Missing artifacts are recoverable, not automatic blockers/);
+  assert.match(unblockDoc, /must not invoke or perform `\/addy-verify` or `\/addy-review` inside the fix-all turn/);
 });
 
 test("auto prompt defines autonomous task loop boundaries", async () => {

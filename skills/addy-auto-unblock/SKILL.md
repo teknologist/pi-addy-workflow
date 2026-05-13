@@ -36,6 +36,10 @@ Missing test files, fixtures, commands, snapshots, generated docs, or local setu
 - If the artifact is stale or over-broad, preserve the acceptance criteria and replace it only with equivalent or stronger verification evidence. Record why in the plan.
 - Do not create placeholder tests, empty fixtures, or assertions that cannot fail when the required behavior regresses.
 
+## Auto-dispatched fix-all handoff
+
+When `/addy-fix-all` runs inside `/addy-auto`, it is only the fix pass. Fix the surfaced review issues and run narrow validation for the changed scope, then stop. Do not invoke or perform `/addy-verify` or `/addy-review` inside that fix-all turn. The auto monitor owns the follow-up order: `/addy-verify`, then `/addy-review`.
+
 ## When to pause
 
 Pause only after the recovery loop when:
