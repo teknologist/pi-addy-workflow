@@ -4,7 +4,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInitialWorkflowState, resolveTargetPhase, transitionWorkflow, type WorkflowPhase } from "../extensions/workflow-monitor/workflow-transitions.ts";
-import { nextPromptForPhase, parseWorkflowState, planTasksFromMarkdown, refreshWorkflowTasksFromPlan, renderWorkflowStrip, renderWorkflowWidget, unfinishedLifecycleStepsFromMarkdown } from "../extensions/workflow-monitor/workflow-tracker.ts";
+import { nextPromptForActivePlanLifecycle, nextPromptForPhase, parseWorkflowState, planTasksFromMarkdown, refreshWorkflowTasksFromPlan, renderWorkflowStrip, renderWorkflowWidget, unfinishedLifecycleStepsFromMarkdown } from "../extensions/workflow-monitor/workflow-tracker.ts";
 import { handleWorkflowEvent, openNextWorkflowPrompt, resetWorkflow } from "../extensions/workflow-monitor/workflow-handler.ts";
 
 const taskFooterDir = "/tmp/pi-addy-workflow-task-footer-test";
@@ -338,6 +338,79 @@ test("workflow widget renders current and next task from active plan", () => {
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
     "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md",
     "Current task: Parse invoice rows | Next task: Persist invoice payloads | Task 2/3",
+  ]);
+});
+
+test("workflow widget renders verify and review counts for the current task", () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    current: "finish" as const,
+    phases: { ...createInitialWorkflowState().phases, define: "complete" as const, plan: "complete" as const, build: "complete" as const, verify: "complete" as const, review: "complete" as const, finish: "active" as const },
+    activePlan: "docs/plans/task-footer.md",
+    currentTask: "Parse invoice rows",
+    nextTask: "Persist invoice payloads",
+    currentTaskIndex: 2,
+    taskCount: 3,
+    stats: {
+      active: {
+        tasks: {
+          current: { plan: "docs/plans/task-footer.md", taskIndex: 2, taskTitle: "Parse invoice rows", turns: 7, verifyRuns: 2, reviewRuns: 3, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } },
+          other: { plan: "docs/plans/task-footer.md", taskIndex: 1, taskTitle: "Previous task", turns: 4, verifyRuns: 5, reviewRuns: 6, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } },
+        },
+      },
+      history: [],
+    },
+  };
+
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { ✓build → simplify → ✓verify (2) → ✓review (3) → [finish] } | task-footer.md",
+    "Current task: Parse invoice rows | Next task: Persist invoice payloads | Task 2/3",
+  ]);
+});
+
+test("workflow widget resolves index plans to the first unfinished slice", () => {
+  const cwd = join(taskFooterDir, "index-plan-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "2026-05-14-migration-index.md"), [
+    "# Migration Plan Index",
+    "",
+    "| Slice | File |",
+    "| --- | --- |",
+    "| 01 | `docs/plans/2026-05-14-migration-slice-01-api.md` |",
+    "| 02 | `docs/plans/2026-05-14-migration-slice-02-runtime.md` |",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "2026-05-14-migration-slice-01-api.md"), [
+    "## Task 1: Complete public API",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "2026-05-14-migration-slice-02-runtime.md"), [
+    "## Task 1: Migrate runtime",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+    "",
+    "## Task 2: Remove stale config",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: "build",
+    phases: { ...createInitialWorkflowState().phases, define: "complete", plan: "complete", build: "active" },
+    activePlan: "@docs/plans/2026-05-14-migration-index.md",
+  }, cwd);
+
+  assert.equal(state.activePlan, "@docs/plans/2026-05-14-migration-slice-02-runtime.md");
+  assert.equal(state.currentTask, "Migrate runtime");
+  assert.equal(nextPromptForActivePlanLifecycle({ ...state, activePlan: "@docs/plans/2026-05-14-migration-index.md" }, cwd), "/addy-build @docs/plans/2026-05-14-migration-slice-02-runtime.md");
+  assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
+    "Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-14-migration-slice-02-runtime.md",
+    "Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2",
   ]);
 });
 

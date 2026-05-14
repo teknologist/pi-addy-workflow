@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
@@ -63,6 +63,26 @@ test("registers workflow commands and handlers", () => {
   assert.ok(commands.has("addy-workflow-next"));
 });
 
+test("session start creates the global Addy workflow config with defaults", async () => {
+  const previousHome = process.env.HOME;
+  const home = join(stateDir, "config-home");
+  process.env.HOME = home;
+  try {
+    const { pi, events } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = { id: "config-startup", ui: { setWidget() {} } };
+
+    await events.get("session_start")?.({}, ctx);
+
+    const configPath = join(home, ".pi", "agent", "addy-workflow.json");
+    assert.equal(existsSync(configPath), true);
+    assert.deepEqual(JSON.parse(readFileSync(configPath, "utf8")).auto.freshContext, { betweenTasks: true, beforeReview: false });
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+});
+
 test("Addy workflow config uses fresh-context defaults and env overrides", () => {
   const config = loadAddyWorkflowConfig({}, {
     PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS: "0",
@@ -93,6 +113,43 @@ test("Addy workflow config ignores malformed project config safely", () => {
   assert.deepEqual(config.auto.freshContext, { betweenTasks: true, beforeReview: false });
   assert.match(notices.at(-1)?.[0] ?? "", /Ignoring invalid Addy workflow config/);
   assert.equal(notices.at(-1)?.[1], "warning");
+});
+
+test("auto command activates the first unfinished slice when given an index plan", async () => {
+  const cwd = join(stateDir, "auto-command-index-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "migration-index.md"), [
+    "# Migration Index",
+    "",
+    "| Slice | File |",
+    "| --- | --- |",
+    "| 01 | `docs/plans/migration-slice-01-api.md` |",
+    "| 02 | `docs/plans/migration-slice-02-runtime.md` |",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "migration-slice-01-api.md"), [
+    "## Task 1: Complete API",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "migration-slice-02-runtime.md"), [
+    "## Task 1: Migrate runtime",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = { cwd, id: "auto-command-index", ui: { setWidget() {} }, isIdle: () => true };
+
+  await commands.get("addy-auto")?.handler("@docs/plans/migration-index.md", ctx);
+
+  assert.equal(ctx.state.activePlan, "@docs/plans/migration-slice-01-api.md");
+  assert.equal(ctx.state.currentTask, "Complete API");
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], "/addy-build @docs/plans/migration-slice-01-api.md", "Addy Build");
 });
 
 test("auto command dispatches the real next workflow command", async () => {
@@ -1476,6 +1533,7 @@ test("auto-dispatched fix, verify, review, finish, and commit prompts record tas
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Fixed." }] }] }, ctx);
   assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-verify ${planPath}`, "Addy Verify");
   assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 3);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].verifyRuns, 1);
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
   assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-review ${planPath}`, "Addy Review");

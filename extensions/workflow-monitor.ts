@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadAddyWorkflowConfig } from "./workflow-monitor/config.ts";
-import { archiveWorkflowStats, getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, recordWorkflowTaskTurn, resetWorkflow, setContextWorkflowState, type WorkflowStatsTarget } from "./workflow-monitor/workflow-handler.ts";
+import { ensureGlobalAddyWorkflowConfig, loadAddyWorkflowConfig } from "./workflow-monitor/config.ts";
+import { archiveWorkflowStats, getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, recordWorkflowTaskTurn, recordWorkflowVerifyRun, resetWorkflow, setContextWorkflowState, type WorkflowStatsTarget } from "./workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
 import { nextWorkflowActionForActivePlanLifecycle, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
@@ -373,11 +373,13 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
     taskIndex: nextState.autoReviewTaskIndex ?? nextState.currentTaskIndex,
     taskTitle: nextState.autoReviewTask ?? nextState.currentTask,
   };
-  const stateWithStats = command === "/addy-review"
-    ? recordWorkflowReviewRun(nextState, target)
-    : autoStatsCommand(command)
-      ? recordWorkflowTaskTurn(nextState, target)
-      : nextState;
+  const stateWithStats = command === "/addy-verify"
+    ? recordWorkflowVerifyRun(nextState, target)
+    : command === "/addy-review"
+      ? recordWorkflowReviewRun(nextState, target)
+      : autoStatsCommand(command)
+        ? recordWorkflowTaskTurn(nextState, target)
+        : nextState;
   setContextWorkflowState(workflowCtx, stateWithStats, options.appendEntry === false ? undefined : appendWorkflowEntry(pi));
   sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
 }
@@ -581,6 +583,7 @@ function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unkn
 
 export default function addyWorkflowMonitor(pi: ExtensionAPI) {
   pi.on("session_start", async (_event: unknown, ctx: unknown) => {
+    ensureGlobalAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } });
     initializeWorkflowWidget(ctx as never);
   });
 

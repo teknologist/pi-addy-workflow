@@ -38,6 +38,7 @@ function normalizeTaskStats(value: unknown): WorkflowTaskStats | undefined {
     taskIndex: typeof candidate.taskIndex === "number" && Number.isSafeInteger(candidate.taskIndex) && candidate.taskIndex > 0 ? candidate.taskIndex : undefined,
     taskTitle: typeof candidate.taskTitle === "string" ? candidate.taskTitle : undefined,
     turns: nonNegative(candidate.turns),
+    verifyRuns: nonNegative(candidate.verifyRuns),
     reviewRuns: nonNegative(candidate.reviewRuns),
     issues: normalizeIssueStats(candidate.issues),
   };
@@ -120,9 +121,20 @@ export function parseWorkflowState(value: unknown): WorkflowState {
   return createInitialWorkflowState();
 }
 
+function currentWorkflowTaskStats(state: WorkflowState): WorkflowTaskStats | undefined {
+  const tasks = Object.values(state.stats?.active.tasks ?? {});
+  return tasks.find((task) => {
+    if (state.activePlan && task.plan && task.plan !== state.activePlan) return false;
+    if (state.currentTaskIndex && task.taskIndex && task.taskIndex !== state.currentTaskIndex) return false;
+    if (state.currentTask && task.taskTitle && task.taskTitle !== state.currentTask) return false;
+    return !!task.taskTitle || !!task.taskIndex;
+  });
+}
+
 export function renderWorkflowStrip(state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }): string {
-  const setupPhases = WORKFLOW_PHASES.slice(0, phaseIndex("build")).map((phase) => renderPhase(phase, state, theme));
-  const loopPhases = WORKFLOW_PHASES.slice(phaseIndex("build")).map((phase) => renderPhase(phase, state, theme));
+  const currentStats = currentWorkflowTaskStats(state);
+  const setupPhases = WORKFLOW_PHASES.slice(0, phaseIndex("build")).map((phase) => renderPhase(phase, state, theme, currentStats));
+  const loopPhases = WORKFLOW_PHASES.slice(phaseIndex("build")).map((phase) => renderPhase(phase, state, theme, currentStats));
   return `${setupPhases.join(" → ")} => { ${loopPhases.join(" → ")} }`;
 }
 
@@ -173,6 +185,14 @@ function readPlanMarkdown(planPath: string, baseCwd?: string): string | undefine
   }
 }
 
+function readablePlanFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function planPathForDisplay(resolvedPlanPath: string, previousPlanPath: string, baseCwd?: string): string {
   if (isAbsolute(previousPlanPath.replace(/^@/, ""))) return resolvedPlanPath;
 
@@ -220,6 +240,50 @@ function findNextNumberedPlanPath(planPath: string, baseCwd?: string): string | 
   });
 
   return matches.length === 1 ? planPathForDisplay(matches[0], planPath, baseCwd) : undefined;
+}
+
+function slicePlanPathFromIndexCandidate(rawPath: string, indexPlanPath: string, baseCwd?: string): string | undefined {
+  const path = rawPath.replace(/^@/, "");
+  const direct = isAbsolute(path) ? path : resolve(baseCwd ?? process.cwd(), path);
+  if (readablePlanFile(direct)) return planPathForDisplay(direct, indexPlanPath, baseCwd);
+
+  if (!isAbsolute(path)) {
+    const sibling = resolve(dirname(resolvePlanPath(indexPlanPath, baseCwd)), path);
+    if (readablePlanFile(sibling)) return planPathForDisplay(sibling, indexPlanPath, baseCwd);
+  }
+
+  return undefined;
+}
+
+function slicePlanPathsFromIndexMarkdown(markdown: string, indexPlanPath: string, baseCwd?: string): string[] {
+  const candidates = markdown.match(/@?(?:[A-Za-z0-9._~/-]+\/)?[A-Za-z0-9._~/-]*slice[-_]\d+[A-Za-z0-9._~/-]*\.md\b/gi) ?? [];
+  const paths: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of candidates) {
+    const path = slicePlanPathFromIndexCandidate(candidate, indexPlanPath, baseCwd);
+    if (!path || path === indexPlanPath || seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
+  }
+
+  return paths;
+}
+
+function currentSlicePlanPathFromIndex(planPath: string, markdown: string, baseCwd?: string): string | undefined {
+  const slicePaths = slicePlanPathsFromIndexMarkdown(markdown, planPath, baseCwd);
+  let lastTaskSlice: string | undefined;
+
+  for (const slicePath of slicePaths) {
+    const sliceMarkdown = readPlanMarkdown(slicePath, baseCwd);
+    if (!sliceMarkdown) continue;
+    const tasks = planTasksFromMarkdown(sliceMarkdown);
+    if (tasks.length === 0) continue;
+    lastTaskSlice = slicePath;
+    if (tasks.some((task) => !task.complete)) return slicePath;
+  }
+
+  return lastTaskSlice;
 }
 
 function sliceProgressForPlanPath(planPath: string, baseCwd?: string): { currentSliceIndex: number; sliceCount: number } | undefined {
@@ -313,6 +377,11 @@ export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: s
   if (!markdown) return undefined;
 
   const tasks = planTasksFromMarkdown(markdown);
+  if (tasks.length === 0) {
+    const slicePlan = currentSlicePlanPathFromIndex(planPath, markdown, baseCwd);
+    if (slicePlan && slicePlan !== planPath) return workflowTaskFooterLine(slicePlan, baseCwd, theme);
+  }
+
   const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
   const sliceProgress = sliceProgressSuffix(planPath, baseCwd, styleLabel);
   const currentIndex = tasks.findIndex((task) => !task.complete);
@@ -333,6 +402,9 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
 
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
+    const slicePlan = currentSlicePlanPathFromIndex(state.activePlan, markdown, baseCwd);
+    if (slicePlan && slicePlan !== state.activePlan) return refreshWorkflowTasksFromPlan({ ...state, activePlan: slicePlan }, baseCwd);
+
     return {
       ...state,
       currentTask: undefined,
@@ -443,15 +515,21 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   });
 }
 
-function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }): string {
+function phaseRunCountSuffix(phase: WorkflowPhase, stats?: WorkflowTaskStats): string {
+  const count = phase === "verify" ? stats?.verifyRuns : phase === "review" ? stats?.reviewRuns : undefined;
+  return count && count > 1 ? ` (${count})` : "";
+}
+
+function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }, currentStats?: WorkflowTaskStats): string {
   const status = state.phases[phase];
-  if (status === "complete") return `✓${phase}`;
+  const countSuffix = phaseRunCountSuffix(phase, currentStats);
+  if (status === "complete") return `✓${phase}${countSuffix}`;
   if (status === "active") {
-    const text = `[${phase}]`;
+    const text = `[${phase}]${countSuffix}`;
     return theme?.fg?.("success", text) ?? theme?.fg?.("green", text) ?? text;
   }
   if (OPTIONAL_PHASES.has(phase)) return theme?.fg?.("dim", phase) ?? theme?.fg?.("muted", phase) ?? phase;
-  return phase;
+  return `${phase}${countSuffix}`;
 }
 
 function totalStatsTasks(session: WorkflowStatsSession, planPath?: string): WorkflowTaskStats[] {
@@ -522,6 +600,11 @@ export function nextWorkflowActionForActivePlanLifecycle(state: WorkflowState, b
   if (!markdown) return { prompt: nextPromptForPhase("build", state.activePlan) };
 
   const tasks = planTasksFromMarkdown(markdown);
+  if (tasks.length === 0) {
+    const slicePlan = currentSlicePlanPathFromIndex(state.activePlan, markdown, baseCwd);
+    if (slicePlan && slicePlan !== state.activePlan) return nextWorkflowActionForActivePlanLifecycle({ ...state, activePlan: slicePlan }, baseCwd);
+  }
+
   const task = tasks.find((candidate) => !candidate.complete);
   if (!task) return { prompt: tasks.length > 0 ? nextPromptForPhase("finish", state.activePlan) : nextPromptForPhase("build", state.activePlan) };
 

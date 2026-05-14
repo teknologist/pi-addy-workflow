@@ -18,6 +18,7 @@ export type WorkflowTaskStats = {
   taskIndex?: number;
   taskTitle?: string;
   turns: number;
+  verifyRuns: number;
   reviewRuns: number;
   issues: WorkflowIssueStats;
 };

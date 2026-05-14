@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export type AddyWorkflowConfig = {
   auto: {
@@ -18,7 +18,7 @@ type ConfigContext = {
 
 type ConfigEnv = Record<string, string | undefined>;
 
-const DEFAULT_CONFIG: AddyWorkflowConfig = {
+export const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig = {
   auto: {
     freshContext: {
       betweenTasks: true,
@@ -31,8 +31,8 @@ function cloneDefaultConfig(): AddyWorkflowConfig {
   return {
     auto: {
       freshContext: {
-        betweenTasks: DEFAULT_CONFIG.auto.freshContext.betweenTasks,
-        beforeReview: DEFAULT_CONFIG.auto.freshContext.beforeReview,
+        betweenTasks: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.betweenTasks,
+        beforeReview: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeReview,
       },
     },
   };
@@ -69,6 +69,22 @@ function mergeConfig(base: AddyWorkflowConfig, raw: unknown): AddyWorkflowConfig
   };
 }
 
+function globalConfigPath(home = homedir()): string {
+  return join(home, ".pi", "agent", "addy-workflow.json");
+}
+
+export function ensureGlobalAddyWorkflowConfig(ctx: ConfigContext = {}, home = homedir()): void {
+  const path = globalConfigPath(home);
+  if (existsSync(path)) return;
+
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(DEFAULT_ADDY_WORKFLOW_CONFIG, null, 2)}\n`, { flag: "wx" });
+  } catch {
+    ctx.ui?.notify?.(`Could not create default Addy workflow config: ${path}`, "warning");
+  }
+}
+
 function readConfigFile(path: string, base: AddyWorkflowConfig, notify?: (message: string, level?: string) => void): AddyWorkflowConfig {
   if (!existsSync(path)) return base;
 
@@ -100,7 +116,7 @@ function applyEnv(config: AddyWorkflowConfig, env: ConfigEnv): AddyWorkflowConfi
 export function loadAddyWorkflowConfig(ctx: ConfigContext = {}, env: ConfigEnv = process.env): AddyWorkflowConfig {
   const notify = ctx.ui?.notify;
   let config = cloneDefaultConfig();
-  config = readConfigFile(join(homedir(), ".pi", "agent", "addy-workflow.json"), config, notify);
+  config = readConfigFile(globalConfigPath(), config, notify);
   if (ctx.cwd) config = readConfigFile(join(ctx.cwd, ".pi", "addy-workflow.json"), config, notify);
   return applyEnv(config, env);
 }

@@ -272,6 +272,7 @@ function emptyTaskStats(target: Required<WorkflowStatsTarget>): WorkflowTaskStat
     taskIndex: target.taskIndex || undefined,
     taskTitle: target.taskTitle || undefined,
     turns: 0,
+    verifyRuns: 0,
     reviewRuns: 0,
     issues: emptyIssueStats(),
   };
@@ -279,6 +280,31 @@ function emptyTaskStats(target: Required<WorkflowStatsTarget>): WorkflowTaskStat
 
 export function recordWorkflowTaskTurn(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
   return updateWorkflowTaskStats(state, target, (existing) => ({ ...existing, turns: existing.turns + 1 }));
+}
+
+export function recordWorkflowVerifyRun(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
+  const withTurn = recordWorkflowTaskTurn(state, target);
+  const key = statsTaskKey(withTurn, target);
+  const stats = withTurn.stats ?? createEmptyWorkflowStats();
+  const existing = stats.active.tasks[key];
+  if (!existing) return withTurn;
+
+  return {
+    ...withTurn,
+    stats: {
+      active: {
+        ...stats.active,
+        tasks: {
+          ...stats.active.tasks,
+          [key]: {
+            ...existing,
+            verifyRuns: (existing.verifyRuns ?? 0) + 1,
+          },
+        },
+      },
+      history: stats.history,
+    },
+  };
 }
 
 export function recordWorkflowReviewRun(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
@@ -298,7 +324,7 @@ export function recordWorkflowReviewRun(state: WorkflowState, target: WorkflowSt
           ...stats.active.tasks,
           [key]: {
             ...existing,
-            reviewRuns: existing.reviewRuns + 1,
+            reviewRuns: (existing.reviewRuns ?? 0) + 1,
           },
         },
       },
@@ -339,6 +365,7 @@ function recordManualTaskTurn(previous: WorkflowState, state: WorkflowState, eve
   if (event.source !== "user-input" && event.source !== "command") return state;
   const command = commandNameFromText(event.text ?? event.command);
   if (!manualTurnCommand(command)) return state;
+  if (command === "/addy-verify") return recordWorkflowVerifyRun(state);
   if (command === "/addy-review") return recordWorkflowReviewRun(state);
   return recordWorkflowTaskTurn(state);
 }

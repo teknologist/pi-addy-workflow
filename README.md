@@ -34,7 +34,7 @@ Prompts:
 - Workflow monitor renders the phase strip with `ctx.ui.setWidget`.
 - Slice plans track `[ ] Implemented`, `[ ] Verified`, and `[ ] Reviewed`; workflow prompts keep those checkboxes synchronized with real evidence.
 - `/addy-auto` appends scoped recovery guidance to auto-dispatched prompts so routine blockers are investigated with `addy-auto-unblock` before pausing. See [Addy Auto Unblock Flow](docs/addy-auto-unblock-flow.md).
-- `/addy-auto` starts a fresh Pi session between completed task commits by default. Configure `.pi/addy-workflow.json` with `{ "auto": { "freshContext": { "betweenTasks": true, "beforeReview": false } } }`; environment overrides are `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` and `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW`.
+- `/addy-auto` starts from the first unfinished slice when given a slice index plan, then starts a fresh Pi session between completed task commits by default. The extension creates `~/.pi/agent/addy-workflow.json` with defaults on startup; override per project with `.pi/addy-workflow.json`. Environment overrides are `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` and `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW`.
 - Agent installer syncs bundled agents into `~/.pi/agent/agents/pi-addy-workflow/` for pi-subagents discovery.
 
 `todo` and `subagent` are optional companion tools. Missing tools warn but do not block session start.
