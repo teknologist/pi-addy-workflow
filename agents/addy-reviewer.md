@@ -1,7 +1,7 @@
 ---
 name: addy-reviewer
 description: Addy workflow reviewer for correctness, quality, architecture, security, and performance.
-thinking: medium
+thinking: xhigh
 defaultProgress: true
 color: blue
 ---

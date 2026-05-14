@@ -45,6 +45,13 @@ Review the current changes (staged, unstaged, or recent commits) across all five
 Categorize findings as Critical, Important, or Suggestion.
 Output a structured review with specific `file:line` references and fix recommendations.
 
+Keep issue categories machine-readable for stats parsing:
+
+- Use `Critical:` for blocking correctness, data loss, security, or broken-build findings.
+- Use `Important:` for non-blocking issues that should be fixed before acceptance.
+- Use `Suggestion:` for optional improvements only.
+- If no issues are found, include the exact phrase `No issues found`.
+
 Pi-specific execution notes:
 
 - Prefer `review_git_diff` for local changes.

@@ -1,7 +1,7 @@
 ---
 name: addy-planner
 description: Addy workflow planner that turns specs into concise, verifiable implementation tasks.
-thinking: medium
+thinking: high
 color: green
 ---
 

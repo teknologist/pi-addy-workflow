@@ -1,7 +1,7 @@
 ---
 name: addy-implementer
 description: Addy workflow implementation agent that builds one small verified slice at a time.
-thinking: low
+thinking: high
 defaultProgress: true
 color: purple
 ---

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-auto", "addy-finish", "addy-ship"];
-const planPathPrompts = ["addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-finish", "addy-ship"];
+const prompts = ["addy-define", "addy-plan", "addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-auto", "addy-stats", "addy-finish", "addy-ship"];
+const planPathPrompts = ["addy-build", "addy-code-simplify", "addy-verify", "addy-review", "addy-fix-all", "addy-stats", "addy-finish", "addy-ship"];
 const agents = [
   "addy-planner",
   "addy-implementer",
@@ -279,6 +279,29 @@ test("auto prompt defines autonomous task loop boundaries", async () => {
   assert.match(content, /expected git state/i);
   assert.match(content, /ambiguous-but-inferable next slices/i);
   assert.match(content, /unsafe, destructive, external, or genuinely undecidable/i);
+});
+
+test("stats prompt is read-only and prompts require completion stats", async () => {
+  const stats = await readFile(join("prompts", "addy-stats.md"), "utf8");
+  const auto = await readFile(join("prompts", "addy-auto.md"), "utf8");
+  const finish = await readFile(join("prompts", "addy-finish.md"), "utf8");
+  const review = await readFile(join("prompts", "addy-review.md"), "utf8");
+
+  assert.match(stats, /argument-hint: "\[plan-path\]"/);
+  assert.match(stats, /Supplied plan path argument, if any: `\$ARGUMENTS`\./);
+  assert.match(stats, /read-only/i);
+  assert.match(stats, /Do not edit/i);
+  assert.match(stats, /No Addy stats recorded yet/);
+  assert.match(auto, /final aggregate stats/i);
+  assert.match(auto, /completed or stopped loop/i);
+  assert.match(finish, /single-task completion stats/i);
+  assert.match(finish, /Turns:/);
+  assert.match(finish, /Review runs:/);
+  assert.match(finish, /Issues:/);
+  assert.match(review, /Critical:/);
+  assert.match(review, /Important:/);
+  assert.match(review, /Suggestion:/);
+  assert.match(review, /machine-readable/i);
 });
 
 test("auto workflow end-to-end validation evidence is recorded", async () => {

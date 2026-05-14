@@ -26,7 +26,7 @@ Plan-selection rules follow the same rules as `/addy-build`:
 5. If the active/supplied slice is fully implemented, move to the next slice only when it can be inferred unambiguously from a forward-reference link, same-directory index, or next numbered slice filename.
 6. Ask the user with bounded candidate plan paths only when no active/supplied plan exists or the next slice cannot be inferred uniquely.
 
-`/addy-auto stop` stops autonomous mode. It must not clear the active spec, active plan, task progress, or existing plan checkbox evidence.
+`/addy-auto stop` stops autonomous mode. It must not clear the active spec, active plan, task progress, existing plan checkbox evidence, or active/historical stats. The stopped-loop output must include final aggregate stats for the completed or stopped loop, including turns, review runs, and issue buckets.
 
 Autonomous mode may commit after the current task's build, verify, and review pass. Do not commit work with failing tests, failing typecheck/build, unresolved review blockers, or unsynchronized plan status. Do not push, deploy, or publish unless the user explicitly asks.
 
@@ -64,6 +64,12 @@ Task commit policy:
 - Do not call `ask_user_question` for this auto-task commit. `/addy-auto` is explicit permission to commit completed, verified, reviewed task work.
 - Use the same direct commit workflow as `/addy-finish`: inspect `git status`, stage all current changed files for the completed task including the plan checkbox update, review the staged diff, create one concise commit, and report the commit hash.
 - After the commit is complete, continue to the next lifecycle action automatically.
+
+Completion stats policy:
+
+- Every completed or stopped `/addy-auto` loop must output final aggregate stats for the loop.
+- Include total turns, review runs, and issues by Critical, Important, Suggestion, and Unknown buckets.
+- Keep stats aggregate-only; do not include raw review text, logs, transcripts, or full findings.
 
 Pi-specific execution notes:
 

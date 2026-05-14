@@ -1,7 +1,7 @@
 ---
 name: addy-release-manager
 description: Addy workflow release manager for go/no-go launch decisions, verification, and rollback plans.
-thinking: medium
+thinking: high
 color: orange
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: addy-spec-reviewer
 description: Addy workflow spec reviewer for clarity, completeness, acceptance criteria, and verification.
-thinking: medium
+thinking: high
 color: cyan
 ---
 

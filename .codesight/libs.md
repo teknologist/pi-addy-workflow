@@ -1,0 +1,43 @@
+# Libraries
+
+- `extensions/agent-installer/core.ts`
+  - function defaultAgentTargetRoot: (home) => void
+  - function isSafeTargetPath: (targetRoot, candidate) => boolean
+  - function addGeneratedNotice: (markdown) => string
+  - function listMarkdownFiles: (dir, base) => Promise<string[]>
+  - function syncAgents: (options) => Promise<AgentSyncResult>
+  - function packageAgentSourceRoot: (importMetaUrl) => string
+  - _...3 more_
+- `extensions/bootstrap/core.ts`
+  - function shouldSkipBootstrap: (env, string | undefined>) => boolean
+  - function toolAvailable: (tools, name) => boolean
+  - function buildAddyBootstrap: (tools?) => string
+  - function injectAddyBootstrap: (options) => string | undefined
+  - type BootstrapToolAvailability
+  - type BootstrapOptions
+  - _...1 more_
+- `extensions/workflow-monitor/warnings.ts` — function workflowWarningText: (state) => string | undefined
+- `extensions/workflow-monitor/workflow-handler.ts`
+  - function getContextWorkflowState: (ctx) => WorkflowState
+  - function setContextWorkflowState: (ctx, state, appendEntry?) => void
+  - function recordWorkflowReviewRun: (state, target) => WorkflowState
+  - function recordWorkflowReviewIssues: (state, issues) => WorkflowState
+  - function summarizeWorkflowTasks: (ctx, state) => Promise<WorkflowState>
+  - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
+  - _...3 more_
+- `extensions/workflow-monitor/workflow-tracker.ts`
+  - function createEmptyWorkflowStats: () => WorkflowStats
+  - function serializeWorkflowState: (state) => string
+  - function parseWorkflowState: (value) => WorkflowState
+  - function renderWorkflowStrip: (state, theme?, text) => void
+  - function workflowArtifactForFooter: (state) => string | undefined
+  - function workflowArtifactName: (path) => string
+  - _...12 more_
+- `extensions/workflow-monitor/workflow-transitions.ts`
+  - function createInitialWorkflowState: () => WorkflowState
+  - function phaseIndex: (phase) => number
+  - function resolveTargetPhase: (event, current?) => WorkflowPhase | undefined
+  - function transitionWorkflow: (state, event) => WorkflowState
+  - type WorkflowPhase
+  - type PhaseStatus
+  - _...8 more_

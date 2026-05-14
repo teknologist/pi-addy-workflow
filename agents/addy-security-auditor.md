@@ -1,7 +1,7 @@
 ---
 name: addy-security-auditor
 description: Addy workflow security auditor for vulnerabilities, secrets, auth, unsafe I/O, and dependency risk.
-thinking: medium
+thinking: xhigh
 color: red
 ---
 
