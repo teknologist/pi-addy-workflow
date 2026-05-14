@@ -103,6 +103,16 @@ test("finish prompt advances tasks and slices with commit prompts", async () => 
   assert.match(content, /\/addy-build <current-slice-plan-path>/);
   assert.match(content, /\/addy-build <next-slice-plan-path>/);
   assert.match(content, /\/commit/);
+  assert.match(content, /cross-repo-aware `\/commit`/);
+  assert.match(content, /non-interactive mode/);
+  assert.match(content, /derive the full repository scope/);
+  assert.match(content, /Owner repo/);
+  assert.match(content, /Companion repo/);
+  assert.match(content, /Pass that full repository scope to `\/commit --non-interactive`/);
+  assert.match(content, /fresh-session file-touch history/);
+  assert.match(content, /finish choice is already the confirmation/);
+  assert.match(content, /do not call `ask_user_question` again for commit confirmation/);
+  assert.match(content, /do not replace `\/commit` with a hand-rolled single-repository git flow/);
   assert.match(content, /\/addy-ship/);
   assert.match(content, /execute the selected action directly/);
   assert.match(content, /Never respond with only the slash command text/);

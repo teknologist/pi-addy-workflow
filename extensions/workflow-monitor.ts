@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureGlobalAddyWorkflowConfig, loadAddyWorkflowConfig } from "./workflow-monitor/config.ts";
 import { archiveWorkflowStats, getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, recordWorkflowTaskTurn, recordWorkflowVerifyRun, resetWorkflow, setContextWorkflowState, type WorkflowStatsTarget } from "./workflow-monitor/workflow-handler.ts";
@@ -286,15 +286,76 @@ function reviewedTaskWasCompleted(previousState: ReturnType<typeof getContextWor
     || state.taskCount !== previousState.taskCount;
 }
 
-function repositoryScopeForPlan(planPath: string | undefined, baseCwd?: string): string | undefined {
-  if (!planPath) return undefined;
+function uniqueDefined(values: Array<string | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+function repoScopeValueToPath(value: string, baseCwd?: string): string | undefined {
+  const cleaned = value.replace(/\s+only\.?$/i, "").trim();
+  if (!cleaned) return undefined;
+  if (/^(?:current repo(?:sitory)?|owner repo(?:sitory)?)$/i.test(cleaned)) return baseCwd;
+  if (isAbsolute(cleaned)) return cleaned;
+  if (cleaned.startsWith("./") || cleaned.startsWith("../") || cleaned === "." || cleaned === "..") return resolve(baseCwd ?? process.cwd(), cleaned);
+  if (baseCwd && basename(baseCwd) === cleaned) return baseCwd;
+  return cleaned;
+}
+
+function extractBacktickedValues(line: string): string[] {
+  return [...line.matchAll(/`([^`]+)`/g)].map((match) => match[1]?.trim()).filter((value): value is string => Boolean(value));
+}
+
+function extractRepositoryScopeLineValues(markdown: string): string[] {
+  const line = markdown.match(/^Repository scope:\s*(.+)$/im)?.[1];
+  if (!line) return [];
+  const backticked = extractBacktickedValues(line);
+  if (backticked.length > 0) return backticked;
+  return line.split(/,|\band\b/i).map((value) => value.replace(/\.$/, "").trim()).filter(Boolean);
+}
+
+function extractIndexPlanPath(markdown: string): string | undefined {
+  return markdown.match(/^Index:\s*`([^`]+)`/im)?.[1]?.trim();
+}
+
+function extractOwnerAndCompanionRepos(markdown: string): string[] {
+  const repos: string[] = [];
+  for (const label of ["Owner repo", "Companion repo"]) {
+    const line = markdown.match(new RegExp(`^\\*\\*${label}:\\*\\*\\s*(.+)$`, "im"))?.[1];
+    if (!line) continue;
+    const backticked = extractBacktickedValues(line);
+    repos.push(...(backticked.length > 0 ? backticked : [line.replace(/^sibling\s+/i, "").trim()]));
+  }
+  return repos;
+}
+
+function repositoryScopesForPlan(planPath: string | undefined, baseCwd?: string): string[] {
+  if (!planPath) return baseCwd ? [baseCwd] : [];
 
   try {
-    const markdown = readFileSync(resolveWorkflowPlanPath(planPath, baseCwd), "utf8");
-    return markdown.match(/^Repository scope:\s*`([^`]+)`/m)?.[1]?.trim();
+    const resolvedPlanPath = resolveWorkflowPlanPath(planPath, baseCwd);
+    const markdown = readFileSync(resolvedPlanPath, "utf8");
+    const indexPlanPath = extractIndexPlanPath(markdown);
+    let indexMarkdown = "";
+    if (indexPlanPath) {
+      try {
+        indexMarkdown = readFileSync(resolveWorkflowPlanPath(indexPlanPath, baseCwd), "utf8");
+      } catch {
+        indexMarkdown = "";
+      }
+    }
+
+    return uniqueDefined([
+      baseCwd,
+      ...extractOwnerAndCompanionRepos(indexMarkdown || markdown).map((value) => repoScopeValueToPath(value, baseCwd)),
+      ...extractRepositoryScopeLineValues(markdown).map((value) => repoScopeValueToPath(value, baseCwd)),
+    ]);
   } catch {
-    return undefined;
+    return baseCwd ? [baseCwd] : [];
   }
+}
+
+function repositoryScopeForPlan(planPath: string | undefined, baseCwd?: string): string | undefined {
+  const scopes = repositoryScopesForPlan(planPath, baseCwd);
+  return scopes.length > 0 ? scopes.join("; ") : undefined;
 }
 
 function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>, taskTitle?: string, baseCwd?: string): string {
@@ -312,11 +373,12 @@ function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>,
     `Completed task: ${task}`,
     "",
     "Required steps:",
-    "1. Use the cross-repo-aware `/commit` prompt/command for the repository scope above.",
-    "2. Commit only files for this completed task, including the plan checkbox update when it changed. Do not stage unrelated work.",
-    "3. If the plan checkbox file lives in a different repo from the implementation, `/commit` should handle the relevant repos together.",
-    "4. If there are no changes in any relevant repo, say `No changes to commit` and stop.",
-    "5. Report each commit hash in the form `COMMIT: <hash>`.",
+    "1. Use the cross-repo-aware `/commit --non-interactive` prompt/command for the repository scope above.",
+    "2. Pass the full repository scope above to `/commit`; do not rely on fresh-session file-touch history.",
+    "3. Commit only files for this completed task, including the plan checkbox update when it changed. Do not stage unrelated work.",
+    "4. If the plan checkbox file lives in a different repo from the implementation, `/commit` should handle the relevant repos together.",
+    "5. If there are no changes in any relevant repo, say `No changes to commit` and stop.",
+    "6. Report each commit hash in the form `COMMIT: <hash>`.",
     "",
     "Do not call ask_user_question. Do not start the next task yourself; Addy auto will continue after this commit turn ends.",
     "",

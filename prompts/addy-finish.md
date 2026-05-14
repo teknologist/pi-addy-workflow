@@ -39,13 +39,15 @@ Also warn when the Addy workflow state itself shows a phase jump between build a
 
 Legacy checklist-only plans remain supported: a checked top-level task is treated as complete, and an unchecked top-level task is treated as unfinished, but there are no per-step skip warnings because those plans do not encode `Implemented`/`Verified`/`Reviewed` separately.
 
+Commit execution rule: whenever the selected finish action is `commit first` or `commit`, use the user's cross-repo-aware `/commit` prompt/command in non-interactive mode. Before calling it, derive the full repository scope from the active/supplied plan and its index: include the current/owner repository for plan checkbox changes, any `Repository scope:` entries, and index metadata such as `Owner repo` and `Companion repo`. Pass that full repository scope to `/commit --non-interactive`; do not rely on fresh-session file-touch history. The finish choice is already the confirmation, so `/commit` must not ask again. Preserve cross-repo behavior; do not replace `/commit` with a hand-rolled single-repository git flow.
+
 If the current slice has unfinished tasks:
 
 1. Call the `ask_user_question` tool with one single-select question asking whether to commit the current work before moving to the next task.
 2. Options must be exactly:
    - `commit first` — commit unstaged files before any more build work.
    - `next task` — implement the next unfinished task in the current slice using the Addy Build workflow.
-3. If the user chooses `commit first`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
+3. If the user chooses `commit first`, run the cross-repo-aware `/commit` prompt/command in non-interactive mode (for example, `/commit --non-interactive`) for the relevant plan/repository scope. Treat this finish answer as the user's commit confirmation; do not call `ask_user_question` again for commit confirmation. Let `/commit` handle multi-repo detection, staging, and committing, and report each commit hash. Do not merely print `/commit`.
 4. If the user chooses `next task`, immediately continue with the Addy Build workflow for `<current-slice-plan-path>` in this same turn. Do not merely print `/addy-build <current-slice-plan-path>` or wait for the user to submit it.
 
 If the current slice is complete and a next unfinished slice exists:
@@ -54,7 +56,7 @@ If the current slice is complete and a next unfinished slice exists:
 2. Options must be exactly:
    - `commit first` — commit unstaged files before starting another slice.
    - `next slice` — start the first unfinished task in the next slice using the Addy Build workflow.
-3. If the user chooses `commit first`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
+3. If the user chooses `commit first`, run the cross-repo-aware `/commit` prompt/command in non-interactive mode (for example, `/commit --non-interactive`) for the relevant plan/repository scope. Treat this finish answer as the user's commit confirmation; do not call `ask_user_question` again for commit confirmation. Let `/commit` handle multi-repo detection, staging, and committing, and report each commit hash. Do not merely print `/commit`.
 4. If the user chooses `next slice`, immediately continue with the Addy Build workflow for `<next-slice-plan-path>` in this same turn. Do not merely print `/addy-build <next-slice-plan-path>` or wait for the user to submit it.
 
 If all slices are complete and Addy Auto Mode is active:
@@ -65,7 +67,7 @@ If all slices are complete and Addy Auto Mode is active:
 4. Options must be exactly:
    - `commit` — commit unstaged files.
    - `finish without commit` — stop Addy Auto Mode without committing.
-5. If the user chooses `commit`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, report the commit hash, include cycle completion stats, then say `Finished!` and stop. Do not merely print `/commit`.
+5. If the user chooses `commit`, run the cross-repo-aware `/commit` prompt/command in non-interactive mode (for example, `/commit --non-interactive`) for the relevant plan/repository scope. Treat this finish answer as the user's commit confirmation; do not call `ask_user_question` again for commit confirmation. Let `/commit` handle multi-repo detection, staging, and committing, report each commit hash, include cycle completion stats, then say `Finished!` and stop. Do not merely print `/commit`.
 6. If the user chooses `finish without commit`, say `Finished!`, include cycle completion stats, and stop. Do not run another Addy workflow command.
 
 Cycle completion stats cover either the full Addy Auto session or the current single lifecycle cycle (`build → simplify → verify → review → finish`). Show these stats whether or not the user chooses to commit.
@@ -84,7 +86,7 @@ If all slices are complete and Addy Auto Mode is not active:
 2. Options must be exactly:
    - `commit` — commit unstaged files.
    - `ship` — continue with the Addy Ship workflow.
-3. If the user chooses `commit`, perform the commit workflow directly: inspect `git status`, stage the relevant unstaged files, generate an appropriate commit message, run `git commit`, and report the commit hash. Do not merely print `/commit`.
+3. If the user chooses `commit`, run the cross-repo-aware `/commit` prompt/command in non-interactive mode (for example, `/commit --non-interactive`) for the relevant plan/repository scope. Treat this finish answer as the user's commit confirmation; do not call `ask_user_question` again for commit confirmation. Let `/commit` handle multi-repo detection, staging, and committing, and report each commit hash. Do not merely print `/commit`.
 4. If the user chooses `ship`, immediately continue with the Addy Ship workflow, passing the active/supplied plan path when available. Do not merely print `/addy-ship` or wait for the user to submit it.
 
 For every answer returned by `ask_user_question`, execute the selected action directly in the current assistant turn. Never respond with only the slash command text for the user to run manually.

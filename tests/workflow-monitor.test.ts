@@ -571,6 +571,8 @@ test("auto loop commits a completed reviewed task before moving to the next task
   const planPath = join("docs", "plans", "auto-loop.md");
   mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
   writeFileSync(join(cwd, planPath), [
+    "Repository scope: `../invoices-converter` only.",
+    "",
     "## Task 1: Current",
     "- [x] Implemented",
     "- [x] Verified",
@@ -606,8 +608,58 @@ test("auto loop commits a completed reviewed task before moving to the next task
   assert.equal(sentMessages.length, 1);
   assert.match(sentMessages[0], /^# Addy Auto Commit/);
   assert.match(sentMessages[0], /Completed task: Current/);
+  assert.match(sentMessages[0], new RegExp(`Repository scope: ${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}; `));
+  assert.match(sentMessages[0], /invoices-converter/);
+  assert.match(sentMessages[0], /`\/commit --non-interactive`/);
   assert.match(sentMessages[0], /Invocation: `__addy-auto-task-commit__`/);
   assert.match(sentMessages[0], /Do not call ask_user_question/);
+});
+
+test("auto loop extracts cross-repo scope from slice index metadata", async () => {
+  const cwd = join(stateDir, "invoicehub-files-to-api");
+  const planPath = join("docs", "plans", "slice-01.md");
+  const indexPath = join("docs", "plans", "index.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, indexPath), [
+    "# Index",
+    "**Owner repo:** `invoicehub-files-to-api`",
+    "**Companion repo:** sibling `../invoices-converter`",
+  ].join("\n"));
+  writeFileSync(join(cwd, planPath), [
+    "Index: `docs/plans/index.md`",
+    "Repository scope: `../invoices-converter` only.",
+    "",
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-task-commit-cross-repo-scope",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found. Marked Reviewed." }] }] }, ctx);
+
+  assert.match(sentMessages[0], new RegExp(`Repository scope: ${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}; `));
+  assert.match(sentMessages[0], new RegExp(join(stateDir, "invoices-converter").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(sentMessages[0], /Pass the full repository scope above to `\/commit`/);
 });
 
 test("auto loop commits reviewed task even when refreshed state already points at next task", async () => {
