@@ -56,6 +56,7 @@ test("registers workflow commands and handlers", () => {
   assert.ok(events.has("before_agent_start"));
   assert.ok(events.has("agent_end"));
   assert.ok(commands.has("addy-auto"));
+  assert.ok(commands.has("addy-stats"));
   assert.ok(commands.has("addy-workflow-reset"));
   assert.ok(commands.has("addy-workflow-next"));
 });
@@ -1084,6 +1085,76 @@ test("session start restores persisted workflow widget state", async () => {
   assert.equal(nextCtx.state.current, "build");
   assert.equal(nextCtx.state.activePlan, planPath);
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | startup-restore.md"]);
+});
+
+test("manual Addy turns record active task stats and addy-stats is read-only", async () => {
+  const cwd = join(stateDir, "manual-stats-project");
+  const planPath = join("docs", "plans", "manual-stats.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Count this task",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = { cwd, id: "manual-stats", ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) } };
+
+  await commands.get("addy-stats")?.handler({}, ctx);
+  assert.deepEqual(notices.at(-1), ["No Addy stats recorded yet", "info"]);
+
+  for (const command of ["/addy-build", "/addy-verify", "/addy-code-simplify", "/addy-fix-all", "/addy-finish"]) {
+    await events.get("input")?.({ input: `${command} ${planPath}` }, ctx);
+  }
+  await commands.get("addy-stats")?.handler({}, ctx);
+
+  const statsKey = `${planPath}\u001f\u001f1\u001fCount this task`;
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);
+  assert.match(notices.at(-1)?.[0] ?? "", /Turns: 5/);
+  assert.match(notices.at(-1)?.[0] ?? "", /Current task 1: Count this task — 5 turns/);
+  assert.equal(notices.at(-1)?.[1], "info");
+});
+
+test("legacy workflow state normalizes to empty stats", () => {
+  const ctx: any = {
+    sessionManager: {
+      getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, {
+        current: "build",
+        phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+        warnings: [],
+      }]],
+    },
+  };
+
+  assert.deepEqual(getContextWorkflowState(ctx).stats, { active: { tasks: {} }, history: [] });
+});
+
+test("reset command archives active stats history", async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+
+  const widgets: Array<[string, unknown]> = [];
+  const ctx: any = {
+    id: "reset-stats-history-test",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "build",
+      stats: { active: { tasks: { task: { taskTitle: "Task", turns: 2, reviewRuns: 0, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) },
+  };
+
+  await commands.get("addy-workflow-reset")?.handler({}, ctx);
+
+  assert.deepEqual(ctx.state.stats.active.tasks, {});
+  assert.equal(ctx.state.stats.history.length, 1);
+  assert.equal(ctx.state.stats.history[0].endedReason, "reset");
+  assert.equal(ctx.state.stats.history[0].tasks.task.turns, 2);
+  assert.deepEqual(widgets, [["pi-addy-workflow", undefined]]);
 });
 
 test("reset command clears widget, persists reset state, and continues", async () => {

@@ -1,7 +1,7 @@
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
-import { WORKFLOW_PHASES, type WorkflowPhase, type WorkflowState, createInitialWorkflowState } from "./workflow-transitions.ts";
+import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase, type WorkflowState, type WorkflowStats, type WorkflowStatsSession, type WorkflowTaskStats, createInitialWorkflowState } from "./workflow-transitions.ts";
 
 export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
 export const WORKFLOW_STATE_ENTRY_TYPE = "pi-addy-workflow-state";
@@ -9,6 +9,64 @@ const OPTIONAL_PHASES = new Set<WorkflowPhase>(["simplify"]);
 
 function phaseIndex(phase: WorkflowPhase): number {
   return WORKFLOW_PHASES.indexOf(phase);
+}
+
+function emptyIssueStats(): WorkflowIssueStats {
+  return { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 };
+}
+
+function normalizeIssueStats(value: unknown): WorkflowIssueStats {
+  if (typeof value !== "object" || value === null) return emptyIssueStats();
+  const candidate = value as Partial<WorkflowIssueStats>;
+  const nonNegative = (number: unknown) => (typeof number === "number" && Number.isSafeInteger(number) && number >= 0 ? number : 0);
+  return {
+    critical: nonNegative(candidate.critical),
+    important: nonNegative(candidate.important),
+    suggestion: nonNegative(candidate.suggestion),
+    unknown: nonNegative(candidate.unknown),
+    total: nonNegative(candidate.total),
+  };
+}
+
+function normalizeTaskStats(value: unknown): WorkflowTaskStats | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<WorkflowTaskStats>;
+  const nonNegative = (number: unknown) => (typeof number === "number" && Number.isSafeInteger(number) && number >= 0 ? number : 0);
+  return {
+    plan: typeof candidate.plan === "string" ? candidate.plan : undefined,
+    sliceIndex: typeof candidate.sliceIndex === "number" && Number.isSafeInteger(candidate.sliceIndex) && candidate.sliceIndex > 0 ? candidate.sliceIndex : undefined,
+    taskIndex: typeof candidate.taskIndex === "number" && Number.isSafeInteger(candidate.taskIndex) && candidate.taskIndex > 0 ? candidate.taskIndex : undefined,
+    taskTitle: typeof candidate.taskTitle === "string" ? candidate.taskTitle : undefined,
+    turns: nonNegative(candidate.turns),
+    reviewRuns: nonNegative(candidate.reviewRuns),
+    issues: normalizeIssueStats(candidate.issues),
+  };
+}
+
+function normalizeStatsSession(value: unknown): WorkflowStatsSession {
+  if (typeof value !== "object" || value === null) return { tasks: {} };
+  const candidate = value as Partial<WorkflowStatsSession>;
+  const tasks: Record<string, WorkflowTaskStats> = {};
+  if (typeof candidate.tasks === "object" && candidate.tasks !== null) {
+    for (const [key, task] of Object.entries(candidate.tasks)) {
+      const normalized = normalizeTaskStats(task);
+      if (normalized) tasks[key] = normalized;
+    }
+  }
+  return { tasks, endedReason: typeof candidate.endedReason === "string" ? candidate.endedReason : undefined };
+}
+
+export function createEmptyWorkflowStats(): WorkflowStats {
+  return { active: { tasks: {} }, history: [] };
+}
+
+function normalizeWorkflowStats(value: unknown): WorkflowStats {
+  if (typeof value !== "object" || value === null) return createEmptyWorkflowStats();
+  const candidate = value as Partial<WorkflowStats>;
+  return {
+    active: normalizeStatsSession(candidate.active),
+    history: Array.isArray(candidate.history) ? candidate.history.map(normalizeStatsSession) : [],
+  };
 }
 
 function normalizeWorkflowState(state: WorkflowState): WorkflowState {
@@ -25,11 +83,14 @@ function normalizeWorkflowState(state: WorkflowState): WorkflowState {
     }
     : {};
 
-  if (!state.current || phaseIndex(state.current) <= phaseIndex("plan")) return { ...state, ...normalizedTasks };
+  const normalizedStats = { stats: normalizeWorkflowStats(state.stats) };
+
+  if (!state.current || phaseIndex(state.current) <= phaseIndex("plan")) return { ...state, ...normalizedTasks, ...normalizedStats };
 
   return {
     ...state,
     ...normalizedTasks,
+    ...normalizedStats,
     phases: {
       ...state.phases,
       define: "complete",
@@ -391,6 +452,49 @@ function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: 
   }
   if (OPTIONAL_PHASES.has(phase)) return theme?.fg?.("dim", phase) ?? theme?.fg?.("muted", phase) ?? phase;
   return phase;
+}
+
+function totalStatsTasks(session: WorkflowStatsSession, planPath?: string): WorkflowTaskStats[] {
+  return Object.values(session.tasks).filter((task) => !planPath || task.plan === planPath);
+}
+
+function sumTaskStats(tasks: WorkflowTaskStats[]): { turns: number; reviewRuns: number; issues: WorkflowIssueStats } {
+  return tasks.reduce((total, task) => ({
+    turns: total.turns + task.turns,
+    reviewRuns: total.reviewRuns + task.reviewRuns,
+    issues: {
+      critical: total.issues.critical + task.issues.critical,
+      important: total.issues.important + task.issues.important,
+      suggestion: total.issues.suggestion + task.issues.suggestion,
+      unknown: total.issues.unknown + task.issues.unknown,
+      total: total.issues.total + task.issues.total,
+    },
+  }), { turns: 0, reviewRuns: 0, issues: emptyIssueStats() });
+}
+
+export function renderWorkflowStatsText(state: WorkflowState, planPath?: string): string {
+  const stats = normalizeWorkflowStats(state.stats);
+  const activeTasks = totalStatsTasks(stats.active, planPath);
+  const historyTasks = stats.history.flatMap((session) => totalStatsTasks(session, planPath));
+  const allTasks = [...activeTasks, ...historyTasks];
+  if (allTasks.length === 0) return "No Addy stats recorded yet";
+
+  const totals = sumTaskStats(allTasks);
+  const lines = [
+    "Addy stats",
+    `Turns: ${totals.turns}`,
+    `Review runs: ${totals.reviewRuns}`,
+    `Issues: ${totals.issues.total} (Critical ${totals.issues.critical}, Important ${totals.issues.important}, Suggestions ${totals.issues.suggestion}, Unknown ${totals.issues.unknown})`,
+  ];
+
+  for (const task of activeTasks) {
+    const slice = task.sliceIndex ? `slice ${task.sliceIndex}, ` : "";
+    const taskLabel = task.taskIndex ? `task ${task.taskIndex}` : "task";
+    const title = task.taskTitle ? `: ${task.taskTitle}` : "";
+    lines.push(`Current ${slice}${taskLabel}${title} — ${task.turns} turns`);
+  }
+
+  return lines.join("\n");
 }
 
 export function nextPromptForPhase(phase: WorkflowPhase, artifact?: string): string {

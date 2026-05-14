@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, resetWorkflow, setContextWorkflowState } from "./workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_PHASES, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
-import { nextWorkflowActionForActivePlanLifecycle } from "./workflow-monitor/workflow-tracker.ts";
+import { nextWorkflowActionForActivePlanLifecycle, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
 type CommandEvent = string | { args?: string[]; input?: string };
 type InputEvent = { input?: string; text?: string };
@@ -511,6 +511,16 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       }, appendWorkflowEntry(pi));
 
       if (args[0] !== "stop") dispatchNextAutoWorkflowPrompt(pi, ctx, true);
+      return { action: "continue" as const };
+    },
+  });
+
+  pi.registerCommand?.("addy-stats", {
+    description: "Show Addy workflow stats for the active or supplied plan.",
+    handler: async (event: CommandEvent, ctx: unknown) => {
+      const args = parseCommandArgs(event);
+      const text = renderWorkflowStatsText(getContextWorkflowState(ctx as never), args.join(" ") || undefined);
+      (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(text, "info");
       return { action: "continue" as const };
     },
   });

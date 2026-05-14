@@ -4,10 +4,39 @@ export const ENFORCED_WORKFLOW_PHASES = ["build", "verify", "review"] as const;
 export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
 export type PhaseStatus = "pending" | "active" | "complete";
 
+export type WorkflowIssueStats = {
+  critical: number;
+  important: number;
+  suggestion: number;
+  unknown: number;
+  total: number;
+};
+
+export type WorkflowTaskStats = {
+  plan?: string;
+  sliceIndex?: number;
+  taskIndex?: number;
+  taskTitle?: string;
+  turns: number;
+  reviewRuns: number;
+  issues: WorkflowIssueStats;
+};
+
+export type WorkflowStatsSession = {
+  tasks: Record<string, WorkflowTaskStats>;
+  endedReason?: string;
+};
+
+export type WorkflowStats = {
+  active: WorkflowStatsSession;
+  history: WorkflowStatsSession[];
+};
+
 export type WorkflowState = {
   current?: WorkflowPhase;
   phases: Record<WorkflowPhase, PhaseStatus>;
   warnings: string[];
+  stats?: WorkflowStats;
   activeSpec?: string;
   activePlan?: string;
   currentTask?: string;
@@ -320,6 +349,7 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.warnings = warnings;
   next.activeSpec = baseState.activeSpec;
   next.activePlan = baseState.activePlan;
+  next.stats = baseState.stats;
   next.autoMode = baseState.autoMode;
   next.autoLastPrompt = baseState.autoLastPrompt;
   next.autoRetryKey = baseState.autoRetryKey;

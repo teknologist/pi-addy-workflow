@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { complete, type UserMessage } from "@earendil-works/pi-ai";
 import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
-import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, refreshWorkflowTasksFromPlan, renderWorkflowWidget } from "./workflow-tracker.ts";
+import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, createEmptyWorkflowStats, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, refreshWorkflowTasksFromPlan, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
 type SessionEntry = { type?: string; customType?: string; data?: unknown } | [string, unknown];
@@ -193,6 +193,67 @@ function taskNeedsSummary(task: string | undefined, summary: string | undefined)
   return !!task && task !== "none" && task !== "all tasks complete" && (!summary || summary.length > 36 || summary === task);
 }
 
+function commandNameFromText(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const [command] = text.trim().split(/\s+/, 1);
+  return command?.startsWith("/addy-") ? command : undefined;
+}
+
+function manualTurnCommand(command: string | undefined): boolean {
+  return command === "/addy-build"
+    || command === "/addy-verify"
+    || command === "/addy-code-simplify"
+    || command === "/addy-fix-all"
+    || command === "/addy-finish";
+}
+
+function statsTaskKey(state: WorkflowState): string {
+  return [state.activePlan ?? "", state.currentSliceIndex ?? "", state.currentTaskIndex ?? "", state.currentTask ?? ""].join("\u001f");
+}
+
+function recordManualTaskTurn(previous: WorkflowState, state: WorkflowState, event: WorkflowEvent): WorkflowState {
+  if (previous.autoMode) return state;
+  if (event.source !== "user-input" && event.source !== "command") return state;
+  if (!manualTurnCommand(commandNameFromText(event.text ?? event.command))) return state;
+  if (!state.activePlan && !state.currentTask) return state;
+
+  const stats = state.stats ?? createEmptyWorkflowStats();
+  const key = statsTaskKey(state);
+  const existing = stats.active.tasks[key];
+  return {
+    ...state,
+    stats: {
+      active: {
+        ...stats.active,
+        tasks: {
+          ...stats.active.tasks,
+          [key]: {
+            plan: state.activePlan,
+            sliceIndex: state.currentSliceIndex,
+            taskIndex: state.currentTaskIndex,
+            taskTitle: state.currentTask,
+            turns: (existing?.turns ?? 0) + 1,
+            reviewRuns: existing?.reviewRuns ?? 0,
+            issues: existing?.issues ?? { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 },
+          },
+        },
+      },
+      history: stats.history,
+    },
+  };
+}
+
+function archiveActiveStats(state: WorkflowState, endedReason: string): WorkflowState {
+  const stats = state.stats ?? createEmptyWorkflowStats();
+  const hasActiveStats = Object.keys(stats.active.tasks).length > 0;
+  return {
+    ...state,
+    stats: hasActiveStats
+      ? { active: { tasks: {} }, history: [...stats.history, { ...stats.active, endedReason }] }
+      : stats,
+  };
+}
+
 function fallbackTaskSummary(task: string): string {
   const cleaned = task
     .replace(/\s*;.*$/, "")
@@ -255,7 +316,9 @@ export async function summarizeWorkflowTasks(ctx: WorkflowContext, state: Workfl
 }
 
 export function handleWorkflowEvent(ctx: WorkflowContext, event: WorkflowEvent, appendEntry?: AppendEntry): WorkflowState {
-  const next = transitionWorkflow(getContextWorkflowState(ctx), event);
+  const previous = getContextWorkflowState(ctx);
+  const transitioned = transitionWorkflow(previous, event);
+  const next = recordManualTaskTurn(previous, refreshWorkflowTasksFromPlan(transitioned, ctx.cwd), event);
   setContextWorkflowState(ctx, next, appendEntry);
   const source = ctx.state ?? next;
   void summarizeWorkflowTasks(ctx, source).then((summarized) => {
@@ -284,7 +347,11 @@ export function initializeWorkflowWidget(ctx: WorkflowContext): WorkflowState {
 }
 
 export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): WorkflowState {
-  const state = createInitialWorkflowState();
+  const previous = getContextWorkflowState(ctx);
+  const state = {
+    ...createInitialWorkflowState(),
+    stats: archiveActiveStats(previous, "reset").stats,
+  };
   ctx.state = state;
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);
