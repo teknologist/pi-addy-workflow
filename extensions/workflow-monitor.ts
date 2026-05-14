@@ -9,17 +9,19 @@ import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase } from "./
 import { nextWorkflowActionForActivePlanLifecycle, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
 type CommandEvent = string | { args?: string[]; input?: string };
-type InputEvent = { input?: string; text?: string };
+type InputEvent = { input?: string; text?: string; source?: string };
 type ToolEvent = { command?: string; text?: string; success?: boolean; artifact?: string };
 type ToolCallEvent = { toolName?: string; name?: string; input?: Record<string, unknown> };
 type SubagentEvent = { agent?: string; agentName?: string };
 type AgentEndEvent = { messages?: AgentMessage[]; message?: AgentMessage };
 type AgentMessage = { role?: string; content?: unknown };
-type FreshContextReason = "between-tasks" | "before-review";
+type FreshContextReason = "between-tasks" | "before-step" | "before-review";
 type DispatchOptions = { freshContextBypassReason?: FreshContextReason; appendEntry?: boolean };
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url));
 
 const PROMPT_TEMPLATE_BY_COMMAND: Record<string, string> = {
+  "/addy-define": "addy-define.md",
+  "/addy-plan": "addy-plan.md",
   "/addy-build": "addy-build.md",
   "/addy-code-simplify": "addy-code-simplify.md",
   "/addy-verify": "addy-verify.md",
@@ -29,6 +31,7 @@ const PROMPT_TEMPLATE_BY_COMMAND: Record<string, string> = {
 };
 const AUTO_REVIEW_FIX_MAX = 5;
 const AUTO_TASK_COMMIT_PROMPT = "__addy-auto-task-commit__";
+const FRESH_CONTEXT_STEP_COMMANDS = new Set(["/addy-define", "/addy-plan", "/addy-build", "/addy-code-simplify", "/addy-verify", "/addy-review", "/addy-fix-all", "/addy-finish"]);
 
 function isWorkflowPhase(value: string | undefined): value is WorkflowPhase {
   return WORKFLOW_PHASES.includes(value as WorkflowPhase);
@@ -112,6 +115,11 @@ Critical rule: do not skip, weaken, or silently reinterpret acceptance criteria,
 
 function workflowTextFromInput(text: string): string {
   return text.match(/^Invocation:\s+`([^`]+)`\s*$/m)?.[1] ?? text;
+}
+
+function isManualAddyWorkflowCommand(input: string): boolean {
+  const command = input.trim().split(/\s+/, 1)[0];
+  return command.startsWith("/addy-") && command !== "/addy-auto" && command !== "/addy-auto-continue";
 }
 
 function extractWriteArtifact(event: ToolCallEvent): string | undefined {
@@ -348,6 +356,61 @@ function freshContextCommand(reason: FreshContextReason): string {
   return `/addy-auto-continue --fresh ${reason}`;
 }
 
+function consumeAutoFreshPromptUpdates(state: ReturnType<typeof getContextWorkflowState>): Partial<ReturnType<typeof getContextWorkflowState>> {
+  return {
+    autoFreshPrompt: undefined,
+    autoRetryKey: state.autoRetryKey,
+    autoRetryCount: state.autoRetryCount,
+  };
+}
+
+async function runFreshContextContinuation(pi: ExtensionAPI, ctx: unknown, reason: FreshContextReason): Promise<void> {
+  const notify = (message: string, level: string) => (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(message, level);
+  const newSession = (ctx as { newSession?: (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => Promise<{ cancelled?: boolean } | void> }).newSession;
+  if (!newSession) {
+    notify("Addy auto could not start a fresh session; continuing in the current session.", "warning");
+    const state = getContextWorkflowState(ctx as never);
+    if (state.autoFreshPrompt) {
+      dispatchAutoPrompt(pi, ctx, state.autoFreshPrompt, state, consumeAutoFreshPromptUpdates(state), undefined, { freshContextBypassReason: reason });
+    } else {
+      await dispatchNextAutoWorkflowPrompt(pi, ctx, false, { freshContextBypassReason: reason });
+    }
+    return;
+  }
+
+  const parentSession = (ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }).sessionManager?.getSessionFile?.();
+  const result = await newSession.call(ctx, {
+    parentSession,
+    withSession: async (newCtx: unknown) => {
+      (newCtx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(
+        reason === "between-tasks"
+          ? "Addy auto is continuing in a fresh session before the next task."
+          : reason === "before-review"
+            ? "Addy auto is continuing in a fresh session before review."
+            : "Addy auto is continuing in a fresh session before the next workflow step.",
+        "info",
+      );
+      const deliveries: Promise<unknown>[] = [];
+      const replacementSender = (newCtx as { sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void | Promise<void> }).sendUserMessage;
+      const replacementPi = {
+        sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => {
+          const delivery = replacementSender?.call(newCtx, content, options);
+          if (delivery && typeof (delivery as Promise<void>).then === "function") deliveries.push(delivery);
+        },
+      } as ExtensionAPI;
+      const replacementState = getContextWorkflowState(newCtx as never);
+      if (replacementState.autoFreshPrompt) {
+        dispatchAutoPrompt(replacementPi, newCtx, replacementState.autoFreshPrompt, replacementState, consumeAutoFreshPromptUpdates(replacementState), undefined, { freshContextBypassReason: reason, appendEntry: false });
+      } else {
+        await dispatchNextAutoWorkflowPrompt(replacementPi, newCtx, false, { freshContextBypassReason: reason, appendEntry: false });
+      }
+      await Promise.all(deliveries);
+    },
+  });
+
+  if (result?.cancelled) notify("Addy auto fresh-session continuation was cancelled; auto mode is paused.", "warning");
+}
+
 function sendFreshContextContinuation(pi: ExtensionAPI, ctx: unknown, reason: FreshContextReason): void {
   sendUserMessage(pi, ctx, freshContextCommand(reason));
 }
@@ -356,7 +419,46 @@ function parseFreshContextReason(event: CommandEvent): FreshContextReason | unde
   const args = parseCommandArgs(event);
   const freshIndex = args.indexOf("--fresh");
   const value = freshIndex >= 0 ? args[freshIndex + 1] : args[0];
-  return value === "between-tasks" || value === "before-review" ? value : undefined;
+  return value === "between-tasks" || value === "before-step" || value === "before-review" ? value : undefined;
+}
+
+function shouldFreshContextBeforeStep(input: string, ctx: unknown): boolean {
+  const command = input.trim().split(/\s+/, 1)[0];
+  if (!FRESH_CONTEXT_STEP_COMMANDS.has(command)) return false;
+  return loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext.beforeEveryStep;
+}
+
+async function dispatchManualStepInFreshContext(pi: ExtensionAPI, input: string, ctx: unknown): Promise<boolean> {
+  const notify = (message: string, level: string) => (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(message, level);
+  const expandedInput = expandPackagedPromptTemplate(input);
+  const newSession = (ctx as { newSession?: (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => Promise<{ cancelled?: boolean } | void> }).newSession;
+  if (!newSession) {
+    notify("Addy workflow could not start a fresh session; continuing in the current session.", "warning");
+    sendUserMessage(pi, ctx, expandedInput);
+    return true;
+  }
+
+  const parentSession = (ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }).sessionManager?.getSessionFile?.();
+  const result = await newSession.call(ctx, {
+    parentSession,
+    withSession: async (newCtx: unknown) => {
+      (newCtx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.("Addy workflow is running this step in a fresh session.", "info");
+      await (newCtx as { sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void | Promise<void> }).sendUserMessage?.(expandedInput);
+    },
+  });
+
+  if (result?.cancelled) notify("Addy workflow fresh-session step was cancelled.", "warning");
+  return true;
+}
+
+function freshContextReasonForPrompt(prompt: string, ctx: unknown, options: DispatchOptions): FreshContextReason | undefined {
+  if (options.freshContextBypassReason) return undefined;
+  const command = commandFromPrompt(prompt);
+  const phase = phaseFromWorkflowPrompt(prompt);
+  const freshContext = loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext;
+  if (command && FRESH_CONTEXT_STEP_COMMANDS.has(command) && freshContext.beforeEveryStep) return "before-step";
+  if (phase === "review" && freshContext.beforeReview) return "before-review";
+  return undefined;
 }
 
 function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, state: ReturnType<typeof getContextWorkflowState>, updates: Partial<ReturnType<typeof getContextWorkflowState>> = {}, statsTarget?: WorkflowStatsTarget, options: DispatchOptions = {}): void {
@@ -366,6 +468,7 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
     autoLastPrompt: prompt,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
+    autoFreshPrompt: undefined,
     ...updates,
   };
   const command = commandFromPrompt(prompt);
@@ -384,20 +487,37 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
   sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
 }
 
-function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): boolean {
+async function dispatchAutoPromptFreshAware(pi: ExtensionAPI, ctx: unknown, prompt: string, state: ReturnType<typeof getContextWorkflowState>, updates: Partial<ReturnType<typeof getContextWorkflowState>> = {}, statsTarget?: WorkflowStatsTarget, options: DispatchOptions = {}): Promise<void> {
+  const reason = freshContextReasonForPrompt(prompt, ctx, options);
+  if (!reason) {
+    dispatchAutoPrompt(pi, ctx, prompt, state, updates, statsTarget, options);
+    return;
+  }
+
+  setContextWorkflowState(ctx as never, {
+    ...state,
+    autoRetryKey: undefined,
+    autoRetryCount: undefined,
+    ...updates,
+    autoFreshPrompt: prompt,
+  }, options.appendEntry === false ? undefined : appendWorkflowEntry(pi));
+  await runFreshContextContinuation(pi, ctx, reason);
+}
+
+async function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): Promise<boolean> {
   const lastCommand = commandFromPrompt(state.autoLastPrompt);
 
   if (lastCommand === "/addy-fix-all") {
     const verifyPrompt = activePlanPrompt("/addy-verify", state);
     if (!verifyPrompt) return false;
-    dispatchAutoPrompt(pi, ctx, verifyPrompt, state, { autoReviewFixNeedsReview: true });
+    await dispatchAutoPromptFreshAware(pi, ctx, verifyPrompt, state, { autoReviewFixNeedsReview: true });
     return true;
   }
 
   if (lastCommand === "/addy-verify" && state.autoReviewFixNeedsReview) {
     const reviewPrompt = activePlanPrompt("/addy-review", state);
     if (!reviewPrompt) return false;
-    dispatchAutoPrompt(pi, ctx, reviewPrompt, state, {
+    await dispatchAutoPromptFreshAware(pi, ctx, reviewPrompt, state, {
       autoReviewFixNeedsReview: false,
       autoReviewTask: state.currentTask,
       autoReviewTaskIndex: state.currentTaskIndex,
@@ -436,7 +556,7 @@ function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: Agent
 
   const fixPrompt = activePlanPrompt("/addy-fix-all", state);
   if (!fixPrompt) return false;
-  dispatchAutoPrompt(pi, ctx, fixPrompt, state, {
+  await dispatchAutoPromptFreshAware(pi, ctx, fixPrompt, state, {
     autoReviewFixKey: key,
     autoReviewFixCount: fixCount + 1,
     autoReviewFindingFingerprint: fingerprint,
@@ -444,7 +564,7 @@ function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: Agent
   return true;
 }
 
-function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, previousState: ReturnType<typeof getContextWorkflowState>, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): boolean {
+async function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, previousState: ReturnType<typeof getContextWorkflowState>, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): Promise<boolean> {
   if (commandFromPrompt(previousState.autoLastPrompt) !== "/addy-review") return false;
   const reviewText = latestAssistantText(event);
   if (!reviewText.trim() || reviewTextHasActionableFindings(reviewText)) return false;
@@ -456,7 +576,7 @@ function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
   const planMovedPastReviewTarget = Boolean(reviewedTask && reviewedTask !== "none" && action?.taskTitle && action.taskTitle !== reviewedTask);
   if (!trackedReviewedTask && !planMovedPastReviewTarget && !reviewedTaskWasCompleted(previousState, state)) return false;
 
-  dispatchAutoPrompt(pi, ctx, autoTaskCommitPrompt(previousState, reviewedTask), state, {
+  await dispatchAutoPromptFreshAware(pi, ctx, autoTaskCommitPrompt(previousState, reviewedTask), state, {
     autoLastPrompt: AUTO_TASK_COMMIT_PROMPT,
     autoReviewTask: undefined,
     autoReviewTaskIndex: undefined,
@@ -469,7 +589,7 @@ function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
   return true;
 }
 
-function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>): boolean {
+async function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>): Promise<boolean> {
   if (commandFromPrompt(state.autoLastPrompt) !== AUTO_TASK_COMMIT_PROMPT) return false;
 
   const text = latestAssistantText(event);
@@ -488,11 +608,11 @@ function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, event: Age
     autoReviewTaskIndex: committedTarget?.taskIndex,
   }, appendWorkflowEntry(pi));
   if (loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext.betweenTasks) {
-    sendFreshContextContinuation(pi, ctx, "between-tasks");
+    await runFreshContextContinuation(pi, ctx, "between-tasks");
     return true;
   }
 
-  dispatchNextAutoWorkflowPrompt(pi, ctx);
+  await dispatchNextAutoWorkflowPrompt(pi, ctx);
   return true;
 }
 
@@ -515,6 +635,7 @@ function maybeCompleteAutoFinish(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
+    autoFreshPrompt: undefined,
     autoReviewFixKey: undefined,
     autoReviewFixCount: undefined,
     autoReviewFindingFingerprint: undefined,
@@ -527,7 +648,7 @@ function maybeCompleteAutoFinish(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
   return true;
 }
 
-function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSamePhase = false, options: DispatchOptions = {}): void {
+async function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSamePhase = false, options: DispatchOptions = {}): Promise<void> {
   const workflowCtx = ctx as never;
   const state = getContextWorkflowState(workflowCtx);
   setContextWorkflowState(workflowCtx, state, options.appendEntry === false ? undefined : appendWorkflowEntry(pi));
@@ -548,16 +669,9 @@ function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSam
     return;
   }
 
-  if (phase === "review"
-    && loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext.beforeReview
-    && options.freshContextBypassReason !== "before-review") {
-    sendFreshContextContinuation(pi, ctx, "before-review");
-    return;
-  }
-
   const reviewTask = phase === "review" ? action.taskTitle ?? refreshedState.currentTask : undefined;
   const finishTask = phase === "finish" ? refreshedState.autoReviewTask : undefined;
-  dispatchAutoPrompt(pi, ctx, prompt, refreshedState, {
+  await dispatchAutoPromptFreshAware(pi, ctx, prompt, refreshedState, {
     autoRetryKey: retryKey,
     autoRetryCount: isSameIncompletePhase ? retryCount + 1 : 0,
     autoReviewTask: reviewTask ?? finishTask,
@@ -568,17 +682,17 @@ function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSam
   } : undefined, options);
 }
 
-function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent): void {
+async function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent): Promise<void> {
   const workflowCtx = ctx as never;
   const state = getContextWorkflowState(workflowCtx);
-  if (maybeContinueAfterTaskCommit(pi, ctx, event, state)) return;
+  if (await maybeContinueAfterTaskCommit(pi, ctx, event, state)) return;
   setContextWorkflowState(workflowCtx, state, appendWorkflowEntry(pi));
   const refreshedState = getContextWorkflowState(workflowCtx);
   const action = nextWorkflowActionForActivePlanLifecycle(refreshedState, (ctx as { cwd?: string }).cwd);
   if (maybeCompleteAutoFinish(pi, ctx, event, refreshedState, action)) return;
-  if (maybeDispatchReviewFixLoop(pi, ctx, event, refreshedState, action)) return;
-  if (maybeDispatchTaskCommit(pi, ctx, event, state, refreshedState, action)) return;
-  dispatchNextAutoWorkflowPrompt(pi, ctx);
+  if (await maybeDispatchReviewFixLoop(pi, ctx, event, refreshedState, action)) return;
+  if (await maybeDispatchTaskCommit(pi, ctx, event, state, refreshedState, action)) return;
+  await dispatchNextAutoWorkflowPrompt(pi, ctx);
 }
 
 export default function addyWorkflowMonitor(pi: ExtensionAPI) {
@@ -589,7 +703,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
 
   pi.on("input", async (event: InputEvent, ctx: unknown) => {
     const input = event.input ?? event.text ?? "";
-    const manualAddyCommand = /^\/addy-(?!auto(?:\s|$))/.test(input.trim());
+    const manualAddyCommand = isManualAddyWorkflowCommand(input);
     handleWorkflowEvent(ctx as never, { source: "user-input", text: workflowTextFromInput(input), manualAddyCommand }, appendWorkflowEntry(pi));
     return { action: "continue" as const };
   });
@@ -626,8 +740,22 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
     const stateWithReviewIssues = state.reviewStatsKey ? recordWorkflowReviewIssues(state, reviewIssueStatsFromText(reviewText)) : state;
     if (stateWithReviewIssues !== state) setContextWorkflowState(ctx as never, stateWithReviewIssues, appendWorkflowEntry(pi));
     if (!stateWithReviewIssues.autoMode) return;
-    dispatchNextAutoWorkflowPromptAfterAgentEnd(pi, ctx, event);
+    await dispatchNextAutoWorkflowPromptAfterAgentEnd(pi, ctx, event);
   });
+
+  for (const command of FRESH_CONTEXT_STEP_COMMANDS) {
+    pi.registerCommand?.(command.slice(1), {
+      description: `Run ${command} in a fresh session when Addy fresh context is enabled.`,
+      handler: async (event: CommandEvent, ctx: unknown) => {
+        const args = parseCommandArgs(event);
+        const input = `${command}${args.length ? ` ${args.join(" ")}` : ""}`;
+        handleWorkflowEvent(ctx as never, { source: "command", text: input, manualAddyCommand: true }, appendWorkflowEntry(pi));
+        if (shouldFreshContextBeforeStep(input, ctx)) await dispatchManualStepInFreshContext(pi, input, ctx);
+        else sendUserMessage(pi, ctx, input);
+        return { action: "continue" as const };
+      },
+    });
+  }
 
   pi.registerCommand?.("addy-auto-continue", {
     description: "Internal Addy auto continuation command.",
@@ -635,41 +763,11 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       const reason = parseFreshContextReason(event);
       const notify = (message: string, level: string) => (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(message, level);
       if (!reason) {
-        notify("Usage: /addy-auto-continue --fresh <between-tasks|before-review>", "warning");
+        notify("Usage: /addy-auto-continue --fresh <between-tasks|before-step|before-review>", "warning");
         return { action: "continue" as const };
       }
 
-      const newSession = (ctx as { newSession?: (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => Promise<{ cancelled?: boolean } | void> }).newSession;
-      if (!newSession) {
-        notify("Addy auto could not start a fresh session; continuing in the current session.", "warning");
-        dispatchNextAutoWorkflowPrompt(pi, ctx, false, { freshContextBypassReason: reason });
-        return { action: "continue" as const };
-      }
-
-      const parentSession = (ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }).sessionManager?.getSessionFile?.();
-      const result = await newSession.call(ctx, {
-        parentSession,
-        withSession: async (newCtx: unknown) => {
-          (newCtx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(
-            reason === "between-tasks"
-              ? "Addy auto is continuing in a fresh session before the next task."
-              : "Addy auto is continuing in a fresh session before review.",
-            "info",
-          );
-          const deliveries: Promise<unknown>[] = [];
-          const replacementSender = (newCtx as { sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void | Promise<void> }).sendUserMessage;
-          const replacementPi = {
-            sendUserMessage: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => {
-              const delivery = replacementSender?.call(newCtx, content, options);
-              if (delivery && typeof (delivery as Promise<void>).then === "function") deliveries.push(delivery);
-            },
-          } as ExtensionAPI;
-          dispatchNextAutoWorkflowPrompt(replacementPi, newCtx, false, { freshContextBypassReason: reason, appendEntry: false });
-          await Promise.all(deliveries);
-        },
-      });
-
-      if (result?.cancelled) notify("Addy auto fresh-session continuation was cancelled; auto mode is paused.", "warning");
+      await runFreshContextContinuation(pi, ctx, reason);
       return { action: "continue" as const };
     },
   });
@@ -686,7 +784,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
         artifact: args[0] === "stop" ? undefined : args.join(" ") || undefined,
       }, appendWorkflowEntry(pi));
 
-      if (args[0] !== "stop") dispatchNextAutoWorkflowPrompt(pi, ctx, true);
+      if (args[0] !== "stop") await dispatchNextAutoWorkflowPrompt(pi, ctx, true);
       else {
         const state = getContextWorkflowState(ctx as never);
         (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(`Addy auto stopped.\n${renderWorkflowStatsText(state)}`, "info");

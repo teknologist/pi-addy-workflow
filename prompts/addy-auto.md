@@ -68,10 +68,10 @@ Task commit policy:
 
 Fresh context policy:
 
-- By default, Addy auto starts a fresh Pi session before the next task or slice after each completed task commit.
-- Configure this in `.pi/addy-workflow.json` with `{"auto":{"freshContext":{"betweenTasks":true,"beforeReview":false}}}`.
-- Set `beforeReview` to `true` to also start a fresh Pi session immediately before each `/addy-review` prompt.
-- Environment overrides: `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` and `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` accept `1/0`, `true/false`, `yes/no`, or `on/off`.
+- By default, Addy starts a fresh Pi session before every `/addy-*` workflow step, whether manually typed or auto-dispatched.
+- Configure this in `.pi/addy-workflow.json` with `{"auto":{"freshContext":{"beforeEveryStep":true,"betweenTasks":true,"beforeReview":false}}}`.
+- `betweenTasks` is retained for compatibility; `beforeReview` is only needed when `beforeEveryStep` is disabled but review-only fresh context is desired.
+- Environment overrides: `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP`, `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS`, and `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` accept `1/0`, `true/false`, `yes/no`, or `on/off`.
 
 Completion stats policy:
 

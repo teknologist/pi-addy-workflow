@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 0 routes | 0 models | 0 components | 7 lib files | 4 env vars | 0 middleware | 0% test coverage
-> **Token savings:** this file is ~1,500 tokens. Without it, AI exploration would cost ~9,500 tokens. **Saves ~8,000 tokens per conversation.**
-> **Last scanned:** 2026-05-14 18:27 — re-run after significant changes
+> 0 routes | 0 models | 0 components | 7 lib files | 5 env vars | 0 middleware | 0% test coverage
+> **Token savings:** this file is ~1,500 tokens. Without it, AI exploration would cost ~9,600 tokens. **Saves ~8,100 tokens per conversation.**
+> **Last scanned:** 2026-05-14 20:40 — re-run after significant changes
 
 ---
 
@@ -26,16 +26,20 @@
   - type BootstrapToolAvailability
   - type BootstrapOptions
   - _...1 more_
-- `extensions/workflow-monitor/config.ts` — function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig, type AddyWorkflowConfig
+- `extensions/workflow-monitor/config.ts`
+  - function ensureGlobalAddyWorkflowConfig: (ctx, home) => void
+  - function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig
+  - type AddyWorkflowConfig
+  - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
 - `extensions/workflow-monitor/warnings.ts` — function workflowWarningText: (state) => string | undefined
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function getContextWorkflowState: (ctx) => WorkflowState
   - function setContextWorkflowState: (ctx, state, appendEntry?) => void
   - function recordWorkflowTaskTurn: (state, target) => WorkflowState
+  - function recordWorkflowVerifyRun: (state, target) => WorkflowState
   - function recordWorkflowReviewRun: (state, target) => WorkflowState
   - function recordWorkflowReviewIssues: (state, issues) => WorkflowState
-  - function archiveWorkflowStats: (state, endedReason) => WorkflowState
-  - _...6 more_
+  - _...7 more_
 - `extensions/workflow-monitor/workflow-tracker.ts`
   - function createEmptyWorkflowStats: () => WorkflowStats
   - function serializeWorkflowState: (state) => string
@@ -62,6 +66,7 @@
 - `HOME` **required** — extensions/agent-installer/core.ts
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` **required** — tests/workflow-monitor.test.ts
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/workflow-monitor.test.ts
+- `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/workflow-monitor.test.ts
 - `PI_ADDY_WORKFLOW_STATE_DIR` **required** — extensions/workflow-monitor/workflow-handler.ts
 
 ## Config Files

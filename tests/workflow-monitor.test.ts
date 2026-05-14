@@ -13,10 +13,18 @@ type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
 type CommandConfig = { description: string; handler: Handler };
 
 const stateDir = mkdtempSync(join(tmpdir(), "pi-addy-workflow-test-"));
+const previousHomeEnv = process.env.HOME;
+const previousBeforeEveryStepEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+process.env.HOME = join(stateDir, "home");
 process.env.PI_ADDY_WORKFLOW_STATE_DIR = stateDir;
+process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "0";
 
 test.after(() => {
+  if (previousHomeEnv === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHomeEnv;
   delete process.env.PI_ADDY_WORKFLOW_STATE_DIR;
+  if (previousBeforeEveryStepEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousBeforeEveryStepEnv;
   rmSync(stateDir, { recursive: true, force: true });
 });
 
@@ -76,7 +84,7 @@ test("session start creates the global Addy workflow config with defaults", asyn
 
     const configPath = join(home, ".pi", "agent", "addy-workflow.json");
     assert.equal(existsSync(configPath), true);
-    assert.deepEqual(JSON.parse(readFileSync(configPath, "utf8")).auto.freshContext, { betweenTasks: true, beforeReview: false });
+    assert.deepEqual(JSON.parse(readFileSync(configPath, "utf8")).auto.freshContext, { beforeEveryStep: true, betweenTasks: true, beforeReview: false });
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
@@ -85,11 +93,12 @@ test("session start creates the global Addy workflow config with defaults", asyn
 
 test("Addy workflow config uses fresh-context defaults and env overrides", () => {
   const config = loadAddyWorkflowConfig({}, {
+    PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP: "false",
     PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS: "0",
     PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW: "true",
   });
 
-  assert.deepEqual(config.auto.freshContext, { betweenTasks: false, beforeReview: true });
+  assert.deepEqual(config.auto.freshContext, { beforeEveryStep: false, betweenTasks: false, beforeReview: true });
 });
 
 test("Addy workflow config lets project config override defaults", () => {
@@ -99,7 +108,7 @@ test("Addy workflow config lets project config override defaults", () => {
 
   const config = loadAddyWorkflowConfig({ cwd }, {});
 
-  assert.deepEqual(config.auto.freshContext, { betweenTasks: false, beforeReview: true });
+  assert.deepEqual(config.auto.freshContext, { beforeEveryStep: true, betweenTasks: false, beforeReview: true });
 });
 
 test("Addy workflow config ignores malformed project config safely", () => {
@@ -110,7 +119,7 @@ test("Addy workflow config ignores malformed project config safely", () => {
 
   const config = loadAddyWorkflowConfig({ cwd, ui: { notify: (message: string, level?: string) => notices.push([message, level]) } }, {});
 
-  assert.deepEqual(config.auto.freshContext, { betweenTasks: true, beforeReview: false });
+  assert.deepEqual(config.auto.freshContext, { beforeEveryStep: true, betweenTasks: true, beforeReview: false });
   assert.match(notices.at(-1)?.[0] ?? "", /Ignoring invalid Addy workflow config/);
   assert.equal(notices.at(-1)?.[1], "warning");
 });
@@ -253,6 +262,7 @@ test("manual Addy command exits auto mode", async () => {
       autoLastPrompt: `/addy-build ${planPath}`,
       autoRetryKey: "retry",
       autoRetryCount: 1,
+      autoFreshPrompt: `/addy-build ${planPath}`,
       autoReviewTask: "Current",
       activePlan: planPath,
     },
@@ -265,8 +275,52 @@ test("manual Addy command exits auto mode", async () => {
   assert.equal(ctx.state.autoLastPrompt, undefined);
   assert.equal(ctx.state.autoRetryKey, undefined);
   assert.equal(ctx.state.autoRetryCount, undefined);
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
   assert.equal(ctx.state.autoReviewTask, undefined);
   assert.equal(ctx.state.current, "verify");
+});
+
+test("registered manual workflow step command exits auto mode", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "false";
+  try {
+    const cwd = join(stateDir, "registered-step-exits-auto-project");
+    const planPath = join("docs", "plans", "auto-loop.md");
+    const { pi, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      cwd,
+      id: "registered-step-exits-auto",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+        warnings: [],
+        current: "build",
+        autoMode: true,
+        autoLastPrompt: `/addy-build ${planPath}`,
+        autoRetryKey: "retry",
+        autoRetryCount: 1,
+        autoFreshPrompt: `/addy-build ${planPath}`,
+        autoReviewTask: "Current",
+        activePlan: planPath,
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await commands.get("addy-verify")?.handler({ args: [planPath] }, ctx);
+
+    assert.equal(ctx.state.autoMode, false);
+    assert.equal(ctx.state.autoLastPrompt, undefined);
+    assert.equal(ctx.state.autoRetryKey, undefined);
+    assert.equal(ctx.state.autoRetryCount, undefined);
+    assert.equal(ctx.state.autoFreshPrompt, undefined);
+    assert.equal(ctx.state.autoReviewTask, undefined);
+    assert.equal(ctx.state.current, "verify");
+    assertSentWorkflowPrompt(sentMessages[0], `/addy-verify ${planPath}`, "Addy Verify");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
 });
 
 test("registered workflow next command exits auto mode", async () => {
@@ -286,6 +340,7 @@ test("registered workflow next command exits auto mode", async () => {
       autoLastPrompt: `/addy-build ${planPath}`,
       autoRetryKey: "retry",
       autoRetryCount: 1,
+      autoFreshPrompt: `/addy-build ${planPath}`,
       autoReviewTask: "Current",
       activePlan: planPath,
     },
@@ -299,6 +354,7 @@ test("registered workflow next command exits auto mode", async () => {
   assert.equal(ctx.state.autoLastPrompt, undefined);
   assert.equal(ctx.state.autoRetryKey, undefined);
   assert.equal(ctx.state.autoRetryCount, undefined);
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
   assert.equal(ctx.state.autoReviewTask, undefined);
   assert.equal(ctx.state.current, "verify");
   assert.deepEqual(prefills, [`/addy-verify ${planPath}`]);
@@ -818,10 +874,7 @@ test("auto loop starts next task in a new session after task commit", async () =
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
 
-  assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh between-tasks"]);
-
-  await commands.get("addy-auto-continue")?.handler(sentMessages[0], ctx);
-
+  assert.deepEqual(sentMessages, []);
   assert.equal(newSessionParent, "old-session.jsonl");
   assert.equal(replacementMessages.length, 1);
   assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
@@ -920,11 +973,8 @@ test("auto loop starts review in a new session when configured", async () => {
 
     await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
 
-    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-review"]);
+    assert.deepEqual(sentMessages, []);
     assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 0);
-
-    await commands.get("addy-auto-continue")?.handler(sentMessages[0], ctx);
-
     assert.equal(replacementMessages.length, 1);
     assertSentWorkflowPrompt(replacementMessages[0], `/addy-review ${planPath}`, "Addy Review");
     assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 2);
@@ -933,6 +983,291 @@ test("auto loop starts review in a new session when configured", async () => {
     if (previousEnv === undefined) delete process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
     else process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW = previousEnv;
   }
+});
+
+test("auto loop starts every workflow step in a new session when configured", async () => {
+  const cwd = join(stateDir, "auto-loop-every-step-fresh-project");
+  const planPath = join("docs", "plans", "auto-every-step.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const { pi, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    const ctx: any = {
+      cwd,
+      id: "auto-loop-every-step-fresh",
+      newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+        await options.withSession({ cwd, id: "auto-loop-every-step-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+        return { cancelled: false };
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await commands.get("addy-auto")?.handler(planPath, ctx);
+
+    assert.deepEqual(sentMessages, []);
+    assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("fresh-context same-phase retry pauses after one retry", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const cwd = join(stateDir, "auto-loop-fresh-retry-project");
+    const planPath = join("docs", "plans", "auto-fresh-retry.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), [
+      "## Task 1: Current",
+      "- [ ] Implemented",
+      "- [ ] Verified",
+      "- [ ] Reviewed",
+    ].join("\n"));
+
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    const replacementNotices: Array<[string, string | undefined]> = [];
+    let replacementCtx: any;
+    const ctx: any = {
+      cwd,
+      id: "auto-loop-fresh-retry",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+        warnings: [],
+        current: "build",
+        autoMode: true,
+        activePlan: planPath,
+      },
+      newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+        replacementCtx = {
+          cwd,
+          id: "auto-loop-fresh-retry-replacement",
+          ui: { setWidget() {}, notify: (message: string, level?: string) => replacementNotices.push([message, level]) },
+          isIdle: () => true,
+          sendUserMessage: (message: string) => replacementMessages.push(message),
+        };
+        await options.withSession(replacementCtx);
+        return { cancelled: false };
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({}, ctx);
+
+    assert.deepEqual(sentMessages, []);
+    assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
+    assert.equal(replacementCtx.state.autoFreshPrompt, undefined);
+    assert.equal(replacementCtx.state.autoRetryKey?.startsWith(`/addy-build ${planPath}`), true);
+    assert.equal(replacementCtx.state.autoRetryCount, 1);
+
+    await events.get("agent_end")?.({}, replacementCtx);
+
+    assert.equal(replacementMessages.length, 1);
+    assert.match(replacementNotices.at(-1)?.[0] ?? "", /paused at \/addy-build/);
+    assert.equal(replacementNotices.at(-1)?.[1], "warning");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("review fix loop starts fix verify and review prompts in new sessions when configured", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const cwd = join(stateDir, "auto-review-fix-fresh-project");
+    const planPath = join("docs", "plans", "auto-review-fix-fresh.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), [
+      "## Task 1: Current",
+      "- [x] Implemented",
+      "- [x] Verified",
+      "- [ ] Reviewed",
+    ].join("\n"));
+
+    const { pi, events, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
+    let replacementIndex = 0;
+    const ctx: any = {
+      cwd,
+      id: "auto-review-fix-fresh",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+        warnings: [],
+        current: "review",
+        currentTask: "Current",
+        currentTaskIndex: 1,
+        autoMode: true,
+        autoLastPrompt: `/addy-review ${planPath}`,
+        activePlan: planPath,
+        reviewStatsKey: statsKey,
+        stats: { active: { tasks: { [statsKey]: { plan: planPath, taskIndex: 1, taskTitle: "Current", turns: 1, verifyRuns: 1, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+      },
+      newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+        replacementIndex += 1;
+        await options.withSession({ cwd, id: `auto-review-fix-fresh-replacement-${replacementIndex}`, ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+        return { cancelled: false };
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/foo.ts:1 before review can pass." }] }] }, ctx);
+    assert.deepEqual(sentMessages.splice(0), []);
+    assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-fix-all ${planPath}`, "Addy Fix All");
+
+    ctx.state = { ...ctx.state, autoLastPrompt: `/addy-fix-all ${planPath}` };
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Fixed." }] }] }, ctx);
+    assert.deepEqual(sentMessages.splice(0), []);
+    assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-verify ${planPath}`, "Addy Verify");
+
+    ctx.state = { ...ctx.state, autoLastPrompt: `/addy-verify ${planPath}`, autoReviewFixNeedsReview: true };
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
+    assert.deepEqual(sentMessages.splice(0), []);
+    assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-review ${planPath}`, "Addy Review");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("fresh context fallback dispatches pending review-fix prompt when newSession is unavailable", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const cwd = join(stateDir, "auto-review-fix-no-new-session-project");
+    const planPath = join("docs", "plans", "auto-review-fix-no-new-session.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), [
+      "## Task 1: Current",
+      "- [x] Implemented",
+      "- [x] Verified",
+      "- [ ] Reviewed",
+    ].join("\n"));
+
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      cwd,
+      id: "auto-review-fix-no-new-session",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+        warnings: [],
+        current: "review",
+        currentTask: "Current",
+        currentTaskIndex: 1,
+        autoMode: true,
+        autoLastPrompt: `/addy-review ${planPath}`,
+        activePlan: planPath,
+      },
+      ui: { setWidget() {}, notify() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/foo.ts:1 before review can pass." }] }] }, ctx);
+
+    assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-fix-all ${planPath}`, "Addy Fix All");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("manual Addy workflow steps start in a new session when configured", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const { pi, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    const notices: Array<[string, string | undefined]> = [];
+    const ctx: any = {
+      id: "manual-step-fresh",
+      sessionManager: { getSessionFile: () => "old-session.jsonl" },
+      newSession: async (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => {
+        assert.equal(options.parentSession, "old-session.jsonl");
+        await options.withSession({ id: "manual-step-replacement", ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) }, sendUserMessage: (message: string) => replacementMessages.push(message) });
+        return { cancelled: false };
+      },
+      ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    };
+
+    const result = await commands.get("addy-finish")?.handler({ args: ["docs/plans/current.md"] }, ctx);
+
+    assert.deepEqual(result, { action: "continue" });
+    assert.equal(sentMessages.length, 0);
+    assert.equal(replacementMessages.length, 1);
+    assert.match(replacementMessages[0], /# Addy Finish/);
+    assert.ok(replacementMessages[0].includes("Invocation: `/addy-finish docs/plans/current.md`"));
+    assert.match(notices.at(-1)?.[0] ?? "", /fresh session/);
+
+    replacementMessages.length = 0;
+    await commands.get("addy-define")?.handler({ args: ["Implement invoices"] }, ctx);
+    assert.match(replacementMessages[0], /# Addy Define/);
+    assert.ok(replacementMessages[0].includes("Invocation: `/addy-define Implement invoices`"));
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("extension-injected Addy workflow steps do not recursively start fresh sessions", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const { pi, events } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = { cwd: join(stateDir, "manual-step-no-loop-project"), id: "manual-step-no-loop", ui: { setWidget() {} } };
+
+    const result = await events.get("input")?.({ input: "/addy-verify docs/plans/current.md", source: "extension" }, ctx);
+
+    assert.deepEqual(result, { action: "continue" });
+    assert.equal(ctx.state.current, "verify");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("internal auto continuation input does not exit auto mode", async () => {
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    id: "auto-continue-preserve-auto-mode",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "active", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "verify",
+      autoMode: true,
+      autoLastPrompt: "/addy-verify docs/plans/current.md",
+      activePlan: "docs/plans/current.md",
+    },
+    ui: { setWidget() {} },
+  };
+
+  const result = await events.get("input")?.({ input: "/addy-auto-continue --fresh before-review", source: "extension" }, ctx);
+
+  assert.deepEqual(result, { action: "continue" });
+  assert.equal(ctx.state.autoMode, true);
+  assert.equal(ctx.state.autoLastPrompt, "/addy-verify docs/plans/current.md");
+  assert.equal(ctx.state.current, "verify");
 });
 
 test("auto continuation cancellation pauses without dispatching a lifecycle prompt", async () => {
@@ -1279,6 +1614,7 @@ test("auto retry state restored from session entries pauses duplicate dispatch",
 
 test("malformed persisted auto retry state is ignored", () => {
   const ctx: any = {
+    cwd: join(stateDir, "malformed-auto-retry-state-project"),
     id: "malformed-auto-retry-state",
     sessionManager: {
       getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, {
@@ -1300,7 +1636,7 @@ test("session start renders workflow widget before first workflow instruction", 
   addyWorkflowMonitor(pi as never);
 
   const widgets: Array<[string, unknown]> = [];
-  await events.get("session_start")?.({}, { id: "startup-widget-test", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } });
+  await events.get("session_start")?.({}, { cwd: join(stateDir, "startup-widget-project"), id: "startup-widget-test", ui: { setWidget: (key: string, value: unknown) => widgets.push([key, value]) } });
 
   assert.equal(widgets.at(-1)?.[0], "pi-addy-workflow");
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: define → plan => { build → simplify → verify → review → finish }"]);
@@ -1551,11 +1887,8 @@ test("auto-dispatched fix, verify, review, finish, and commit prompts record tas
   assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
-  assert.deepEqual(sentMessages.at(-1), "/addy-auto-continue --fresh between-tasks");
   assert.equal(ctx.state.stats.history.at(-1)?.endedReason, "task-commit");
   assert.equal(ctx.state.stats.history.at(-1)?.tasks[statsKey].turns, 5);
-
-  await commands.get("addy-auto-continue")?.handler(sentMessages.at(-1), ctx);
 
   assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
   assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 1);
@@ -1572,6 +1905,7 @@ test("auto stop preserves active stats and reports totals", async () => {
       warnings: [],
       current: "build",
       autoMode: true,
+      autoFreshPrompt: "/addy-build docs/plans/current.md",
       stats: { active: { tasks: { task: { taskTitle: "Task", turns: 3, reviewRuns: 1, issues: { critical: 0, important: 1, suggestion: 0, unknown: 0, total: 1 } } } }, history: [] },
     },
     ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
@@ -1580,6 +1914,7 @@ test("auto stop preserves active stats and reports totals", async () => {
   await commands.get("addy-auto")?.handler({ args: ["stop"] }, ctx);
 
   assert.equal(ctx.state.autoMode, false);
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
   assert.equal(ctx.state.stats.active.tasks.task.turns, 3);
   assert.equal(ctx.state.stats.history.length, 0);
   assert.match(notices.at(-1)?.[0] ?? "", /Addy auto stopped/);
@@ -1791,6 +2126,7 @@ test("auto mode input preserves plan and task progress while toggling footer lab
   const build = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-build docs/plans/auto-mode.md" });
   const withTask = {
     ...build,
+    autoFreshPrompt: "/addy-build docs/plans/auto-mode.md",
     currentTask: "Current task",
     nextTask: "Next task",
     currentTaskIndex: 1,
@@ -1800,6 +2136,7 @@ test("auto mode input preserves plan and task progress while toggling footer lab
 
   const auto = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-auto" });
   assert.equal(auto.autoMode, true);
+  assert.equal(auto.autoFreshPrompt, undefined);
   assert.equal(auto.activePlan, "docs/plans/auto-mode.md");
   assert.equal(auto.currentTask, "Current task");
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [

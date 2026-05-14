@@ -16,16 +16,20 @@
   - type BootstrapToolAvailability
   - type BootstrapOptions
   - _...1 more_
-- `extensions/workflow-monitor/config.ts` — function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig, type AddyWorkflowConfig
+- `extensions/workflow-monitor/config.ts`
+  - function ensureGlobalAddyWorkflowConfig: (ctx, home) => void
+  - function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig
+  - type AddyWorkflowConfig
+  - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
 - `extensions/workflow-monitor/warnings.ts` — function workflowWarningText: (state) => string | undefined
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function getContextWorkflowState: (ctx) => WorkflowState
   - function setContextWorkflowState: (ctx, state, appendEntry?) => void
   - function recordWorkflowTaskTurn: (state, target) => WorkflowState
+  - function recordWorkflowVerifyRun: (state, target) => WorkflowState
   - function recordWorkflowReviewRun: (state, target) => WorkflowState
   - function recordWorkflowReviewIssues: (state, issues) => WorkflowState
-  - function archiveWorkflowStats: (state, endedReason) => WorkflowState
-  - _...6 more_
+  - _...7 more_
 - `extensions/workflow-monitor/workflow-tracker.ts`
   - function createEmptyWorkflowStats: () => WorkflowStats
   - function serializeWorkflowState: (state) => string

@@ -55,6 +55,7 @@ export type WorkflowState = {
   autoLastPrompt?: string;
   autoRetryKey?: string;
   autoRetryCount?: number;
+  autoFreshPrompt?: string;
   autoReviewFixKey?: string;
   autoReviewFixCount?: number;
   autoReviewFindingFingerprint?: string;
@@ -188,6 +189,7 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
       autoLastPrompt: undefined,
       autoRetryKey: undefined,
       autoRetryCount: undefined,
+      autoFreshPrompt: undefined,
       autoReviewFixKey: undefined,
       autoReviewFixCount: undefined,
       autoReviewFindingFingerprint: undefined,
@@ -204,6 +206,7 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
+    autoFreshPrompt: undefined,
     autoReviewFixKey: undefined,
     autoReviewFixCount: undefined,
     autoReviewFindingFingerprint: undefined,
@@ -223,6 +226,7 @@ function exitAutoMode(state: WorkflowState): WorkflowState {
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
+    autoFreshPrompt: undefined,
     autoReviewFixKey: undefined,
     autoReviewFixCount: undefined,
     autoReviewFindingFingerprint: undefined,

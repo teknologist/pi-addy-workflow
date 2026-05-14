@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 export type AddyWorkflowConfig = {
   auto: {
     freshContext: {
+      beforeEveryStep: boolean;
       betweenTasks: boolean;
       beforeReview: boolean;
     };
@@ -21,6 +22,7 @@ type ConfigEnv = Record<string, string | undefined>;
 export const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig = {
   auto: {
     freshContext: {
+      beforeEveryStep: true,
       betweenTasks: true,
       beforeReview: false,
     },
@@ -31,6 +33,7 @@ function cloneDefaultConfig(): AddyWorkflowConfig {
   return {
     auto: {
       freshContext: {
+        beforeEveryStep: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeEveryStep,
         betweenTasks: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.betweenTasks,
         beforeReview: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeReview,
       },
@@ -49,19 +52,22 @@ function coerceBoolean(value: unknown): boolean | undefined {
 
 function mergeConfig(base: AddyWorkflowConfig, raw: unknown): AddyWorkflowConfig | undefined {
   if (typeof raw !== "object" || raw === null) return undefined;
-  const candidate = raw as { auto?: { freshContext?: { betweenTasks?: unknown; beforeReview?: unknown } } };
+  const candidate = raw as { auto?: { freshContext?: { beforeEveryStep?: unknown; betweenTasks?: unknown; beforeReview?: unknown } } };
   const freshContext = candidate.auto?.freshContext;
   if (freshContext === undefined) return base;
   if (typeof freshContext !== "object" || freshContext === null) return undefined;
 
+  const beforeEveryStep = freshContext.beforeEveryStep === undefined ? undefined : coerceBoolean(freshContext.beforeEveryStep);
   const betweenTasks = freshContext.betweenTasks === undefined ? undefined : coerceBoolean(freshContext.betweenTasks);
   const beforeReview = freshContext.beforeReview === undefined ? undefined : coerceBoolean(freshContext.beforeReview);
+  if (freshContext.beforeEveryStep !== undefined && beforeEveryStep === undefined) return undefined;
   if (freshContext.betweenTasks !== undefined && betweenTasks === undefined) return undefined;
   if (freshContext.beforeReview !== undefined && beforeReview === undefined) return undefined;
 
   return {
     auto: {
       freshContext: {
+        beforeEveryStep: beforeEveryStep ?? base.auto.freshContext.beforeEveryStep,
         betweenTasks: betweenTasks ?? base.auto.freshContext.betweenTasks,
         beforeReview: beforeReview ?? base.auto.freshContext.beforeReview,
       },
@@ -100,12 +106,14 @@ function readConfigFile(path: string, base: AddyWorkflowConfig, notify?: (messag
 }
 
 function applyEnv(config: AddyWorkflowConfig, env: ConfigEnv): AddyWorkflowConfig {
+  const beforeEveryStep = coerceBoolean(env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP ?? env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_EVERY_STEP);
   const betweenTasks = coerceBoolean(env.PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS);
   const beforeReview = coerceBoolean(env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW);
 
   return {
     auto: {
       freshContext: {
+        beforeEveryStep: beforeEveryStep ?? config.auto.freshContext.beforeEveryStep,
         betweenTasks: betweenTasks ?? config.auto.freshContext.betweenTasks,
         beforeReview: beforeReview ?? config.auto.freshContext.beforeReview,
       },
