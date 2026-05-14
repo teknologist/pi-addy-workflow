@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, resetWorkflow, setContextWorkflowState } from "./workflow-monitor/workflow-handler.ts";
+import { archiveWorkflowStats, getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, recordWorkflowTaskTurn, resetWorkflow, setContextWorkflowState, type WorkflowStatsTarget } from "./workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
 import { nextWorkflowActionForActivePlanLifecycle, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
@@ -143,6 +143,15 @@ function commandFromPrompt(prompt: string | undefined): string | undefined {
 
 function activePlanPrompt(command: string, state: ReturnType<typeof getContextWorkflowState>): string | undefined {
   return state.activePlan ? `${command} ${state.activePlan}` : undefined;
+}
+
+function autoStatsCommand(command: string | undefined): boolean {
+  return command === "/addy-build"
+    || command === "/addy-verify"
+    || command === "/addy-review"
+    || command === "/addy-fix-all"
+    || command === "/addy-finish"
+    || command === AUTO_TASK_COMMIT_PROMPT;
 }
 
 function textFromMessage(message: AgentMessage | undefined): string {
@@ -310,6 +319,17 @@ function autoRetryKey(state: ReturnType<typeof getContextWorkflowState>, prompt:
   return [prompt, state.activePlan ?? "", state.currentTaskIndex ?? "", state.currentTask ?? "", state.nextTask ?? ""].join("\u001f");
 }
 
+function latestActiveStatsTarget(state: ReturnType<typeof getContextWorkflowState>): WorkflowStatsTarget | undefined {
+  const task = Object.values(state.stats?.active.tasks ?? {}).at(-1);
+  if (!task) return undefined;
+  return {
+    plan: task.plan,
+    sliceIndex: task.sliceIndex,
+    taskIndex: task.taskIndex,
+    taskTitle: task.taskTitle,
+  };
+}
+
 function autoPauseWarning(prompt: string, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): string {
   const missing = action?.missingStatuses?.join(", ");
   const task = action?.taskTitle ? ` Task: ${action.taskTitle}.` : "";
@@ -317,7 +337,7 @@ function autoPauseWarning(prompt: string, action: ReturnType<typeof nextWorkflow
   return `Addy auto paused at ${prompt}; the current lifecycle step is still incomplete after retry.${task}${missingText} Re-run the step after fixing the work, or update the plan checkbox only if that phase is actually complete.`;
 }
 
-function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, state: ReturnType<typeof getContextWorkflowState>, updates: Partial<ReturnType<typeof getContextWorkflowState>> = {}): void {
+function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, state: ReturnType<typeof getContextWorkflowState>, updates: Partial<ReturnType<typeof getContextWorkflowState>> = {}, statsTarget?: WorkflowStatsTarget): void {
   const workflowCtx = ctx as never;
   const nextState = {
     ...state,
@@ -326,12 +346,16 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
     autoRetryCount: undefined,
     ...updates,
   };
-  const stateWithStats = commandFromPrompt(prompt) === "/addy-review"
-    ? recordWorkflowReviewRun(nextState, {
-      taskIndex: nextState.autoReviewTaskIndex ?? nextState.currentTaskIndex,
-      taskTitle: nextState.autoReviewTask ?? nextState.currentTask,
-    })
-    : nextState;
+  const command = commandFromPrompt(prompt);
+  const target = statsTarget ?? {
+    taskIndex: nextState.autoReviewTaskIndex ?? nextState.currentTaskIndex,
+    taskTitle: nextState.autoReviewTask ?? nextState.currentTask,
+  };
+  const stateWithStats = command === "/addy-review"
+    ? recordWorkflowReviewRun(nextState, target)
+    : autoStatsCommand(command)
+      ? recordWorkflowTaskTurn(nextState, target)
+      : nextState;
   setContextWorkflowState(workflowCtx, stateWithStats, appendWorkflowEntry(pi));
   sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
 }
@@ -349,7 +373,11 @@ function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: Agent
   if (lastCommand === "/addy-verify" && state.autoReviewFixNeedsReview) {
     const reviewPrompt = activePlanPrompt("/addy-review", state);
     if (!reviewPrompt) return false;
-    dispatchAutoPrompt(pi, ctx, reviewPrompt, state, { autoReviewFixNeedsReview: false });
+    dispatchAutoPrompt(pi, ctx, reviewPrompt, state, {
+      autoReviewFixNeedsReview: false,
+      autoReviewTask: state.currentTask,
+      autoReviewTaskIndex: state.currentTaskIndex,
+    });
     return true;
   }
 
@@ -400,13 +428,19 @@ function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
   if (nextCommand === "/addy-review") return false;
 
   const reviewedTask = previousState.autoReviewTask && previousState.autoReviewTask !== "none" ? previousState.autoReviewTask : previousState.currentTask;
+  const trackedReviewedTask = Boolean(previousState.autoReviewTask && previousState.autoReviewTask !== "none");
   const planMovedPastReviewTarget = Boolean(reviewedTask && reviewedTask !== "none" && action?.taskTitle && action.taskTitle !== reviewedTask);
-  if (!planMovedPastReviewTarget && !reviewedTaskWasCompleted(previousState, state)) return false;
+  if (!trackedReviewedTask && !planMovedPastReviewTarget && !reviewedTaskWasCompleted(previousState, state)) return false;
 
   dispatchAutoPrompt(pi, ctx, autoTaskCommitPrompt(previousState, reviewedTask), state, {
     autoLastPrompt: AUTO_TASK_COMMIT_PROMPT,
     autoReviewTask: undefined,
     autoReviewTaskIndex: undefined,
+  }, {
+    plan: previousState.activePlan,
+    sliceIndex: previousState.currentSliceIndex,
+    taskIndex: previousState.autoReviewTaskIndex ?? previousState.currentTaskIndex,
+    taskTitle: reviewedTask,
   });
   return true;
 }
@@ -423,6 +457,12 @@ function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, event: Age
     return true;
   }
 
+  const committedTarget = latestActiveStatsTarget(state);
+  setContextWorkflowState(ctx as never, {
+    ...archiveWorkflowStats(state, "task-commit"),
+    autoReviewTask: committedTarget?.taskTitle,
+    autoReviewTaskIndex: committedTarget?.taskIndex,
+  }, appendWorkflowEntry(pi));
   dispatchNextAutoWorkflowPrompt(pi, ctx);
   return true;
 }
@@ -436,7 +476,7 @@ function maybeCompleteAutoFinish(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
   if (commandFromPrompt(action?.prompt) !== "/addy-finish") return false;
   if (!finishTextReportsComplete(latestAssistantText(event))) return false;
 
-  setContextWorkflowState(ctx as never, {
+  const completedState = archiveWorkflowStats({
     ...state,
     phases: {
       ...state.phases,
@@ -452,8 +492,9 @@ function maybeCompleteAutoFinish(pi: ExtensionAPI, ctx: unknown, event: AgentEnd
     autoReviewFixNeedsReview: undefined,
     autoReviewTask: undefined,
     autoReviewTaskIndex: undefined,
-  }, appendWorkflowEntry(pi));
-  (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.("Finished!", "info");
+  }, "completed");
+  setContextWorkflowState(ctx as never, completedState, appendWorkflowEntry(pi));
+  (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(`Finished!\n${renderWorkflowStatsText(completedState)}`, "info");
   return true;
 }
 
@@ -478,16 +519,17 @@ function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, allowSam
     return;
   }
 
-  setContextWorkflowState(workflowCtx, {
-    ...refreshedState,
-    autoLastPrompt: prompt,
+  const reviewTask = phase === "review" ? action.taskTitle ?? refreshedState.currentTask : undefined;
+  const finishTask = phase === "finish" ? refreshedState.autoReviewTask : undefined;
+  dispatchAutoPrompt(pi, ctx, prompt, refreshedState, {
     autoRetryKey: retryKey,
     autoRetryCount: isSameIncompletePhase ? retryCount + 1 : 0,
-    autoReviewTask: phase === "review" ? action.taskTitle ?? refreshedState.currentTask : refreshedState.autoReviewTask,
-    autoReviewTaskIndex: phase === "review" ? refreshedState.currentTaskIndex : refreshedState.autoReviewTaskIndex,
-  }, appendWorkflowEntry(pi));
-
-  sendUserMessage(pi, ctx, prompt, { autoMode: true });
+    autoReviewTask: reviewTask ?? finishTask,
+    autoReviewTaskIndex: phase === "review" ? refreshedState.currentTaskIndex : phase === "finish" ? refreshedState.autoReviewTaskIndex : undefined,
+  }, reviewTask || finishTask ? {
+    taskIndex: phase === "review" ? refreshedState.currentTaskIndex : refreshedState.autoReviewTaskIndex,
+    taskTitle: reviewTask ?? finishTask,
+  } : undefined);
 }
 
 function dispatchNextAutoWorkflowPromptAfterAgentEnd(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent): void {
@@ -563,6 +605,10 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       }, appendWorkflowEntry(pi));
 
       if (args[0] !== "stop") dispatchNextAutoWorkflowPrompt(pi, ctx, true);
+      else {
+        const state = getContextWorkflowState(ctx as never);
+        (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(`Addy auto stopped.\n${renderWorkflowStatsText(state)}`, "info");
+      }
       return { action: "continue" as const };
     },
   });

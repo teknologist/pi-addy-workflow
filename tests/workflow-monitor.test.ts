@@ -758,7 +758,8 @@ test("auto loop stops after finish when all plan tasks are complete", async () =
   assert.equal(ctx.state.autoMode, false);
   assert.equal(ctx.state.autoLastPrompt, undefined);
   assert.equal(ctx.state.phases.finish, "complete");
-  assert.deepEqual(notices.at(-1), ["Finished!", "info"]);
+  assert.match(notices.at(-1)?.[0] ?? "", /Finished!/);
+  assert.equal(notices.at(-1)?.[1], "info");
 });
 
 test("auto loop does not stop after finish when the finish result is incomplete", async () => {
@@ -1223,6 +1224,200 @@ test("auto review stats use the same finding parser as the fix loop", async () =
   assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 1);
   assert.equal(ctx.state.stats.active.tasks[statsKey].issues.important, 1);
   assert.equal(ctx.state.stats.active.tasks[statsKey].issues.total, 1);
+});
+
+test("auto-dispatched build records one turn without input double-counting", async () => {
+  const cwd = join(stateDir, "auto-stats-dispatch-project");
+  const planPath = join("docs", "plans", "auto-stats.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Auto task",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = { cwd, id: "auto-stats-dispatch", ui: { setWidget() {} }, isIdle: () => true };
+
+  await commands.get("addy-auto")?.handler(planPath, ctx);
+  const statsKey = `${planPath}\u001f\u001f1\u001fAuto task`;
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
+
+  await events.get("input")?.({ input: sentMessages.at(-1) }, ctx);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
+});
+
+test("auto-dispatched fix, verify, review, finish, and commit prompts record task turns", async () => {
+  const cwd = join(stateDir, "auto-stats-lifecycle-project");
+  const planPath = join("docs", "plans", "auto-stats-lifecycle.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Auto task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const statsKey = `${planPath}\u001f\u001f1\u001fAuto task`;
+  const ctx: any = {
+    cwd,
+    id: "auto-stats-lifecycle",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Auto task",
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+      stats: { active: { tasks: { [statsKey]: { plan: planPath, taskIndex: 1, taskTitle: "Auto task", turns: 1, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/foo.ts:1 before review can pass." }] }] }, ctx);
+  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-fix-all ${planPath}`, "Addy Fix All");
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 2);
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Fixed." }] }] }, ctx);
+  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-verify ${planPath}`, "Addy Verify");
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 3);
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
+  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-review ${planPath}`, "Addy Review");
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 4);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 2);
+
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Auto task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found." }] }] }, ctx);
+  assert.match(sentMessages.at(-1) ?? "", /^# Addy Auto Commit/);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
+  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
+  assert.equal(ctx.state.stats.history.at(-1)?.endedReason, "task-commit");
+  assert.equal(ctx.state.stats.history.at(-1)?.tasks[statsKey].turns, 5);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
+});
+
+test("auto stop preserves active stats and reports totals", async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    id: "auto-stop-stats",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "build",
+      autoMode: true,
+      stats: { active: { tasks: { task: { taskTitle: "Task", turns: 3, reviewRuns: 1, issues: { critical: 0, important: 1, suggestion: 0, unknown: 0, total: 1 } } } }, history: [] },
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+  };
+
+  await commands.get("addy-auto")?.handler({ args: ["stop"] }, ctx);
+
+  assert.equal(ctx.state.autoMode, false);
+  assert.equal(ctx.state.stats.active.tasks.task.turns, 3);
+  assert.equal(ctx.state.stats.history.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? "", /Addy auto stopped/);
+  assert.match(notices.at(-1)?.[0] ?? "", /Turns: 3/);
+});
+
+test("auto finish archives active stats and reports totals", async () => {
+  const cwd = join(stateDir, "auto-finish-stats-project");
+  const planPath = join("docs", "plans", "auto-finish-stats.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
+  const ctx: any = {
+    cwd,
+    id: "auto-finish-stats",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "complete", finish: "active" },
+      warnings: [],
+      current: "finish",
+      autoMode: true,
+      autoLastPrompt: `/addy-finish ${planPath}`,
+      activePlan: planPath,
+      stats: { active: { tasks: { [statsKey]: { plan: planPath, taskIndex: 1, taskTitle: "Current", turns: 2, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Finished!" }] }] }, ctx);
+
+  assert.equal(ctx.state.autoMode, false);
+  assert.equal(ctx.state.stats.active.tasks[statsKey], undefined);
+  assert.equal(ctx.state.stats.history.at(-1)?.endedReason, "completed");
+  assert.equal(ctx.state.stats.history.at(-1)?.tasks[statsKey].turns, 2);
+  assert.match(notices.at(-1)?.[0] ?? "", /Finished!/);
+  assert.match(notices.at(-1)?.[0] ?? "", /Turns: 2/);
+});
+
+test("auto stats use advanced numbered slice task grouping", async () => {
+  const cwd = join(stateDir, "auto-stats-slice-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  const firstPlan = join("docs", "plans", "feature-slice-01-one.md");
+  const secondPlan = join("docs", "plans", "feature-slice-02-two.md");
+  writeFileSync(join(cwd, firstPlan), [
+    "## Task 1: Done",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(cwd, secondPlan), [
+    "## Task 1: Next slice task",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-stats-slice",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "complete", finish: "pending" },
+      warnings: [],
+      current: "review",
+      autoMode: true,
+      activePlan: firstPlan,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
+
+  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-build ${secondPlan}`, "Addy Build");
+  const statsKey = `${secondPlan}\u001f2\u001f1\u001fNext slice task`;
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
 });
 
 test("legacy workflow state normalizes to empty stats", () => {

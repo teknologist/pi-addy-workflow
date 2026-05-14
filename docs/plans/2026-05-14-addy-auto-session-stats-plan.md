@@ -62,9 +62,9 @@ Spec: `docs/specs/2026-05-14-135237-addy-auto-session-stats.md`
 
 ## Task 3: Aggregate stats during `/addy-auto` loops
 
-- [ ] Implemented
-- [ ] Verified
-- [ ] Reviewed
+- [x] Implemented
+- [x] Verified
+- [x] Reviewed
 
 ### Acceptance criteria
 

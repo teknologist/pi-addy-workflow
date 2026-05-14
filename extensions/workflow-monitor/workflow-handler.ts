@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { complete, type UserMessage } from "@earendil-works/pi-ai";
-import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowIssueStats, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
+import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowIssueStats, type WorkflowPhase, type WorkflowState, type WorkflowTaskStats } from "./workflow-transitions.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, createEmptyWorkflowStats, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, refreshWorkflowTasksFromPlan, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
@@ -223,18 +223,73 @@ function addIssueStats(left: WorkflowIssueStats, right: WorkflowIssueStats): Wor
   };
 }
 
-function statsTaskKey(state: WorkflowState, taskIndex = state.currentTaskIndex, taskTitle = state.currentTask): string {
-  return [state.activePlan ?? "", state.currentSliceIndex ?? "", taskIndex ?? "", taskTitle ?? ""].join("\u001f");
+export type WorkflowStatsTarget = {
+  plan?: string;
+  sliceIndex?: number;
+  taskIndex?: number;
+  taskTitle?: string;
+};
+
+function statsTaskKey(state: WorkflowState, target: WorkflowStatsTarget = {}): string {
+  return [target.plan ?? state.activePlan ?? "", target.sliceIndex ?? state.currentSliceIndex ?? "", target.taskIndex ?? state.currentTaskIndex ?? "", target.taskTitle ?? state.currentTask ?? ""].join("\u001f");
 }
 
-export function recordWorkflowReviewRun(state: WorkflowState, target: { taskIndex?: number; taskTitle?: string } = {}): WorkflowState {
-  if (!state.activePlan && !state.currentTask && !target.taskTitle) return state;
+function workflowStatsTarget(state: WorkflowState, target: WorkflowStatsTarget = {}): Required<WorkflowStatsTarget> {
+  return {
+    plan: target.plan ?? state.activePlan ?? "",
+    sliceIndex: target.sliceIndex ?? state.currentSliceIndex ?? 0,
+    taskIndex: target.taskIndex ?? state.currentTaskIndex ?? 0,
+    taskTitle: target.taskTitle ?? state.currentTask ?? "",
+  };
+}
+
+function updateWorkflowTaskStats(state: WorkflowState, target: WorkflowStatsTarget, update: (existing: WorkflowTaskStats) => WorkflowTaskStats): WorkflowState {
+  if (!state.activePlan && !state.currentTask && !target.plan && !target.taskTitle) return state;
 
   const stats = state.stats ?? createEmptyWorkflowStats();
-  const key = statsTaskKey(state, target.taskIndex, target.taskTitle);
-  const existing = stats.active.tasks[key];
+  const resolved = workflowStatsTarget(state, target);
+  const key = statsTaskKey(state, target);
+  const existing = stats.active.tasks[key] ?? emptyTaskStats(resolved);
   return {
     ...state,
+    stats: {
+      active: {
+        ...stats.active,
+        tasks: {
+          ...stats.active.tasks,
+          [key]: update(existing),
+        },
+      },
+      history: stats.history,
+    },
+  };
+}
+
+function emptyTaskStats(target: Required<WorkflowStatsTarget>): WorkflowTaskStats {
+  return {
+    plan: target.plan || undefined,
+    sliceIndex: target.sliceIndex || undefined,
+    taskIndex: target.taskIndex || undefined,
+    taskTitle: target.taskTitle || undefined,
+    turns: 0,
+    reviewRuns: 0,
+    issues: emptyIssueStats(),
+  };
+}
+
+export function recordWorkflowTaskTurn(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
+  return updateWorkflowTaskStats(state, target, (existing) => ({ ...existing, turns: existing.turns + 1 }));
+}
+
+export function recordWorkflowReviewRun(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
+  const withTurn = recordWorkflowTaskTurn(state, target);
+  const key = statsTaskKey(withTurn, target);
+  const stats = withTurn.stats ?? createEmptyWorkflowStats();
+  const existing = stats.active.tasks[key];
+  if (!existing) return withTurn;
+
+  return {
+    ...withTurn,
     reviewStatsKey: key,
     stats: {
       active: {
@@ -242,13 +297,8 @@ export function recordWorkflowReviewRun(state: WorkflowState, target: { taskInde
         tasks: {
           ...stats.active.tasks,
           [key]: {
-            plan: state.activePlan,
-            sliceIndex: state.currentSliceIndex,
-            taskIndex: target.taskIndex ?? state.currentTaskIndex,
-            taskTitle: target.taskTitle ?? state.currentTask,
-            turns: (existing?.turns ?? 0) + 1,
-            reviewRuns: (existing?.reviewRuns ?? 0) + 1,
-            issues: existing?.issues ?? emptyIssueStats(),
+            ...existing,
+            reviewRuns: existing.reviewRuns + 1,
           },
         },
       },
@@ -290,35 +340,10 @@ function recordManualTaskTurn(previous: WorkflowState, state: WorkflowState, eve
   const command = commandNameFromText(event.text ?? event.command);
   if (!manualTurnCommand(command)) return state;
   if (command === "/addy-review") return recordWorkflowReviewRun(state);
-  if (!state.activePlan && !state.currentTask) return state;
-
-  const stats = state.stats ?? createEmptyWorkflowStats();
-  const key = statsTaskKey(state);
-  const existing = stats.active.tasks[key];
-  return {
-    ...state,
-    stats: {
-      active: {
-        ...stats.active,
-        tasks: {
-          ...stats.active.tasks,
-          [key]: {
-            plan: state.activePlan,
-            sliceIndex: state.currentSliceIndex,
-            taskIndex: state.currentTaskIndex,
-            taskTitle: state.currentTask,
-            turns: (existing?.turns ?? 0) + 1,
-            reviewRuns: existing?.reviewRuns ?? 0,
-            issues: existing?.issues ?? emptyIssueStats(),
-          },
-        },
-      },
-      history: stats.history,
-    },
-  };
+  return recordWorkflowTaskTurn(state);
 }
 
-function archiveActiveStats(state: WorkflowState, endedReason: string): WorkflowState {
+export function archiveWorkflowStats(state: WorkflowState, endedReason: string): WorkflowState {
   const stats = state.stats ?? createEmptyWorkflowStats();
   const hasActiveStats = Object.keys(stats.active.tasks).length > 0;
   return {
@@ -425,7 +450,7 @@ export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): 
   const previous = getContextWorkflowState(ctx);
   const state = {
     ...createInitialWorkflowState(),
-    stats: archiveActiveStats(previous, "reset").stats,
+    stats: archiveWorkflowStats(previous, "reset").stats,
   };
   ctx.state = state;
   const key = workflowStateKey(ctx);
