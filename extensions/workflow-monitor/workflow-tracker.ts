@@ -214,34 +214,6 @@ function numberedSliceParts(planPath: string): { prefix: string; number: number;
   };
 }
 
-function findNextNumberedPlanPath(planPath: string, baseCwd?: string): string | undefined {
-  const resolved = resolvePlanPath(planPath, baseCwd);
-  const current = numberedSliceParts(resolved);
-  if (!current) return undefined;
-
-  const nextNumber = current.number + 1;
-  const padded = String(nextNumber).padStart(current.width, "0");
-
-  let candidates: string[];
-  try {
-    candidates = readdirSync(dirname(resolved))
-      .filter((entry) => entry.endsWith(".md"))
-      .map((entry) => resolve(dirname(resolved), entry));
-  } catch {
-    return undefined;
-  }
-
-  const matches = candidates.filter((candidate) => {
-    const parts = numberedSliceParts(candidate);
-    if (!parts || parts.number !== nextNumber) return false;
-    if (parts.prefix.toLowerCase() !== current.prefix.toLowerCase()) return false;
-    const name = basename(candidate).toLowerCase();
-    return name.includes(`slice-${padded}`) || name.includes(`slice_${padded}`) || name.includes(`slice-${nextNumber}`) || name.includes(`slice_${nextNumber}`);
-  });
-
-  return matches.length === 1 ? planPathForDisplay(matches[0], planPath, baseCwd) : undefined;
-}
-
 function slicePlanPathFromIndexCandidate(rawPath: string, indexPlanPath: string, baseCwd?: string): string | undefined {
   const path = rawPath.replace(/^@/, "");
   const direct = isAbsolute(path) ? path : resolve(baseCwd ?? process.cwd(), path);
@@ -420,39 +392,6 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
 
   const currentIndex = tasks.findIndex((task) => !task.complete);
   if (currentIndex === -1) {
-    const nextPlan = findNextNumberedPlanPath(state.activePlan, baseCwd);
-    if (nextPlan) {
-      const nextMarkdown = readPlanMarkdown(nextPlan, baseCwd);
-      const nextTasks = nextMarkdown ? planTasksFromMarkdown(nextMarkdown) : [];
-      const nextCurrentIndex = nextTasks.findIndex((task) => !task.complete);
-      const nextSliceProgress = sliceProgressForPlanPath(nextPlan, baseCwd);
-
-      if (nextCurrentIndex !== -1) {
-        const current = nextTasks[nextCurrentIndex];
-        const next = nextTasks.slice(nextCurrentIndex + 1).find((task) => !task.complete);
-        const currentTask = current.title;
-        const nextTask = next?.title ?? "none";
-        const nextCurrent = state.current === "plan" ? "build" : state.current;
-        return {
-          ...state,
-          current: nextCurrent,
-          phases: nextCurrent === "build"
-            ? { ...state.phases, define: "complete", plan: "complete", build: "active" }
-            : state.phases,
-          warnings: nextCurrent === "build" ? [] : state.warnings,
-          activePlan: nextPlan,
-          currentTask,
-          nextTask,
-          currentTaskIndex: nextCurrentIndex + 1,
-          taskCount: nextTasks.length,
-          currentSliceIndex: nextSliceProgress?.currentSliceIndex,
-          sliceCount: nextSliceProgress?.sliceCount,
-          currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
-          nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
-        };
-      }
-    }
-
     const currentTask = "all tasks complete";
     const nextTask = "none";
     return {

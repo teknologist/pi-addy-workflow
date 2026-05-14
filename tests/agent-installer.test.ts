@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
-import { GENERATED_AGENT_NOTICE, addGeneratedNotice, isSafeTargetPath, syncAgents } from "../extensions/agent-installer/core.ts";
+import { GENERATED_AGENT_NOTICE, addGeneratedNotice, isSafeTargetPath, packageAgentSourceRoot, syncAgents } from "../extensions/agent-installer/core.ts";
 
 test("adds generated notice after YAML frontmatter", () => {
   const content = "---\nname: addy-reviewer\n---\n\nBody\n";
@@ -13,6 +14,13 @@ test("adds generated notice after YAML frontmatter", () => {
 test("target path safety stays inside target root", () => {
   assert.equal(isSafeTargetPath("/tmp/root", "/tmp/root/agent.md"), true);
   assert.equal(isSafeTargetPath("/tmp/root", "/tmp/root2/agent.md"), false);
+});
+
+test("package agent source root decodes file URLs", () => {
+  const packageRoot = join(tmpdir(), "addy agent package");
+  const extensionUrl = pathToFileURL(join(packageRoot, "extensions", "agent-installer.ts")).href;
+
+  assert.equal(packageAgentSourceRoot(extensionUrl), join(packageRoot, "agents"));
 });
 
 test("sync writes changed agents and removes stale generated files", async () => {

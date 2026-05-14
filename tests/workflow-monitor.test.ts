@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
 import { loadAddyWorkflowConfig } from "../extensions/workflow-monitor/config.ts";
-import { getContextWorkflowState, handleWorkflowEvent, openNextWorkflowPrompt } from "../extensions/workflow-monitor/workflow-handler.ts";
+import { getContextWorkflowState, handleWorkflowEvent, openNextWorkflowPrompt, setContextWorkflowState } from "../extensions/workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE } from "../extensions/workflow-monitor/workflow-tracker.ts";
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
@@ -660,6 +660,48 @@ test("auto loop extracts cross-repo scope from slice index metadata", async () =
   assert.match(sentMessages[0], new RegExp(`Repository scope: ${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}; `));
   assert.match(sentMessages[0], new RegExp(join(stateDir, "invoices-converter").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(sentMessages[0], /Pass the full repository scope above to `\/commit`/);
+});
+
+test("auto loop resolves relative Index paths from the slice plan directory", async () => {
+  const cwd = join(stateDir, "relative-index-owner");
+  const planPath = join("docs", "plans", "slice-01.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, "docs", "plans", "index.md"), [
+    "# Index",
+    "**Companion repo:** sibling `../relative-index-companion`",
+  ].join("\n"));
+  writeFileSync(join(cwd, planPath), [
+    "Index: `index.md`",
+    "",
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-task-commit-relative-index-scope",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found. Marked Reviewed." }] }] }, ctx);
+
+  assert.match(sentMessages[0], new RegExp(join(stateDir, "relative-index-companion").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("auto loop commits reviewed task even when refreshed state already points at next task", async () => {
@@ -1895,6 +1937,34 @@ test("session start restores persisted workflow widget state", async () => {
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), ["Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | startup-restore.md"]);
 });
 
+test("session project restore clears stale auto loop controls", async () => {
+  const cwd = join(stateDir, "startup-auto-sanitize-project");
+  const planPath = "docs/plans/startup-auto.md";
+  const firstCtx: any = { cwd, id: "startup-auto-sanitize-first", ui: { setWidget() {} } };
+  handleWorkflowEvent(firstCtx, { source: "user-input", text: `/addy-auto ${planPath}` });
+
+  const nextCtx: any = { cwd, id: "startup-auto-sanitize-next" };
+  const state = getContextWorkflowState(nextCtx);
+
+  assert.equal(state.current, undefined);
+  assert.equal(state.activePlan, planPath);
+  assert.equal(state.autoMode, false);
+  assert.equal(state.autoLastPrompt, undefined);
+});
+
+test("project restore preserves pending fresh auto continuation", () => {
+  const cwd = join(stateDir, "startup-auto-fresh-project");
+  const firstCtx: any = { cwd, id: "startup-auto-fresh-first", ui: { setWidget() {} } };
+  handleWorkflowEvent(firstCtx, { source: "user-input", text: "/addy-auto docs/plans/fresh.md" });
+  firstCtx.state.autoFreshPrompt = "/addy-build docs/plans/fresh.md";
+  setContextWorkflowState(firstCtx, firstCtx.state);
+
+  const state = getContextWorkflowState({ cwd, id: "startup-auto-fresh-next" } as any);
+
+  assert.equal(state.autoMode, true);
+  assert.equal(state.autoFreshPrompt, "/addy-build docs/plans/fresh.md");
+});
+
 test("manual Addy turns record active task stats and addy-stats is read-only", async () => {
   const cwd = join(stateDir, "manual-stats-project");
   const planPath = join("docs", "plans", "manual-stats.md");
@@ -2203,8 +2273,16 @@ test("auto stats use advanced numbered slice task grouping", async () => {
   const cwd = join(stateDir, "auto-stats-slice-project");
   const plansDir = join(cwd, "docs", "plans");
   mkdirSync(plansDir, { recursive: true });
+  const indexPlan = join("docs", "plans", "feature-index.md");
   const firstPlan = join("docs", "plans", "feature-slice-01-one.md");
   const secondPlan = join("docs", "plans", "feature-slice-02-two.md");
+  writeFileSync(join(cwd, indexPlan), [
+    "# Feature index",
+    "| Slice | Plan |",
+    "| --- | --- |",
+    "| 01 | `docs/plans/feature-slice-01-one.md` |",
+    "| 02 | `docs/plans/feature-slice-02-two.md` |",
+  ].join("\n"));
   writeFileSync(join(cwd, firstPlan), [
     "## Task 1: Done",
     "- [x] Implemented",
@@ -2228,7 +2306,7 @@ test("auto stats use advanced numbered slice task grouping", async () => {
       warnings: [],
       current: "review",
       autoMode: true,
-      activePlan: firstPlan,
+      activePlan: indexPlan,
     },
     ui: { setWidget() {} },
     isIdle: () => true,
@@ -2430,7 +2508,7 @@ test("workflow state stores current and next task from active plan", () => {
   assert.equal(ctx.state.nextTask, "Next");
 });
 
-test("bare verify advances stale completed active plan to next unfinished slice", () => {
+test("bare verify keeps completed active slice on finish boundary", () => {
   const cwd = join(stateDir, "stale-active-plan-project");
   const plansDir = join(cwd, "docs", "plans");
   mkdirSync(plansDir, { recursive: true });
@@ -2457,8 +2535,8 @@ test("bare verify advances stale completed active plan to next unfinished slice"
   const verify = handleWorkflowEvent(ctx, { source: "user-input", text: "/addy-verify" });
 
   assert.equal(verify.current, "verify");
-  assert.equal(verify.activePlan, "@docs/plans/2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md");
-  assert.equal(verify.currentTask, "Verify Slice 06 Task 2");
+  assert.equal(verify.activePlan, "@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md");
+  assert.equal(verify.currentTask, "all tasks complete");
   assert.equal(verify.nextTask, "none");
 });
 

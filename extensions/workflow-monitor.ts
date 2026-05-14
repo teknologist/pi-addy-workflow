@@ -337,7 +337,7 @@ function repositoryScopesForPlan(planPath: string | undefined, baseCwd?: string)
     let indexMarkdown = "";
     if (indexPlanPath) {
       try {
-        indexMarkdown = readFileSync(resolveWorkflowPlanPath(indexPlanPath, baseCwd), "utf8");
+        indexMarkdown = readFileSync(resolveWorkflowPlanPathRelativeTo(indexPlanPath, resolvedPlanPath, baseCwd), "utf8");
       } catch {
         indexMarkdown = "";
       }
@@ -427,6 +427,19 @@ function statsTargetFromTask(task: NonNullable<ReturnType<typeof getContextWorkf
 function resolveWorkflowPlanPath(planPath: string, baseCwd?: string): string {
   const filesystemPath = planPath.startsWith("@") ? planPath.slice(1) : planPath;
   return isAbsolute(filesystemPath) ? filesystemPath : resolve(baseCwd ?? process.cwd(), filesystemPath);
+}
+
+function resolveWorkflowPlanPathRelativeTo(planPath: string, relativeTo: string, baseCwd?: string): string {
+  const filesystemPath = planPath.startsWith("@") ? planPath.slice(1) : planPath;
+  if (isAbsolute(filesystemPath)) return filesystemPath;
+
+  const relativeCandidate = resolve(dirname(relativeTo), filesystemPath);
+  try {
+    readFileSync(relativeCandidate, "utf8");
+    return relativeCandidate;
+  } catch {
+    return resolveWorkflowPlanPath(planPath, baseCwd);
+  }
 }
 
 function planTaskIsComplete(planPath: string | undefined, baseCwd: string | undefined, target: WorkflowStatsTarget): boolean {

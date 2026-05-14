@@ -414,6 +414,36 @@ test("workflow widget resolves index plans to the first unfinished slice", () =>
   ]);
 });
 
+test("completed slice stays on current plan so finish runs before next slice", () => {
+  const cwd = join(taskFooterDir, "completed-slice-project");
+  const plansDir = join(cwd, "docs", "plans");
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, "2026-05-14-migration-slice-01-api.md"), [
+    "## Task 1: Complete public API",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(plansDir, "2026-05-14-migration-slice-02-runtime.md"), [
+    "## Task 1: Migrate runtime",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const activePlan = "@docs/plans/2026-05-14-migration-slice-01-api.md";
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: "review",
+    phases: { ...createInitialWorkflowState().phases, define: "complete", plan: "complete", build: "complete", verify: "complete", review: "active" },
+    activePlan,
+  }, cwd);
+
+  assert.equal(state.activePlan, activePlan);
+  assert.equal(state.currentTask, "all tasks complete");
+  assert.equal(nextPromptForActivePlanLifecycle(state, cwd), `/addy-finish ${activePlan}`);
+});
+
 test("workflow widget resolves Pi @-referenced active plan paths", () => {
   const cwd = join(taskFooterDir, "at-reference-project");
   const planPath = join(cwd, "docs", "plans", "task-footer.md");
@@ -439,7 +469,7 @@ test("workflow widget resolves Pi @-referenced active plan paths", () => {
   ]);
 });
 
-test("completed active slice advances footer tasks to next numbered slice", () => {
+test("completed active slice stays on current slice until finish", () => {
   const cwd = join(taskFooterDir, "next-slice-project");
   const plansDir = join(cwd, "docs", "plans");
   mkdirSync(plansDir, { recursive: true });
@@ -481,12 +511,12 @@ test("completed active slice advances footer tasks to next numbered slice", () =
     activePlan: "@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md",
   }, cwd);
 
-  assert.equal(state.activePlan, "@docs/plans/2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md");
-  assert.equal(state.currentTask, "TRESO2 4xx body read fully");
-  assert.equal(state.nextTask, "Report row has summarized error fields");
+  assert.equal(state.activePlan, "@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md");
+  assert.equal(state.currentTask, "all tasks complete");
+  assert.equal(state.nextTask, "none");
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    "Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-06-failures-reports-reruns.md",
-    "Current task: TRESO2 4xx body read fully | Next task: Report row has summarized error fields | Slice 6/8 | Task 2/3",
+    "Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md",
+    "Current task: all tasks complete | Next task: none | Slice 5/8 | Task 1/1",
   ]);
 });
 
@@ -612,7 +642,7 @@ test("refreshing workflow tasks clears stale summaries when task changes", () =>
   assert.equal(state.currentTaskSummary, undefined);
 });
 
-test("refreshing workflow repairs stale completed plan state to the next unfinished slice", () => {
+test("refreshing workflow keeps completed direct slice on finish boundary", () => {
   const cwd = join(taskFooterDir, "repair-stale-complete-plan-project");
   const plansDir = join(cwd, "docs", "plans");
   mkdirSync(plansDir, { recursive: true });
@@ -643,15 +673,15 @@ test("refreshing workflow repairs stale completed plan state to the next unfinis
     sliceCount: 9,
   }, cwd);
 
-  assert.equal(state.current, "build");
-  assert.equal(state.phases.plan, "complete");
-  assert.equal(state.phases.build, "active");
-  assert.deepEqual(state.warnings, []);
-  assert.equal(state.activePlan, "docs/plans/2026-05-08-invoice-csv-etl-slice-09-admin-module-boundaries.md");
-  assert.equal(state.currentTask, "Admin boundaries");
+  assert.equal(state.current, "plan");
+  assert.equal(state.phases.plan, "active");
+  assert.equal(state.phases.build, "pending");
+  assert.deepEqual(state.warnings, ["finish started before build and verify and review."]);
+  assert.equal(state.activePlan, "docs/plans/2026-05-08-invoice-csv-etl-slice-08-prod-readiness.md");
+  assert.equal(state.currentTask, "all tasks complete");
   assert.equal(state.currentTaskIndex, 1);
   assert.equal(state.taskCount, 1);
-  assert.equal(state.currentSliceIndex, 9);
+  assert.equal(state.currentSliceIndex, 8);
   assert.equal(state.sliceCount, 9);
 });
 

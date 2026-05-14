@@ -60,6 +60,7 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
   if (candidate.autoMode !== undefined && typeof candidate.autoMode !== "boolean") return undefined;
   if (candidate.autoLastPrompt !== undefined && typeof candidate.autoLastPrompt !== "string") return undefined;
+  if (candidate.autoFreshPrompt !== undefined && typeof candidate.autoFreshPrompt !== "string") return undefined;
   if (candidate.autoRetryKey !== undefined && typeof candidate.autoRetryKey !== "string") return undefined;
   if (candidate.autoRetryCount !== undefined && !isNonNegativeSafeInteger(candidate.autoRetryCount)) return undefined;
   if (candidate.autoReviewFixKey !== undefined && typeof candidate.autoReviewFixKey !== "string") return undefined;
@@ -161,6 +162,27 @@ function writeStoredWorkflowState(key: string, state: WorkflowState): void {
   }
 }
 
+function projectFallbackWorkflowState(key: string): WorkflowState | undefined {
+  const state = workflowMemory.get(key) ?? readStoredWorkflowState(key);
+  if (!state) return undefined;
+  if (state.autoFreshPrompt) return state;
+
+  return {
+    ...state,
+    autoMode: false,
+    autoLastPrompt: undefined,
+    autoRetryKey: undefined,
+    autoRetryCount: undefined,
+    autoReviewFixKey: undefined,
+    autoReviewFixCount: undefined,
+    autoReviewFindingFingerprint: undefined,
+    autoReviewFixNeedsReview: undefined,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
+    reviewStatsKey: undefined,
+  };
+}
+
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   const entries = ctx.sessionManager?.getBranch?.() ?? [];
   for (const entry of [...entries].reverse()) {
@@ -172,7 +194,7 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
 
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);
-  return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey) ?? createInitialWorkflowState();
+  return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? projectFallbackWorkflowState(projectKey) ?? createInitialWorkflowState();
 }
 
 export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowState, appendEntry?: AppendEntry): void {
