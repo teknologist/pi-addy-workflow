@@ -38,9 +38,9 @@ Spec: `docs/specs/2026-05-14-135237-addy-auto-session-stats.md`
 
 ## Task 2: Count review runs and surfaced issues
 
-- [ ] Implemented
-- [ ] Verified
-- [ ] Reviewed
+- [x] Implemented
+- [x] Verified
+- [x] Reviewed
 
 ### Acceptance criteria
 

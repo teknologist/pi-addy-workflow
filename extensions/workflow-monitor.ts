@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, resetWorkflow, setContextWorkflowState } from "./workflow-monitor/workflow-handler.ts";
-import { WORKFLOW_PHASES, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
+import { getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, resetWorkflow, setContextWorkflowState } from "./workflow-monitor/workflow-handler.ts";
+import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
 import { nextWorkflowActionForActivePlanLifecycle, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
 type CommandEvent = string | { args?: string[]; input?: string };
@@ -164,8 +164,16 @@ function agentTextReportsCommitComplete(text: string): boolean {
   return /\bCOMMIT:\s*[0-9a-f]{7,40}\b/i.test(text) || /\b(no changes to commit|nothing to commit|working tree clean)\b/i.test(text);
 }
 
+type ReviewIssueSeverity = "critical" | "important" | "suggestion" | "unknown";
+
+type ReviewIssueFinding = { line: string; severity: ReviewIssueSeverity };
+
+function emptyReviewIssueStats(): WorkflowIssueStats {
+  return { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 };
+}
+
 function reviewTextHasActionableFindings(text: string): boolean {
-  return reviewFindingLines(text).length > 0;
+  return reviewIssueFindings(text).length > 0;
 }
 
 function reviewFindingsFingerprint(text: string): string {
@@ -174,31 +182,65 @@ function reviewFindingsFingerprint(text: string): string {
 }
 
 function reviewFindingLines(text: string): string[] {
-  let inActionableSection = false;
-  return text
-    .split("\n")
-    .map((line) => line.trim().toLowerCase())
-    .filter((line) => {
-      if (!line) return false;
-      if (/\b[\w./-]+:\d+\b/.test(line) || /\b(blocking issue|blocker|must fix|should fix)\b/.test(line)) return !reviewLineIsEmptyFinding(line);
-
-      const heading = reviewActionableSectionHeading(line);
-      if (heading) {
-        inActionableSection = true;
-        const inlineFinding = heading.inlineFinding;
-        return Boolean(inlineFinding && !reviewLineIsEmptyFinding(inlineFinding));
-      }
-      if (reviewAnySectionHeading(line)) {
-        inActionableSection = false;
-        return false;
-      }
-      return inActionableSection && !reviewLineIsEmptyFinding(line);
-    });
+  return reviewIssueFindings(text).map((finding) => finding.line);
 }
 
-function reviewActionableSectionHeading(line: string): { inlineFinding: string } | undefined {
-  const match = line.match(/^(?:#+\s*)?(?:\*\*)?(critical issues?|important issues?|warnings?|suggestions?)(?:\*\*)?\s*:?\s*(.*)$/i);
-  return match ? { inlineFinding: match[2]?.trim() ?? "" } : undefined;
+function reviewIssueStatsFromText(text: string): WorkflowIssueStats {
+  const stats = emptyReviewIssueStats();
+  for (const finding of reviewIssueFindings(text)) {
+    stats[finding.severity] += 1;
+    stats.total += 1;
+  }
+  return stats;
+}
+
+function reviewIssueFindings(text: string): ReviewIssueFinding[] {
+  const findings: ReviewIssueFinding[] = [];
+  let sectionSeverity: ReviewIssueSeverity | undefined;
+
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim().toLowerCase();
+    if (!line) continue;
+
+    const heading = reviewActionableSectionHeading(line);
+    if (heading) {
+      sectionSeverity = heading.severity;
+      if (heading.inlineFinding && !reviewLineIsEmptyFinding(heading.inlineFinding)) findings.push({ line, severity: heading.severity });
+      continue;
+    }
+
+    if (reviewAnySectionHeading(line)) {
+      sectionSeverity = undefined;
+      continue;
+    }
+
+    if (sectionSeverity && !reviewLineIsEmptyFinding(line)) {
+      findings.push({ line, severity: sectionSeverity });
+      continue;
+    }
+
+    if ((/\b[\w./-]+:\d+\b/.test(line) || /\b(blocking issue|blocker|must fix|should fix)\b/.test(line)) && !reviewLineIsEmptyFinding(line)) {
+      findings.push({ line, severity: "unknown" });
+    }
+  }
+
+  if (findings.length === 0 && reviewTextClearlyFoundIssues(text)) findings.push({ line: text.trim().toLowerCase(), severity: "unknown" });
+  return findings;
+}
+
+function reviewTextClearlyFoundIssues(text: string): boolean {
+  const lower = text.trim().toLowerCase();
+  if (!lower || /\bno (?:actionable )?(?:issues|findings)(?: found)?\b/.test(lower)) return false;
+  return /\b(?:found|surfaced|identified|reported|detected)\b[\s\S]{0,80}\b(?:issues?|findings?|problems?)\b/.test(lower)
+    || /\b(?:issues?|findings?|problems?)\b[\s\S]{0,40}\b(?:found|surfaced|identified|reported|detected)\b/.test(lower);
+}
+
+function reviewActionableSectionHeading(line: string): { severity: ReviewIssueSeverity; inlineFinding: string } | undefined {
+  const match = line.match(/^(?:#+\s*)?(?:\*\*)?(critical(?: issues?)?|important(?: issues?)?|warnings?|suggestions?)(?:\*\*)?\s*:?\s*(.*)$/i);
+  if (!match) return undefined;
+  const label = match[1]?.toLowerCase() ?? "";
+  const severity: ReviewIssueSeverity = label.startsWith("critical") ? "critical" : label.startsWith("suggestion") ? "suggestion" : "important";
+  return { severity, inlineFinding: match[2]?.trim() ?? "" };
 }
 
 function reviewAnySectionHeading(line: string): boolean {
@@ -277,13 +319,20 @@ function autoPauseWarning(prompt: string, action: ReturnType<typeof nextWorkflow
 
 function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, state: ReturnType<typeof getContextWorkflowState>, updates: Partial<ReturnType<typeof getContextWorkflowState>> = {}): void {
   const workflowCtx = ctx as never;
-  setContextWorkflowState(workflowCtx, {
+  const nextState = {
     ...state,
     autoLastPrompt: prompt,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
     ...updates,
-  }, appendWorkflowEntry(pi));
+  };
+  const stateWithStats = commandFromPrompt(prompt) === "/addy-review"
+    ? recordWorkflowReviewRun(nextState, {
+      taskIndex: nextState.autoReviewTaskIndex ?? nextState.currentTaskIndex,
+      taskTitle: nextState.autoReviewTask ?? nextState.currentTask,
+    })
+    : nextState;
+  setContextWorkflowState(workflowCtx, stateWithStats, appendWorkflowEntry(pi));
   sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
 }
 
@@ -494,7 +543,10 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
 
   pi.on("agent_end", async (event: AgentEndEvent, ctx: unknown) => {
     const state = getContextWorkflowState(ctx as never);
-    if (!state.autoMode) return;
+    const reviewText = latestAssistantText(event);
+    const stateWithReviewIssues = state.reviewStatsKey ? recordWorkflowReviewIssues(state, reviewIssueStatsFromText(reviewText)) : state;
+    if (stateWithReviewIssues !== state) setContextWorkflowState(ctx as never, stateWithReviewIssues, appendWorkflowEntry(pi));
+    if (!stateWithReviewIssues.autoMode) return;
     dispatchNextAutoWorkflowPromptAfterAgentEnd(pi, ctx, event);
   });
 

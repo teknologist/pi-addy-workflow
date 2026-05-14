@@ -60,6 +60,7 @@ export type WorkflowState = {
   autoReviewFixNeedsReview?: boolean;
   autoReviewTask?: string;
   autoReviewTaskIndex?: number;
+  reviewStatsKey?: string;
 };
 
 export type WorkflowEvent = {
@@ -360,6 +361,7 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.autoReviewFixNeedsReview = baseState.autoReviewFixNeedsReview;
   next.autoReviewTask = baseState.autoReviewTask;
   next.autoReviewTaskIndex = baseState.autoReviewTaskIndex;
+  next.reviewStatsKey = baseState.reviewStatsKey;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
   next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : baseState.testStatus;

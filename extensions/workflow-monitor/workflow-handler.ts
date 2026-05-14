@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { complete, type UserMessage } from "@earendil-works/pi-ai";
-import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
+import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowIssueStats, type WorkflowPhase, type WorkflowState } from "./workflow-transitions.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, createEmptyWorkflowStats, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, refreshWorkflowTasksFromPlan, renderWorkflowWidget } from "./workflow-tracker.ts";
 import { workflowWarningText } from "./warnings.ts";
 
@@ -68,6 +68,7 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.autoReviewFixNeedsReview !== undefined && typeof candidate.autoReviewFixNeedsReview !== "boolean") return undefined;
   if (candidate.autoReviewTask !== undefined && typeof candidate.autoReviewTask !== "string") return undefined;
   if (candidate.autoReviewTaskIndex !== undefined && !isPositiveSafeInteger(candidate.autoReviewTaskIndex)) return undefined;
+  if (candidate.reviewStatsKey !== undefined && typeof candidate.reviewStatsKey !== "string") return undefined;
   if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
   if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
   if (candidate.currentTaskIndex !== undefined && !isPositiveSafeInteger(candidate.currentTaskIndex)) return undefined;
@@ -202,19 +203,93 @@ function commandNameFromText(text: string | undefined): string | undefined {
 function manualTurnCommand(command: string | undefined): boolean {
   return command === "/addy-build"
     || command === "/addy-verify"
+    || command === "/addy-review"
     || command === "/addy-code-simplify"
     || command === "/addy-fix-all"
     || command === "/addy-finish";
 }
 
-function statsTaskKey(state: WorkflowState): string {
-  return [state.activePlan ?? "", state.currentSliceIndex ?? "", state.currentTaskIndex ?? "", state.currentTask ?? ""].join("\u001f");
+function emptyIssueStats(): WorkflowIssueStats {
+  return { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 };
+}
+
+function addIssueStats(left: WorkflowIssueStats, right: WorkflowIssueStats): WorkflowIssueStats {
+  return {
+    critical: left.critical + right.critical,
+    important: left.important + right.important,
+    suggestion: left.suggestion + right.suggestion,
+    unknown: left.unknown + right.unknown,
+    total: left.total + right.total,
+  };
+}
+
+function statsTaskKey(state: WorkflowState, taskIndex = state.currentTaskIndex, taskTitle = state.currentTask): string {
+  return [state.activePlan ?? "", state.currentSliceIndex ?? "", taskIndex ?? "", taskTitle ?? ""].join("\u001f");
+}
+
+export function recordWorkflowReviewRun(state: WorkflowState, target: { taskIndex?: number; taskTitle?: string } = {}): WorkflowState {
+  if (!state.activePlan && !state.currentTask && !target.taskTitle) return state;
+
+  const stats = state.stats ?? createEmptyWorkflowStats();
+  const key = statsTaskKey(state, target.taskIndex, target.taskTitle);
+  const existing = stats.active.tasks[key];
+  return {
+    ...state,
+    reviewStatsKey: key,
+    stats: {
+      active: {
+        ...stats.active,
+        tasks: {
+          ...stats.active.tasks,
+          [key]: {
+            plan: state.activePlan,
+            sliceIndex: state.currentSliceIndex,
+            taskIndex: target.taskIndex ?? state.currentTaskIndex,
+            taskTitle: target.taskTitle ?? state.currentTask,
+            turns: (existing?.turns ?? 0) + 1,
+            reviewRuns: (existing?.reviewRuns ?? 0) + 1,
+            issues: existing?.issues ?? emptyIssueStats(),
+          },
+        },
+      },
+      history: stats.history,
+    },
+  };
+}
+
+export function recordWorkflowReviewIssues(state: WorkflowState, issues: WorkflowIssueStats): WorkflowState {
+  const key = state.reviewStatsKey;
+  if (!key) return state;
+
+  const stats = state.stats ?? createEmptyWorkflowStats();
+  const existing = stats.active.tasks[key];
+  if (!existing) return { ...state, reviewStatsKey: undefined };
+
+  return {
+    ...state,
+    reviewStatsKey: undefined,
+    stats: {
+      active: {
+        ...stats.active,
+        tasks: {
+          ...stats.active.tasks,
+          [key]: {
+            ...existing,
+            issues: addIssueStats(existing.issues, issues),
+          },
+        },
+      },
+      history: stats.history,
+    },
+  };
 }
 
 function recordManualTaskTurn(previous: WorkflowState, state: WorkflowState, event: WorkflowEvent): WorkflowState {
   if (previous.autoMode) return state;
   if (event.source !== "user-input" && event.source !== "command") return state;
-  if (!manualTurnCommand(commandNameFromText(event.text ?? event.command))) return state;
+  const command = commandNameFromText(event.text ?? event.command);
+  if (!manualTurnCommand(command)) return state;
+  if (command === "/addy-review") return recordWorkflowReviewRun(state);
   if (!state.activePlan && !state.currentTask) return state;
 
   const stats = state.stats ?? createEmptyWorkflowStats();
@@ -234,7 +309,7 @@ function recordManualTaskTurn(previous: WorkflowState, state: WorkflowState, eve
             taskTitle: state.currentTask,
             turns: (existing?.turns ?? 0) + 1,
             reviewRuns: existing?.reviewRuns ?? 0,
-            issues: existing?.issues ?? { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 },
+            issues: existing?.issues ?? emptyIssueStats(),
           },
         },
       },

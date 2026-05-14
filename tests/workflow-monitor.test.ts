@@ -1118,6 +1118,113 @@ test("manual Addy turns record active task stats and addy-stats is read-only", a
   assert.equal(notices.at(-1)?.[1], "info");
 });
 
+test("manual review records a review run with zero issues when clean", async () => {
+  const cwd = join(stateDir, "manual-review-clean-stats-project");
+  const planPath = join("docs", "plans", "manual-review-clean.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Review this task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = { cwd, id: "manual-review-clean-stats", ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) } };
+
+  await events.get("input")?.({ input: `/addy-review ${planPath}` }, ctx);
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No issues found." }] }] }, ctx);
+  await commands.get("addy-stats")?.handler({}, ctx);
+
+  const statsKey = `${planPath}\u001f\u001f1\u001fReview this task`;
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.total, 0);
+  assert.match(notices.at(-1)?.[0] ?? "", /Review runs: 1/);
+  assert.match(notices.at(-1)?.[0] ?? "", /Issues: 0/);
+});
+
+test("manual review records severity buckets and unknown fallback", async () => {
+  const cwd = join(stateDir, "manual-review-issue-stats-project");
+  const planPath = join("docs", "plans", "manual-review-issues.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Review this task",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = { cwd, id: "manual-review-issue-stats", ui: { setWidget() {} } };
+
+  await events.get("input")?.({ input: `/addy-review ${planPath}` }, ctx);
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: [
+    "Critical: fix src/critical.ts:10 before review can pass.",
+    "Important issues:",
+    "- Preserve the reviewed task when counting stats.",
+    "Suggestions:",
+    "- Prefer a shared helper.",
+  ].join("\n") }] }] }, ctx);
+  await events.get("input")?.({ input: `/addy-fix-all ${planPath}` }, ctx);
+  await events.get("input")?.({ input: `/addy-review ${planPath}` }, ctx);
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Review found issues, but the output was not categorized." }] }] }, ctx);
+
+  const statsKey = `${planPath}\u001f\u001f1\u001fReview this task`;
+  assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 2);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.critical, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.important, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.suggestion, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.unknown, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.total, 4);
+});
+
+test("auto review stats use the same finding parser as the fix loop", async () => {
+  const cwd = join(stateDir, "auto-review-stats-parser-project");
+  const planPath = join("docs", "plans", "auto-review-stats.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
+  const ctx: any = {
+    cwd,
+    id: "auto-review-stats-parser",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      currentTask: "Current",
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      reviewStatsKey: statsKey,
+      activePlan: planPath,
+      stats: { active: { tasks: { [statsKey]: { plan: planPath, taskIndex: 1, taskTitle: "Current", turns: 1, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Warnings:\n- This can auto-commit unrelated changes." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-fix-all ${planPath}`, "Addy Fix All");
+  assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.important, 1);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].issues.total, 1);
+});
+
 test("legacy workflow state normalizes to empty stats", () => {
   const ctx: any = {
     sessionManager: {
