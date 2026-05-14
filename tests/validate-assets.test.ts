@@ -294,7 +294,10 @@ test("stats prompt is read-only and prompts require completion stats", async () 
   assert.match(stats, /No Addy stats recorded yet/);
   assert.match(auto, /final aggregate stats/i);
   assert.match(auto, /completed or stopped loop/i);
-  assert.match(finish, /single-task completion stats/i);
+  assert.match(finish, /cycle completion stats/i);
+  assert.match(finish, /full Addy Auto session/i);
+  assert.match(finish, /build → simplify → verify → review → finish/);
+  assert.match(finish, /If the user chooses `commit`[^\n]*cycle completion stats[^\n]*then say `Finished!`/);
   assert.match(finish, /Turns:/);
   assert.match(finish, /Review runs:/);
   assert.match(finish, /Issues:/);
