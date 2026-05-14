@@ -65,6 +65,13 @@ Task commit policy:
 - Use the same direct commit workflow as `/addy-finish`: inspect `git status`, stage all current changed files for the completed task including the plan checkbox update, review the staged diff, create one concise commit, and report the commit hash.
 - After the commit is complete, continue to the next lifecycle action automatically.
 
+Fresh context policy:
+
+- By default, Addy auto starts a fresh Pi session before the next task or slice after each completed task commit.
+- Configure this in `.pi/addy-workflow.json` with `{"auto":{"freshContext":{"betweenTasks":true,"beforeReview":false}}}`.
+- Set `beforeReview` to `true` to also start a fresh Pi session immediately before each `/addy-review` prompt.
+- Environment overrides: `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` and `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` accept `1/0`, `true/false`, `yes/no`, or `on/off`.
+
 Completion stats policy:
 
 - Every completed or stopped `/addy-auto` loop must output final aggregate stats for the loop.

@@ -422,20 +422,24 @@ export function handleWorkflowEvent(ctx: WorkflowContext, event: WorkflowEvent, 
   setContextWorkflowState(ctx, next, appendEntry);
   const source = ctx.state ?? next;
   void summarizeWorkflowTasks(ctx, source).then((summarized) => {
-    const latest = ctx.state ?? next;
-    if (
-      latest.current !== source.current ||
-      latest.activePlan !== source.activePlan ||
-      latest.currentTask !== source.currentTask ||
-      latest.nextTask !== source.nextTask
-    ) return;
+    try {
+      const latest = ctx.state ?? next;
+      if (
+        latest.current !== source.current ||
+        latest.activePlan !== source.activePlan ||
+        latest.currentTask !== source.currentTask ||
+        latest.nextTask !== source.nextTask
+      ) return;
 
-    if (summarized === source) return;
-    setContextWorkflowState(ctx, {
-      ...latest,
-      currentTaskSummary: summarized.currentTaskSummary,
-      nextTaskSummary: summarized.nextTaskSummary,
-    }, appendEntry);
+      if (summarized === source) return;
+      setContextWorkflowState(ctx, {
+        ...latest,
+        currentTaskSummary: summarized.currentTaskSummary,
+        nextTaskSummary: summarized.nextTaskSummary,
+      }, appendEntry);
+    } catch {
+      // Best-effort task summaries may resolve after ctx.newSession() invalidates the old context.
+    }
   });
   return ctx.state ?? next;
 }

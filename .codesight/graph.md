@@ -7,6 +7,7 @@
 - `extensions/workflow-monitor/workflow-handler.ts` — imported by **3** files
 - `extensions/agent-installer/core.ts` — imported by **2** files
 - `extensions/bootstrap/core.ts` — imported by **2** files
+- `extensions/workflow-monitor/config.ts` — imported by **2** files
 - `extensions/workflow-monitor.ts` — imported by **2** files
 - `extensions/workflow-monitor/warnings.ts` — imported by **1** files
 - `extensions/bootstrap.ts` — imported by **1** files
@@ -19,6 +20,7 @@
 - `extensions/workflow-monitor/workflow-handler.ts` ← `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`, `tests/workflow-tracker.test.ts`
 - `extensions/agent-installer/core.ts` ← `extensions/agent-installer.ts`, `tests/agent-installer.test.ts`
 - `extensions/bootstrap/core.ts` ← `extensions/bootstrap.ts`, `tests/bootstrap.test.ts`
+- `extensions/workflow-monitor/config.ts` ← `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`
 - `extensions/workflow-monitor.ts` ← `tests/validate-assets.test.ts`, `tests/workflow-monitor.test.ts`
 - `extensions/workflow-monitor/warnings.ts` ← `extensions/workflow-monitor/workflow-handler.ts`
 - `extensions/bootstrap.ts` ← `tests/validate-assets.test.ts`

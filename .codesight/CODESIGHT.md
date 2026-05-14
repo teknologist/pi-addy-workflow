@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 0 routes | 0 models | 0 components | 6 lib files | 2 env vars | 0 middleware | 0% test coverage
-> **Token savings:** this file is ~1,300 tokens. Without it, AI exploration would cost ~8,800 tokens. **Saves ~7,400 tokens per conversation.**
-> **Last scanned:** 2026-05-14 12:37 — re-run after significant changes
+> 0 routes | 0 models | 0 components | 7 lib files | 4 env vars | 0 middleware | 0% test coverage
+> **Token savings:** this file is ~1,500 tokens. Without it, AI exploration would cost ~9,500 tokens. **Saves ~8,000 tokens per conversation.**
+> **Last scanned:** 2026-05-14 17:40 — re-run after significant changes
 
 ---
 
@@ -26,15 +26,16 @@
   - type BootstrapToolAvailability
   - type BootstrapOptions
   - _...1 more_
+- `extensions/workflow-monitor/config.ts` — function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig, type AddyWorkflowConfig
 - `extensions/workflow-monitor/warnings.ts` — function workflowWarningText: (state) => string | undefined
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function getContextWorkflowState: (ctx) => WorkflowState
   - function setContextWorkflowState: (ctx, state, appendEntry?) => void
+  - function recordWorkflowTaskTurn: (state, target) => WorkflowState
   - function recordWorkflowReviewRun: (state, target) => WorkflowState
   - function recordWorkflowReviewIssues: (state, issues) => WorkflowState
-  - function summarizeWorkflowTasks: (ctx, state) => Promise<WorkflowState>
-  - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
-  - _...3 more_
+  - function archiveWorkflowStats: (state, endedReason) => WorkflowState
+  - _...6 more_
 - `extensions/workflow-monitor/workflow-tracker.ts`
   - function createEmptyWorkflowStats: () => WorkflowStats
   - function serializeWorkflowState: (state) => string
@@ -59,6 +60,8 @@
 ## Environment Variables
 
 - `HOME` **required** — extensions/agent-installer/core.ts
+- `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` **required** — tests/workflow-monitor.test.ts
+- `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/workflow-monitor.test.ts
 - `PI_ADDY_WORKFLOW_STATE_DIR` **required** — extensions/workflow-monitor/workflow-handler.ts
 
 ## Config Files
@@ -76,6 +79,7 @@
 - `extensions/workflow-monitor/workflow-handler.ts` — imported by **3** files
 - `extensions/agent-installer/core.ts` — imported by **2** files
 - `extensions/bootstrap/core.ts` — imported by **2** files
+- `extensions/workflow-monitor/config.ts` — imported by **2** files
 - `extensions/workflow-monitor.ts` — imported by **2** files
 - `extensions/workflow-monitor/warnings.ts` — imported by **1** files
 - `extensions/bootstrap.ts` — imported by **1** files
@@ -88,6 +92,7 @@
 - `extensions/workflow-monitor/workflow-handler.ts` ← `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`, `tests/workflow-tracker.test.ts`
 - `extensions/agent-installer/core.ts` ← `extensions/agent-installer.ts`, `tests/agent-installer.test.ts`
 - `extensions/bootstrap/core.ts` ← `extensions/bootstrap.ts`, `tests/bootstrap.test.ts`
+- `extensions/workflow-monitor/config.ts` ← `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`
 - `extensions/workflow-monitor.ts` ← `tests/validate-assets.test.ts`, `tests/workflow-monitor.test.ts`
 - `extensions/workflow-monitor/warnings.ts` ← `extensions/workflow-monitor/workflow-handler.ts`
 - `extensions/bootstrap.ts` ← `tests/validate-assets.test.ts`

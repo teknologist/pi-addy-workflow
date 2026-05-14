@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import addyWorkflowMonitor from "../extensions/workflow-monitor.ts";
+import { loadAddyWorkflowConfig } from "../extensions/workflow-monitor/config.ts";
 import { getContextWorkflowState, handleWorkflowEvent, openNextWorkflowPrompt } from "../extensions/workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_STATE_ENTRY_TYPE } from "../extensions/workflow-monitor/workflow-tracker.ts";
 
@@ -56,9 +57,42 @@ test("registers workflow commands and handlers", () => {
   assert.ok(events.has("before_agent_start"));
   assert.ok(events.has("agent_end"));
   assert.ok(commands.has("addy-auto"));
+  assert.ok(commands.has("addy-auto-continue"));
   assert.ok(commands.has("addy-stats"));
   assert.ok(commands.has("addy-workflow-reset"));
   assert.ok(commands.has("addy-workflow-next"));
+});
+
+test("Addy workflow config uses fresh-context defaults and env overrides", () => {
+  const config = loadAddyWorkflowConfig({}, {
+    PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS: "0",
+    PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW: "true",
+  });
+
+  assert.deepEqual(config.auto.freshContext, { betweenTasks: false, beforeReview: true });
+});
+
+test("Addy workflow config lets project config override defaults", () => {
+  const cwd = join(stateDir, "config-project");
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "addy-workflow.json"), JSON.stringify({ auto: { freshContext: { betweenTasks: false, beforeReview: true } } }));
+
+  const config = loadAddyWorkflowConfig({ cwd }, {});
+
+  assert.deepEqual(config.auto.freshContext, { betweenTasks: false, beforeReview: true });
+});
+
+test("Addy workflow config ignores malformed project config safely", () => {
+  const cwd = join(stateDir, "config-invalid-project");
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "addy-workflow.json"), "{");
+  const notices: Array<[string, string | undefined]> = [];
+
+  const config = loadAddyWorkflowConfig({ cwd, ui: { notify: (message: string, level?: string) => notices.push([message, level]) } }, {});
+
+  assert.deepEqual(config.auto.freshContext, { betweenTasks: true, beforeReview: false });
+  assert.match(notices.at(-1)?.[0] ?? "", /Ignoring invalid Addy workflow config/);
+  assert.equal(notices.at(-1)?.[1], "warning");
 });
 
 test("auto command dispatches the real next workflow command", async () => {
@@ -681,7 +715,7 @@ test("auto loop runs fix-all when clean review leaves reviewed unchecked", async
   assert.equal(ctx.state.autoReviewFixCount, 1);
 });
 
-test("auto loop continues after task commit succeeds", async () => {
+test("auto loop starts next task in a new session after task commit", async () => {
   const cwd = join(stateDir, "auto-loop-task-commit-continue-project");
   const planPath = join("docs", "plans", "auto-loop.md");
   mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
@@ -696,8 +730,10 @@ test("auto loop continues after task commit succeeds", async () => {
     "- [ ] Reviewed",
   ].join("\n"));
 
-  const { pi, events, sentMessages } = createPiMock();
+  const { pi, events, commands, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
+  const replacementMessages: string[] = [];
+  let newSessionParent: string | undefined;
   const ctx: any = {
     cwd,
     id: "auto-loop-task-commit-continue",
@@ -713,14 +749,157 @@ test("auto loop continues after task commit succeeds", async () => {
       ].join("\n"),
       activePlan: planPath,
     },
+    sessionManager: { getSessionFile: () => "old-session.jsonl" },
+    newSession: async (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => {
+      newSessionParent = options.parentSession;
+      await options.withSession({ cwd, id: "replacement-session", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+      return { cancelled: false };
+    },
     ui: { setWidget() {} },
     isIdle: () => true,
   };
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
 
-  assert.equal(sentMessages.length, 1);
-  assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
+  assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh between-tasks"]);
+
+  await commands.get("addy-auto-continue")?.handler(sentMessages[0], ctx);
+
+  assert.equal(newSessionParent, "old-session.jsonl");
+  assert.equal(replacementMessages.length, 1);
+  assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
+});
+
+test("auto loop can disable between-task fresh context", async () => {
+  const cwd = join(stateDir, "auto-loop-task-commit-no-fresh-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Next",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const previousEnv = process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS;
+  process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS = "false";
+  try {
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      cwd,
+      id: "auto-loop-task-commit-no-fresh",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+        warnings: [],
+        current: "review",
+        autoMode: true,
+        autoLastPrompt: [
+          "# Addy Auto Commit",
+          "",
+          "Invocation: `__addy-auto-task-commit__`",
+        ].join("\n"),
+        activePlan: planPath,
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
+
+    assert.equal(sentMessages.length, 1);
+    assertSentWorkflowPrompt(sentMessages[0], `/addy-build ${planPath}`, "Addy Build");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS;
+    else process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS = previousEnv;
+  }
+});
+
+test("auto loop starts review in a new session when configured", async () => {
+  const cwd = join(stateDir, "auto-loop-review-fresh-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const previousEnv = process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
+  process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW = "true";
+  try {
+    const { pi, events, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    let replacementCtx: any;
+    const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
+    const ctx: any = {
+      cwd,
+      id: "auto-loop-review-fresh",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "pending", finish: "pending" },
+        warnings: [],
+        current: "verify",
+        currentTask: "Current",
+        currentTaskIndex: 1,
+        autoMode: true,
+        autoLastPrompt: `/addy-verify ${planPath}`,
+        activePlan: planPath,
+        stats: { active: { tasks: { [statsKey]: { plan: planPath, taskIndex: 1, taskTitle: "Current", turns: 1, reviewRuns: 0, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+      },
+      newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+        replacementCtx = { cwd, id: "review-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) };
+        await options.withSession(replacementCtx);
+        return { cancelled: false };
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
+
+    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-review"]);
+    assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 0);
+
+    await commands.get("addy-auto-continue")?.handler(sentMessages[0], ctx);
+
+    assert.equal(replacementMessages.length, 1);
+    assertSentWorkflowPrompt(replacementMessages[0], `/addy-review ${planPath}`, "Addy Review");
+    assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 2);
+    assert.equal(replacementCtx.state.stats.active.tasks[statsKey].reviewRuns, 1);
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
+    else process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW = previousEnv;
+  }
+});
+
+test("auto continuation cancellation pauses without dispatching a lifecycle prompt", async () => {
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    id: "auto-continue-cancelled",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "pending", finish: "pending" },
+      warnings: [],
+      autoMode: true,
+      activePlan: "docs/plans/missing.md",
+    },
+    newSession: async () => ({ cancelled: true }),
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await commands.get("addy-auto-continue")?.handler("--fresh before-review", ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? "", /cancelled/);
+  assert.equal(notices.at(-1)?.[1], "warning");
 });
 
 test("auto loop stops after finish when all plan tasks are complete", async () => {
@@ -1260,8 +1439,10 @@ test("auto-dispatched fix, verify, review, finish, and commit prompts record tas
     "- [ ] Reviewed",
   ].join("\n"));
 
-  const { pi, events, sentMessages } = createPiMock();
+  const { pi, events, commands, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
+  const replacementMessages: string[] = [];
+  let replacementCtx: any;
   const statsKey = `${planPath}\u001f\u001f1\u001fAuto task`;
   const ctx: any = {
     cwd,
@@ -1277,6 +1458,12 @@ test("auto-dispatched fix, verify, review, finish, and commit prompts record tas
       autoLastPrompt: `/addy-review ${planPath}`,
       activePlan: planPath,
       stats: { active: { tasks: { [statsKey]: { plan: planPath, taskIndex: 1, taskTitle: "Auto task", turns: 1, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    sessionManager: { getSessionFile: () => "stats-old-session.jsonl" },
+    newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+      replacementCtx = { cwd, id: "auto-stats-lifecycle-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) };
+      await options.withSession(replacementCtx);
+      return { cancelled: false };
     },
     ui: { setWidget() {} },
     isIdle: () => true,
@@ -1306,10 +1493,14 @@ test("auto-dispatched fix, verify, review, finish, and commit prompts record tas
   assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
-  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
+  assert.deepEqual(sentMessages.at(-1), "/addy-auto-continue --fresh between-tasks");
   assert.equal(ctx.state.stats.history.at(-1)?.endedReason, "task-commit");
   assert.equal(ctx.state.stats.history.at(-1)?.tasks[statsKey].turns, 5);
-  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
+
+  await commands.get("addy-auto-continue")?.handler(sentMessages.at(-1), ctx);
+
+  assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
+  assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 1);
 });
 
 test("auto stop preserves active stats and reports totals", async () => {
