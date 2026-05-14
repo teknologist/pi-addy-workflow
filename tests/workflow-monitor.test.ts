@@ -1148,6 +1148,149 @@ test("review fix loop starts fix verify and review prompts in new sessions when 
   }
 });
 
+test("fresh context emits visible clearing-context messages", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const cwd = join(stateDir, "auto-fresh-visible-message-project");
+    const planPath = join("docs", "plans", "auto-fresh-visible.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), [
+      "## Task 1: Current",
+      "- [ ] Implemented",
+      "- [ ] Verified",
+      "- [ ] Reviewed",
+    ].join("\n"));
+
+    const { pi, commands } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const notices: Array<[string, string | undefined]> = [];
+    const messages: unknown[] = [];
+    const replacementMessages: string[] = [];
+    const ctx: any = {
+      cwd,
+      id: "auto-fresh-visible-message",
+      sendMessage: (message: unknown) => messages.push(message),
+      newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+        await options.withSession({ cwd, id: "auto-fresh-visible-message-replacement", ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) }, sendMessage: (message: unknown) => messages.push(message), sendUserMessage: (message: string) => replacementMessages.push(message), isIdle: () => true });
+        return { cancelled: false };
+      },
+      ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+      isIdle: () => true,
+    };
+
+    await commands.get("addy-auto")?.handler(planPath, ctx);
+
+    assert.ok(notices.some(([message]) => /clearing context/.test(message)));
+    assert.ok(messages.some((message) => /clearing context/.test(JSON.stringify(message))));
+    assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("auto loop commits completed review-fix target before advancing to the next task", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "false";
+  try {
+    const cwd = join(stateDir, "auto-review-fix-commit-previous-project");
+    const planPath = join("docs", "plans", "auto-review-fix-commit-previous.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), [
+      "## Task 1: Done",
+      "- [x] Implemented",
+      "- [x] Verified",
+      "- [x] Reviewed",
+      "## Task 2: Next",
+      "- [ ] Implemented",
+      "- [ ] Verified",
+      "- [ ] Reviewed",
+    ].join("\n"));
+
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      cwd,
+      id: "auto-review-fix-commit-previous",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "active", review: "complete", finish: "pending" },
+        warnings: [],
+        current: "verify",
+        currentTask: "Next",
+        currentTaskIndex: 2,
+        taskCount: 2,
+        autoMode: true,
+        autoLastPrompt: `/addy-verify ${planPath}`,
+        autoReviewFixNeedsReview: true,
+        autoReviewTask: "Done",
+        autoReviewTaskIndex: 1,
+        activePlan: planPath,
+      },
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified post-review fixes." }] }] }, ctx);
+
+    assert.match(sentMessages[0], /^# Addy Auto Commit/);
+    assert.match(sentMessages[0], /Completed task: Done/);
+    assert.doesNotMatch(sentMessages[0], /Completed task: Next/);
+    assert.match(sentMessages[0], /`\/commit`/);
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("resumed auto loop commits latest completed active task before new work", async () => {
+  const cwd = join(stateDir, "auto-resume-pending-commit-project");
+  const planPath = join("docs", "plans", "auto-resume-pending-commit.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: First",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 2: Second",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+    "## Task 3: Third",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const secondStatsKey = `${planPath}\u001f\u001f2\u001fSecond`;
+  const ctx: any = {
+    cwd,
+    id: "auto-resume-pending-commit",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "active", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "verify",
+      currentTask: "Third",
+      currentTaskIndex: 3,
+      taskCount: 3,
+      autoMode: true,
+      autoLastPrompt: `/addy-verify ${planPath}`,
+      activePlan: planPath,
+      stats: { active: { tasks: { [secondStatsKey]: { plan: planPath, taskIndex: 2, taskTitle: "Second", turns: 3, verifyRuns: 1, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await commands.get("addy-auto")?.handler("", ctx);
+
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.match(sentMessages[0], /Completed task: Second/);
+  assert.doesNotMatch(sentMessages[0], /Completed task: Third/);
+});
+
 test("fresh context fallback dispatches pending review-fix prompt when newSession is unavailable", async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
@@ -1162,7 +1305,7 @@ test("fresh context fallback dispatches pending review-fix prompt when newSessio
       "- [ ] Reviewed",
     ].join("\n"));
 
-    const { pi, events, sentMessages } = createPiMock();
+    const { pi, events, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const ctx: any = {
       cwd,
@@ -1183,6 +1326,8 @@ test("fresh context fallback dispatches pending review-fix prompt when newSessio
 
     await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/foo.ts:1 before review can pass." }] }] }, ctx);
 
+    assert.equal(sentMessages.at(-1), "/addy-auto-continue --fresh before-step");
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
     assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-fix-all ${planPath}`, "Addy Fix All");
   } finally {
     if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;

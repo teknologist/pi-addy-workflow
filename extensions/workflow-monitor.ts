@@ -1,12 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureGlobalAddyWorkflowConfig, loadAddyWorkflowConfig } from "./workflow-monitor/config.ts";
 import { archiveWorkflowStats, getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, recordWorkflowTaskTurn, recordWorkflowVerifyRun, resetWorkflow, setContextWorkflowState, type WorkflowStatsTarget } from "./workflow-monitor/workflow-handler.ts";
 import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
-import { nextWorkflowActionForActivePlanLifecycle, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
+import { nextWorkflowActionForActivePlanLifecycle, planTasksFromMarkdown, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
 type CommandEvent = string | { args?: string[]; input?: string };
 type InputEvent = { input?: string; text?: string; source?: string };
@@ -286,24 +286,37 @@ function reviewedTaskWasCompleted(previousState: ReturnType<typeof getContextWor
     || state.taskCount !== previousState.taskCount;
 }
 
-function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>, taskTitle?: string): string {
+function repositoryScopeForPlan(planPath: string | undefined, baseCwd?: string): string | undefined {
+  if (!planPath) return undefined;
+
+  try {
+    const markdown = readFileSync(resolveWorkflowPlanPath(planPath, baseCwd), "utf8");
+    return markdown.match(/^Repository scope:\s*`([^`]+)`/m)?.[1]?.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function autoTaskCommitPrompt(state: ReturnType<typeof getContextWorkflowState>, taskTitle?: string, baseCwd?: string): string {
   const task = taskTitle ?? (state.currentTask && state.currentTask !== "none" ? state.currentTask : "the completed task");
   const plan = state.activePlan ? `Plan: ${state.activePlan}` : "Plan: active Addy workflow plan";
+  const repositoryScope = repositoryScopeForPlan(state.activePlan, baseCwd);
+  const repositoryLine = repositoryScope ? `Repository scope: ${repositoryScope}` : "Repository scope: current repository";
   return [
     "# Addy Auto Commit",
     "",
     "The current task has Implemented, Verified, and Reviewed checked. Commit the completed task work now, without asking the user for confirmation.",
     "",
     plan,
+    repositoryLine,
     `Completed task: ${task}`,
     "",
     "Required steps:",
-    "1. Inspect `git status --short`.",
-    "2. If there are no changes, say `No changes to commit` and stop.",
-    "3. Stage all current changed files for this completed task, including the plan checkbox update.",
-    "4. Inspect the staged diff.",
-    "5. Create one concise git commit for the completed task.",
-    "6. Report the commit hash in the form `COMMIT: <hash>`.",
+    "1. Use the cross-repo-aware `/commit` prompt/command for the repository scope above.",
+    "2. Commit only files for this completed task, including the plan checkbox update when it changed. Do not stage unrelated work.",
+    "3. If the plan checkbox file lives in a different repo from the implementation, `/commit` should handle the relevant repos together.",
+    "4. If there are no changes in any relevant repo, say `No changes to commit` and stop.",
+    "5. Report each commit hash in the form `COMMIT: <hash>`.",
     "",
     "Do not call ask_user_question. Do not start the next task yourself; Addy auto will continue after this commit turn ends.",
     "",
@@ -337,12 +350,48 @@ function autoRetryKey(state: ReturnType<typeof getContextWorkflowState>, prompt:
 function latestActiveStatsTarget(state: ReturnType<typeof getContextWorkflowState>): WorkflowStatsTarget | undefined {
   const task = Object.values(state.stats?.active.tasks ?? {}).at(-1);
   if (!task) return undefined;
+  return statsTargetFromTask(task);
+}
+
+function statsTargetFromTask(task: NonNullable<ReturnType<typeof getContextWorkflowState>["stats"]>["active"]["tasks"][string]): WorkflowStatsTarget {
   return {
     plan: task.plan,
     sliceIndex: task.sliceIndex,
     taskIndex: task.taskIndex,
     taskTitle: task.taskTitle,
   };
+}
+
+function resolveWorkflowPlanPath(planPath: string, baseCwd?: string): string {
+  const filesystemPath = planPath.startsWith("@") ? planPath.slice(1) : planPath;
+  return isAbsolute(filesystemPath) ? filesystemPath : resolve(baseCwd ?? process.cwd(), filesystemPath);
+}
+
+function planTaskIsComplete(planPath: string | undefined, baseCwd: string | undefined, target: WorkflowStatsTarget): boolean {
+  if (!planPath || !target.taskTitle) return false;
+
+  try {
+    const tasks = planTasksFromMarkdown(readFileSync(resolveWorkflowPlanPath(planPath, baseCwd), "utf8"));
+    const task = target.taskIndex ? tasks[target.taskIndex - 1] : tasks.find((candidate) => candidate.title === target.taskTitle);
+    return Boolean(task?.complete && task.title === target.taskTitle);
+  } catch {
+    return false;
+  }
+}
+
+function latestCompletedActiveStatsTarget(state: ReturnType<typeof getContextWorkflowState>, baseCwd?: string): WorkflowStatsTarget | undefined {
+  const tasks = Object.values(state.stats?.active.tasks ?? {});
+  for (const task of [...tasks].reverse()) {
+    if (!task.taskTitle || task.taskTitle === "none" || task.taskTitle === "all tasks complete") continue;
+    const target = statsTargetFromTask(task);
+    if (planTaskIsComplete(target.plan ?? state.activePlan, baseCwd, target)) return target;
+  }
+  return undefined;
+}
+
+function activePlanPromptForTarget(command: string, state: ReturnType<typeof getContextWorkflowState>, target?: WorkflowStatsTarget): string | undefined {
+  const plan = target?.plan ?? state.activePlan;
+  return plan ? `${command} ${plan}` : undefined;
 }
 
 function autoPauseWarning(prompt: string, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): string {
@@ -354,6 +403,24 @@ function autoPauseWarning(prompt: string, action: ReturnType<typeof nextWorkflow
 
 function freshContextCommand(reason: FreshContextReason): string {
   return `/addy-auto-continue --fresh ${reason}`;
+}
+
+function freshContextNotice(reason: FreshContextReason): string {
+  return reason === "between-tasks"
+    ? "Addy auto is clearing context and starting a fresh session before the next task."
+    : reason === "before-review"
+      ? "Addy auto is clearing context and starting a fresh session before review."
+      : "Addy auto is clearing context and starting a fresh session before the next workflow step.";
+}
+
+async function showFreshContextNotice(ctx: unknown, reason: FreshContextReason): Promise<void> {
+  const message = freshContextNotice(reason);
+  (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(message, "info");
+  await (ctx as { sendMessage?: (message: unknown, options?: { deliverAs?: "steer" | "followUp" | "nextTurn"; triggerTurn?: boolean }) => void | Promise<void> }).sendMessage?.({
+    customType: "pi-addy-workflow",
+    content: message,
+    display: true,
+  }, { deliverAs: "nextTurn" });
 }
 
 function consumeAutoFreshPromptUpdates(state: ReturnType<typeof getContextWorkflowState>): Partial<ReturnType<typeof getContextWorkflowState>> {
@@ -378,18 +445,12 @@ async function runFreshContextContinuation(pi: ExtensionAPI, ctx: unknown, reaso
     return;
   }
 
+  await showFreshContextNotice(ctx, reason);
   const parentSession = (ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }).sessionManager?.getSessionFile?.();
   const result = await newSession.call(ctx, {
     parentSession,
     withSession: async (newCtx: unknown) => {
-      (newCtx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(
-        reason === "between-tasks"
-          ? "Addy auto is continuing in a fresh session before the next task."
-          : reason === "before-review"
-            ? "Addy auto is continuing in a fresh session before review."
-            : "Addy auto is continuing in a fresh session before the next workflow step.",
-        "info",
-      );
+      await showFreshContextNotice(newCtx, reason);
       const deliveries: Promise<unknown>[] = [];
       const replacementSender = (newCtx as { sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void | Promise<void> }).sendUserMessage;
       const replacementPi = {
@@ -501,7 +562,19 @@ async function dispatchAutoPromptFreshAware(pi: ExtensionAPI, ctx: unknown, prom
     ...updates,
     autoFreshPrompt: prompt,
   }, options.appendEntry === false ? undefined : appendWorkflowEntry(pi));
-  await runFreshContextContinuation(pi, ctx, reason);
+
+  const hasCommandSessionControl = typeof (ctx as { newSession?: unknown }).newSession === "function";
+  if (hasCommandSessionControl) await runFreshContextContinuation(pi, ctx, reason);
+  else sendFreshContextContinuation(pi, ctx, reason);
+}
+
+async function dispatchTaskCommitPrompt(pi: ExtensionAPI, ctx: unknown, state: ReturnType<typeof getContextWorkflowState>, target: WorkflowStatsTarget): Promise<void> {
+  await dispatchAutoPromptFreshAware(pi, ctx, autoTaskCommitPrompt({ ...state, activePlan: target.plan ?? state.activePlan }, target.taskTitle, (ctx as { cwd?: string }).cwd), state, {
+    autoLastPrompt: AUTO_TASK_COMMIT_PROMPT,
+    autoReviewFixNeedsReview: undefined,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
+  }, target);
 }
 
 async function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event: AgentEndEvent, state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): Promise<boolean> {
@@ -515,13 +588,29 @@ async function maybeDispatchReviewFixLoop(pi: ExtensionAPI, ctx: unknown, event:
   }
 
   if (lastCommand === "/addy-verify" && state.autoReviewFixNeedsReview) {
-    const reviewPrompt = activePlanPrompt("/addy-review", state);
+    const target = {
+      plan: state.activePlan,
+      sliceIndex: state.currentSliceIndex,
+      taskIndex: state.autoReviewTaskIndex ?? state.currentTaskIndex,
+      taskTitle: state.autoReviewTask && state.autoReviewTask !== "none" ? state.autoReviewTask : state.currentTask,
+    };
+    const targetMovedBehindCurrent = Boolean(
+      target.taskTitle
+      && target.taskTitle !== "none"
+      && (state.currentTask !== target.taskTitle || state.currentTaskIndex !== target.taskIndex),
+    );
+    if (targetMovedBehindCurrent && planTaskIsComplete(target.plan, (ctx as { cwd?: string }).cwd, target)) {
+      await dispatchTaskCommitPrompt(pi, ctx, state, target);
+      return true;
+    }
+
+    const reviewPrompt = activePlanPromptForTarget("/addy-review", state, target);
     if (!reviewPrompt) return false;
     await dispatchAutoPromptFreshAware(pi, ctx, reviewPrompt, state, {
       autoReviewFixNeedsReview: false,
-      autoReviewTask: state.currentTask,
-      autoReviewTaskIndex: state.currentTaskIndex,
-    });
+      autoReviewTask: target.taskTitle,
+      autoReviewTaskIndex: target.taskIndex,
+    }, target);
     return true;
   }
 
@@ -576,11 +665,7 @@ async function maybeDispatchTaskCommit(pi: ExtensionAPI, ctx: unknown, event: Ag
   const planMovedPastReviewTarget = Boolean(reviewedTask && reviewedTask !== "none" && action?.taskTitle && action.taskTitle !== reviewedTask);
   if (!trackedReviewedTask && !planMovedPastReviewTarget && !reviewedTaskWasCompleted(previousState, state)) return false;
 
-  await dispatchAutoPromptFreshAware(pi, ctx, autoTaskCommitPrompt(previousState, reviewedTask), state, {
-    autoLastPrompt: AUTO_TASK_COMMIT_PROMPT,
-    autoReviewTask: undefined,
-    autoReviewTaskIndex: undefined,
-  }, {
+  await dispatchTaskCommitPrompt(pi, ctx, state, {
     plan: previousState.activePlan,
     sliceIndex: previousState.currentSliceIndex,
     taskIndex: previousState.autoReviewTaskIndex ?? previousState.currentTaskIndex,
@@ -608,7 +693,8 @@ async function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, even
     autoReviewTaskIndex: committedTarget?.taskIndex,
   }, appendWorkflowEntry(pi));
   if (loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext.betweenTasks) {
-    await runFreshContextContinuation(pi, ctx, "between-tasks");
+    if (typeof (ctx as { newSession?: unknown }).newSession === "function") await runFreshContextContinuation(pi, ctx, "between-tasks");
+    else sendFreshContextContinuation(pi, ctx, "between-tasks");
     return true;
   }
 
@@ -657,6 +743,12 @@ async function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, al
   const prompt = action?.prompt;
   if (!prompt) {
     (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.("Addy auto is active, but no active plan is available.", "warning");
+    return;
+  }
+
+  const pendingCommitTarget = latestCompletedActiveStatsTarget(refreshedState, (ctx as { cwd?: string }).cwd);
+  if (pendingCommitTarget && commandFromPrompt(refreshedState.autoLastPrompt) !== AUTO_TASK_COMMIT_PROMPT) {
+    await dispatchTaskCommitPrompt(pi, ctx, refreshedState, pendingCommitTarget);
     return;
   }
 
