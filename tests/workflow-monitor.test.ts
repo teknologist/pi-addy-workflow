@@ -1343,6 +1343,44 @@ test("resumed auto loop commits latest completed active task before new work", a
   assert.doesNotMatch(sentMessages[0], /Completed task: Third/);
 });
 
+test("auto mode starts finish in current session even when fresh before every step is enabled", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const cwd = join(stateDir, "auto-finish-no-fresh-project");
+    const planPath = join("docs", "plans", "auto-finish-no-fresh.md");
+    mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+    writeFileSync(join(cwd, planPath), [
+      "## Task 1: Done",
+      "- [x] Implemented",
+      "- [x] Verified",
+      "- [x] Reviewed",
+    ].join("\n"));
+
+    const { pi, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    const ctx: any = {
+      cwd,
+      id: "auto-finish-no-fresh",
+      newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+        await options.withSession({ cwd, id: "auto-finish-no-fresh-replacement", ui: { setWidget() {}, notify() {} }, sendUserMessage: (message: string) => replacementMessages.push(message), isIdle: () => true });
+        return { cancelled: false };
+      },
+      ui: { setWidget() {}, notify() {} },
+      isIdle: () => true,
+    };
+
+    await commands.get("addy-auto")?.handler(planPath, ctx);
+
+    assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
+    assert.equal(replacementMessages.length, 0);
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
 test("fresh context fallback dispatches pending review-fix prompt when newSession is unavailable", async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
@@ -2087,8 +2125,10 @@ test("auto-dispatched fix, verify, review, finish, and commit prompts record tas
   assert.equal(ctx.state.stats.history.at(-1)?.endedReason, "task-commit");
   assert.equal(ctx.state.stats.history.at(-1)?.tasks[statsKey].turns, 5);
 
-  assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
-  assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 1);
+  assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
+  assert.equal(replacementMessages.length, 0);
+  assert.equal(replacementCtx, undefined);
+  assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 1);
 });
 
 test("auto stop preserves active stats and reports totals", async () => {

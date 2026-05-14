@@ -574,11 +574,12 @@ async function dispatchManualStepInFreshContext(pi: ExtensionAPI, input: string,
   return true;
 }
 
-function freshContextReasonForPrompt(prompt: string, ctx: unknown, options: DispatchOptions): FreshContextReason | undefined {
+function freshContextReasonForPrompt(prompt: string, ctx: unknown, state: ReturnType<typeof getContextWorkflowState>, options: DispatchOptions): FreshContextReason | undefined {
   if (options.freshContextBypassReason) return undefined;
   const command = commandFromPrompt(prompt);
   const phase = phaseFromWorkflowPrompt(prompt);
   const freshContext = loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext;
+  if (command === "/addy-finish" && state.autoMode) return undefined;
   if (command && FRESH_CONTEXT_STEP_COMMANDS.has(command) && freshContext.beforeEveryStep) return "before-step";
   if (phase === "review" && freshContext.beforeReview) return "before-review";
   return undefined;
@@ -611,7 +612,7 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
 }
 
 async function dispatchAutoPromptFreshAware(pi: ExtensionAPI, ctx: unknown, prompt: string, state: ReturnType<typeof getContextWorkflowState>, updates: Partial<ReturnType<typeof getContextWorkflowState>> = {}, statsTarget?: WorkflowStatsTarget, options: DispatchOptions = {}): Promise<void> {
-  const reason = freshContextReasonForPrompt(prompt, ctx, options);
+  const reason = freshContextReasonForPrompt(prompt, ctx, state, options);
   if (!reason) {
     dispatchAutoPrompt(pi, ctx, prompt, state, updates, statsTarget, options);
     return;
@@ -749,11 +750,17 @@ async function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, even
   }
 
   const committedTarget = latestActiveStatsTarget(state);
-  setContextWorkflowState(ctx as never, {
+  const stateAfterCommit = {
     ...archiveWorkflowStats(state, "task-commit"),
     autoReviewTask: committedTarget?.taskTitle,
     autoReviewTaskIndex: committedTarget?.taskIndex,
-  }, appendWorkflowEntry(pi));
+  };
+  setContextWorkflowState(ctx as never, stateAfterCommit, appendWorkflowEntry(pi));
+  const nextAction = nextWorkflowActionForActivePlanLifecycle(stateAfterCommit, (ctx as { cwd?: string }).cwd);
+  if (commandFromPrompt(nextAction?.prompt) === "/addy-finish") {
+    await dispatchNextAutoWorkflowPrompt(pi, ctx);
+    return true;
+  }
   if (loadAddyWorkflowConfig(ctx as { cwd?: string; ui?: { notify?: (message: string, level?: string) => void } }).auto.freshContext.betweenTasks) {
     if (typeof (ctx as { newSession?: unknown }).newSession === "function") await runFreshContextContinuation(pi, ctx, "between-tasks");
     else sendFreshContextContinuation(pi, ctx, "between-tasks");
