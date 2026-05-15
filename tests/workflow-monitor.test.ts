@@ -1013,6 +1013,7 @@ test("auto loop starts next task in a new session after task commit", async () =
   addyWorkflowMonitor(pi as never);
   const replacementMessages: string[] = [];
   let newSessionParent: string | undefined;
+  let replacementCtx: any;
   const ctx: any = {
     cwd,
     id: "auto-loop-task-commit-continue",
@@ -1031,7 +1032,8 @@ test("auto loop starts next task in a new session after task commit", async () =
     sessionManager: { getSessionFile: () => "old-session.jsonl" },
     newSession: async (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => {
       newSessionParent = options.parentSession;
-      await options.withSession({ cwd, id: "replacement-session", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+      replacementCtx = { cwd, id: "replacement-session", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) };
+      await options.withSession(replacementCtx);
       return { cancelled: false };
     },
     ui: { setWidget() {} },
@@ -1040,10 +1042,19 @@ test("auto loop starts next task in a new session after task commit", async () =
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "COMMIT: abc1234" }] }] }, ctx);
 
-  assert.deepEqual(sentMessages, []);
+  assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh between-tasks"]);
+  assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
+  assert.equal(ctx.state.autoFreshReason, "between-tasks");
+  assert.equal(replacementMessages.length, 0);
+
+  await commands.get("addy-auto-continue")?.handler("--fresh between-tasks", ctx);
+
   assert.equal(newSessionParent, "old-session.jsonl");
   assert.equal(replacementMessages.length, 1);
   assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
+  const nextStatsKey = `${planPath}2Next`;
+  assert.equal(replacementCtx.state.stats.active.tasks[nextStatsKey].turns, 1);
+  assert.equal(replacementCtx.state.stats.active.tasks[`${planPath}1Current`], undefined);
 });
 
 test("auto loop starts next slice in a new session after no-op task commit", async () => {
@@ -1064,7 +1075,7 @@ test("auto loop starts next slice in a new session after no-op task commit", asy
     "- [ ] Reviewed",
   ].join("\n"));
 
-  const { pi, events, sentMessages } = createPiMock();
+  const { pi, events, commands, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const replacementMessages: string[] = [];
   const statsKey = `${firstPlan}\u001f1\u001f1\u001fDone`;
@@ -1095,7 +1106,12 @@ test("auto loop starts next slice in a new session after no-op task commit", asy
 
   await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No changes to commit" }] }] }, ctx);
 
-  assert.deepEqual(sentMessages, []);
+  assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh between-tasks"]);
+  assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${secondPlan}`);
+  assert.equal(ctx.state.autoFreshReason, "between-tasks");
+
+  await commands.get("addy-auto-continue")?.handler("--fresh between-tasks", ctx);
+
   assert.equal(replacementMessages.length, 1);
   assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${secondPlan}`, "Addy Build");
 });
@@ -1193,8 +1209,13 @@ test("auto loop starts review in a new session when configured", async () => {
 
     await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
 
-    assert.deepEqual(sentMessages, []);
+    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-review"]);
     assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 0);
+    assert.equal(ctx.state.autoFreshPrompt, `/addy-review ${planPath}`);
+    assert.equal(ctx.state.autoFreshReason, "before-review");
+
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
+
     assert.equal(replacementMessages.length, 1);
     assertSentWorkflowPrompt(replacementMessages[0], `/addy-review ${planPath}`, "Addy Review");
     assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 2);
@@ -1235,7 +1256,11 @@ test("auto loop starts every workflow step in a new session when configured", as
 
     await commands.get("addy-auto")?.handler(planPath, ctx);
 
-    assert.deepEqual(sentMessages, []);
+    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-step"]);
+    assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
+
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
+
     assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
   } finally {
     if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -1257,7 +1282,7 @@ test("fresh-context same-phase retry pauses after one retry", async () => {
       "- [ ] Reviewed",
     ].join("\n"));
 
-    const { pi, events, sentMessages } = createPiMock();
+    const { pi, events, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
     const replacementNotices: Array<[string, string | undefined]> = [];
@@ -1289,7 +1314,11 @@ test("fresh-context same-phase retry pauses after one retry", async () => {
 
     await events.get("agent_end")?.({}, ctx);
 
-    assert.deepEqual(sentMessages, []);
+    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-step"]);
+    assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
+
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
+
     assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
     assert.equal(replacementCtx.state.autoFreshPrompt, undefined);
     assert.equal(replacementCtx.state.autoRetryKey?.startsWith(`/addy-build ${planPath}`), true);
@@ -1350,17 +1379,20 @@ test("review fix loop starts fix verify and review prompts in new sessions when 
     };
 
     await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Important: fix src/foo.ts:1 before review can pass." }] }] }, ctx);
-    assert.deepEqual(sentMessages.splice(0), []);
+    assert.deepEqual(sentMessages.splice(0), ["/addy-auto-continue --fresh before-step"]);
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
     assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-fix-all ${planPath}`, "Addy Fix All");
 
     ctx.state = { ...ctx.state, autoLastPrompt: `/addy-fix-all ${planPath}` };
     await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Fixed." }] }] }, ctx);
-    assert.deepEqual(sentMessages.splice(0), []);
+    assert.deepEqual(sentMessages.splice(0), ["/addy-auto-continue --fresh before-step"]);
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
     assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-verify ${planPath}`, "Addy Verify");
 
     ctx.state = { ...ctx.state, autoLastPrompt: `/addy-verify ${planPath}`, autoReviewFixNeedsReview: true };
     await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
-    assert.deepEqual(sentMessages.splice(0), []);
+    assert.deepEqual(sentMessages.splice(0), ["/addy-auto-continue --fresh before-step"]);
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
     assertSentWorkflowPrompt(replacementMessages.at(-1), `/addy-review ${planPath}`, "Addy Review");
   } finally {
     if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -1382,7 +1414,7 @@ test("fresh context emits visible clearing-context messages", async () => {
       "- [ ] Reviewed",
     ].join("\n"));
 
-    const { pi, commands } = createPiMock();
+    const { pi, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const notices: Array<[string, string | undefined]> = [];
     const messages: unknown[] = [];
@@ -1400,6 +1432,10 @@ test("fresh context emits visible clearing-context messages", async () => {
     };
 
     await commands.get("addy-auto")?.handler(planPath, ctx);
+
+    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-step"]);
+
+    await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
 
     assert.ok(notices.some(([message]) => /clearing context/.test(message)));
     assert.ok(messages.some((message) => /clearing context/.test(JSON.stringify(message))));
@@ -1695,8 +1731,9 @@ test("auto continuation cancellation does not use stale context after session re
   await commands.get("addy-auto-continue")?.handler("--fresh before-review", ctx);
 
   assert.equal(sentMessages.length, 0);
-  assert.match(notices.at(-1)?.[0] ?? "", /clearing context/);
-  assert.equal(notices.at(-1)?.[1], "info");
+  assert.ok(notices.some(([message, level]) => level === "info" && /clearing context/.test(message)));
+  assert.ok(notices.some(([message, level]) => level === "warning" && /cancelled/.test(message)));
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
 });
 
 test("auto loop stops after finish when all plan tasks are complete", async () => {
@@ -2085,6 +2122,9 @@ test("project restore preserves pending fresh auto continuation but clears stale
   const firstCtx: any = { cwd, id: "startup-auto-fresh-first", ui: { setWidget() {} } };
   handleWorkflowEvent(firstCtx, { source: "user-input", text: "/addy-auto docs/plans/fresh.md" });
   firstCtx.state.autoFreshPrompt = "/addy-build docs/plans/fresh.md";
+  firstCtx.state.autoFreshReason = "before-step";
+  firstCtx.state.autoFreshExpandedPrompt = "expanded build prompt";
+  firstCtx.state.autoFreshDeliveryKey = "fresh-key";
   firstCtx.state.autoLastPrompt = "/addy-review docs/plans/old.md";
   firstCtx.state.autoRetryKey = "old-retry";
   firstCtx.state.autoRetryCount = 1;
@@ -2101,6 +2141,9 @@ test("project restore preserves pending fresh auto continuation but clears stale
 
   assert.equal(state.autoMode, true);
   assert.equal(state.autoFreshPrompt, "/addy-build docs/plans/fresh.md");
+  assert.equal(state.autoFreshReason, "before-step");
+  assert.equal(state.autoFreshExpandedPrompt, "expanded build prompt");
+  assert.equal(state.autoFreshDeliveryKey, "fresh-key");
   assert.equal(state.autoLastPrompt, undefined);
   assert.equal(state.autoRetryKey, undefined);
   assert.equal(state.autoRetryCount, undefined);
@@ -2111,6 +2154,178 @@ test("project restore preserves pending fresh auto continuation but clears stale
   assert.equal(state.autoReviewTask, undefined);
   assert.equal(state.autoReviewTaskIndex, undefined);
   assert.equal(state.reviewStatsKey, undefined);
+});
+
+
+test("agent_end fresh handoff never calls ctx.newSession directly", async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = "true";
+  try {
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      id: "agent-end-trampoline-only",
+      state: {
+        phases: { define: "complete", plan: "complete", build: "active", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+        warnings: [],
+        current: "build",
+        autoMode: true,
+        activePlan: "docs/plans/current.md",
+      },
+      newSession: async () => assert.fail("agent_end must enqueue the trampoline instead of starting a session"),
+      ui: { setWidget() {} },
+      isIdle: () => true,
+    };
+
+    await events.get("agent_end")?.({}, ctx);
+
+    assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-step"]);
+    assert.equal(ctx.state.autoFreshPrompt, "/addy-build docs/plans/current.md");
+    assert.equal(ctx.state.autoFreshReason, "before-step");
+  } finally {
+    if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test("session start auto-resumes valid pending fresh continuation", async () => {
+  const cwd = join(stateDir, "startup-auto-resume-fresh-project");
+  const firstCtx: any = { cwd, id: "startup-auto-resume-first", ui: { setWidget() {} } };
+  setContextWorkflowState(firstCtx, {
+    phases: { define: "complete", plan: "complete", build: "pending", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+    warnings: [],
+    autoMode: true,
+    activePlan: "docs/plans/fresh.md",
+    autoFreshPrompt: "/addy-build docs/plans/fresh.md",
+    autoFreshReason: "before-step",
+    autoFreshDeliveryKey: "startup-key",
+  });
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  await events.get("session_start")?.({}, { cwd, id: "startup-auto-resume-next", ui: { setWidget() {} } });
+
+  assert.deepEqual(sentMessages, ["/addy-auto-continue --fresh before-step"]);
+});
+
+test("session start ignores reasonless pending fresh state", async () => {
+  const cwd = join(stateDir, "startup-auto-reasonless-fresh-project");
+  const firstCtx: any = { cwd, id: "startup-auto-reasonless-first", ui: { setWidget() {} } };
+  setContextWorkflowState(firstCtx, {
+    phases: { define: "complete", plan: "complete", build: "pending", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+    warnings: [],
+    autoMode: true,
+    activePlan: "docs/plans/fresh.md",
+    autoFreshPrompt: "/addy-build docs/plans/fresh.md",
+  });
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = { cwd, id: "startup-auto-reasonless-next", ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) } };
+  await events.get("session_start")?.({}, ctx);
+
+  assert.deepEqual(sentMessages, []);
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
+});
+
+test("duplicate auto fresh continuation no-ops after successful delivery", async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const replacementMessages: string[] = [];
+  let newSessionCalls = 0;
+  const ctx: any = {
+    id: "duplicate-auto-continue",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "pending", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      autoMode: true,
+      activePlan: "docs/plans/current.md",
+      autoFreshPrompt: "/addy-build docs/plans/current.md",
+      autoFreshReason: "before-step",
+      autoFreshDeliveryKey: "duplicate-key",
+    },
+    newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+      newSessionCalls += 1;
+      await options.withSession({ id: "duplicate-auto-continue-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+      return { cancelled: false };
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
+  await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
+
+  assert.equal(replacementMessages.length, 1);
+  assert.equal(newSessionCalls, 1);
+  assertSentWorkflowPrompt(replacementMessages[0], "/addy-build docs/plans/current.md", "Addy Build");
+});
+
+test("consumed fresh continuation wins over stale branch pending state", async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const stalePendingState: any = {
+    phases: { define: "complete", plan: "complete", build: "pending", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+    warnings: [],
+    autoMode: true,
+    activePlan: "docs/plans/current.md",
+    autoFreshPrompt: "/addy-build docs/plans/current.md",
+    autoFreshReason: "before-step",
+    autoFreshDeliveryKey: "branch-stale-key",
+  };
+  const projectCtx: any = { cwd: join(stateDir, "branch-stale-fresh-project"), id: "branch-stale-fresh-project-state", ui: { setWidget() {} } };
+  setContextWorkflowState(projectCtx, {
+    ...stalePendingState,
+    autoFreshPrompt: undefined,
+    autoFreshReason: undefined,
+    autoFreshDeliveryKey: undefined,
+    autoFreshConsumedKey: "branch-stale-key",
+  });
+  const replacementMessages: string[] = [];
+  const ctx: any = {
+    cwd: projectCtx.cwd,
+    id: "branch-stale-fresh-session",
+    sessionManager: { getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, stalePendingState]] },
+    newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+      await options.withSession({ cwd: projectCtx.cwd, id: "branch-stale-fresh-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+      return { cancelled: false };
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+
+  await commands.get("addy-auto-continue")?.handler("--fresh before-step", ctx);
+
+  assert.equal(replacementMessages.length, 0);
+});
+
+test("auto fresh send failure preserves pending prompt for retry", async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd: join(stateDir, "auto-continue-send-failure-project"),
+    id: "auto-continue-send-failure",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "pending", simplify: "pending", verify: "pending", review: "pending", finish: "pending" },
+      warnings: [],
+      autoMode: true,
+      activePlan: "docs/plans/current.md",
+      autoFreshPrompt: "/addy-build docs/plans/current.md",
+      autoFreshReason: "before-step",
+      autoFreshDeliveryKey: "send-failure-key",
+    },
+    newSession: async (options: { withSession: (ctx: unknown) => Promise<void> | void }) => {
+      await options.withSession({ cwd: join(stateDir, "auto-continue-send-failure-project"), id: "auto-continue-send-failure-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: async () => { throw new Error("send failed"); } });
+      return { cancelled: false };
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await assert.rejects(() => commands.get("addy-auto-continue")!.handler("--fresh before-step", ctx), /send failed/);
+
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, "/addy-build docs/plans/current.md");
+  assert.equal(getContextWorkflowState(ctx).autoFreshReason, "before-step");
 });
 
 test("manual Addy turns record active task stats and addy-stats is read-only", async () => {

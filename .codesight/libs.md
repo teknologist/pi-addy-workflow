@@ -45,4 +45,4 @@
   - function transitionWorkflow: (state, event) => WorkflowState
   - type WorkflowPhase
   - type PhaseStatus
-  - _...8 more_
+  - _...9 more_

@@ -4,7 +4,7 @@
 
 > 0 routes | 0 models | 0 components | 7 lib files | 5 env vars | 0 middleware | 0% test coverage
 > **Token savings:** this file is ~1,500 tokens. Without it, AI exploration would cost ~9,600 tokens. **Saves ~8,100 tokens per conversation.**
-> **Last scanned:** 2026-05-15 09:39 — re-run after significant changes
+> **Last scanned:** 2026-05-15 11:19 — re-run after significant changes
 
 ---
 
@@ -55,7 +55,7 @@
   - function transitionWorkflow: (state, event) => WorkflowState
   - type WorkflowPhase
   - type PhaseStatus
-  - _...8 more_
+  - _...9 more_
 
 ---
 

@@ -61,6 +61,10 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.autoMode !== undefined && typeof candidate.autoMode !== "boolean") return undefined;
   if (candidate.autoLastPrompt !== undefined && typeof candidate.autoLastPrompt !== "string") return undefined;
   if (candidate.autoFreshPrompt !== undefined && typeof candidate.autoFreshPrompt !== "string") return undefined;
+  if (candidate.autoFreshExpandedPrompt !== undefined && typeof candidate.autoFreshExpandedPrompt !== "string") return undefined;
+  if (candidate.autoFreshReason !== undefined && !["between-tasks", "before-step", "before-review"].includes(candidate.autoFreshReason)) return undefined;
+  if (candidate.autoFreshDeliveryKey !== undefined && typeof candidate.autoFreshDeliveryKey !== "string") return undefined;
+  if (candidate.autoFreshConsumedKey !== undefined && typeof candidate.autoFreshConsumedKey !== "string") return undefined;
   if (candidate.autoRetryKey !== undefined && typeof candidate.autoRetryKey !== "string") return undefined;
   if (candidate.autoRetryCount !== undefined && !isNonNegativeSafeInteger(candidate.autoRetryCount)) return undefined;
   if (candidate.autoReviewFixKey !== undefined && typeof candidate.autoReviewFixKey !== "string") return undefined;
@@ -166,6 +170,11 @@ const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
   "autoLastPrompt",
   "autoRetryKey",
   "autoRetryCount",
+  "autoFreshPrompt",
+  "autoFreshExpandedPrompt",
+  "autoFreshReason",
+  "autoFreshDeliveryKey",
+  "autoFreshConsumedKey",
   "autoReviewFixKey",
   "autoReviewFixCount",
   "autoReviewFindingFingerprint",
@@ -178,31 +187,53 @@ const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
 function projectFallbackWorkflowState(key: string): WorkflowState | undefined {
   const state = workflowMemory.get(key) ?? readStoredWorkflowState(key);
   if (!state) return undefined;
-
-  const preserveFreshRetry = Boolean(state.autoFreshPrompt && state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}\u001f`));
+  const validPendingFresh = Boolean(state.autoFreshPrompt && state.autoFreshReason);
+  const preserveFreshRetry = Boolean(validPendingFresh && state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}`));
   const sanitized = {
     ...state,
-    autoMode: Boolean(state.autoFreshPrompt),
+    autoMode: validPendingFresh,
   };
-  for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS) sanitized[field] = undefined;
-  if (preserveFreshRetry) {
-    sanitized.autoRetryKey = state.autoRetryKey;
-    sanitized.autoRetryCount = state.autoRetryCount;
+  if (!validPendingFresh) {
+    for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS) sanitized[field] = undefined;
+    return sanitized;
+  }
+  sanitized.autoLastPrompt = undefined;
+  sanitized.autoReviewFixKey = undefined;
+  sanitized.autoReviewFixCount = undefined;
+  sanitized.autoReviewFindingFingerprint = undefined;
+  sanitized.autoReviewFixNeedsReview = undefined;
+  sanitized.autoReviewTask = undefined;
+  sanitized.autoReviewTaskIndex = undefined;
+  sanitized.reviewStatsKey = undefined;
+  if (!preserveFreshRetry) {
+    sanitized.autoRetryKey = undefined;
+    sanitized.autoRetryCount = undefined;
   }
   return sanitized;
 }
 
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   const entries = ctx.sessionManager?.getBranch?.() ?? [];
-  for (const entry of [...entries].reverse()) {
-    const state = workflowStateFromEntry(entry);
-    if (state) return state;
-  }
-
-  if (ctx.state) return parseWorkflowState(ctx.state);
-
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);
+  const projectState = workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey);
+  const stateIfNotStalePending = (state: WorkflowState): WorkflowState => {
+    if (
+      state.autoFreshPrompt
+      && state.autoFreshDeliveryKey
+      && projectState?.autoFreshConsumedKey === state.autoFreshDeliveryKey
+      && !projectState.autoFreshPrompt
+    ) return parseWorkflowState(projectState);
+    return state;
+  };
+
+  for (const entry of [...entries].reverse()) {
+    const state = workflowStateFromEntry(entry);
+    if (state) return stateIfNotStalePending(state);
+  }
+
+  if (ctx.state) return stateIfNotStalePending(parseWorkflowState(ctx.state));
+
   return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? projectFallbackWorkflowState(projectKey) ?? createInitialWorkflowState();
 }
 

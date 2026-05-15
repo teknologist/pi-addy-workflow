@@ -33,6 +33,8 @@ export type WorkflowStats = {
   history: WorkflowStatsSession[];
 };
 
+export type AutoFreshReason = "between-tasks" | "before-step" | "before-review";
+
 export type WorkflowState = {
   current?: WorkflowPhase;
   phases: Record<WorkflowPhase, PhaseStatus>;
@@ -56,6 +58,10 @@ export type WorkflowState = {
   autoRetryKey?: string;
   autoRetryCount?: number;
   autoFreshPrompt?: string;
+  autoFreshExpandedPrompt?: string;
+  autoFreshReason?: AutoFreshReason;
+  autoFreshDeliveryKey?: string;
+  autoFreshConsumedKey?: string;
   autoReviewFixKey?: string;
   autoReviewFixCount?: number;
   autoReviewFindingFingerprint?: string;
@@ -190,6 +196,10 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
       autoRetryKey: undefined,
       autoRetryCount: undefined,
       autoFreshPrompt: undefined,
+      autoFreshExpandedPrompt: undefined,
+      autoFreshReason: undefined,
+      autoFreshDeliveryKey: undefined,
+      autoFreshConsumedKey: undefined,
       autoReviewFixKey: undefined,
       autoReviewFixCount: undefined,
       autoReviewFindingFingerprint: undefined,
@@ -200,13 +210,28 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     };
   }
 
+  const pendingFresh = state.autoFreshPrompt && state.autoFreshReason
+    ? {
+      autoFreshPrompt: state.autoFreshPrompt,
+      autoFreshExpandedPrompt: state.autoFreshExpandedPrompt,
+      autoFreshReason: state.autoFreshReason,
+      autoFreshDeliveryKey: state.autoFreshDeliveryKey,
+      autoFreshConsumedKey: state.autoFreshConsumedKey,
+    }
+    : {
+      autoFreshPrompt: undefined,
+      autoFreshExpandedPrompt: undefined,
+      autoFreshReason: undefined,
+      autoFreshDeliveryKey: undefined,
+      autoFreshConsumedKey: undefined,
+    };
   return {
     ...state,
     autoMode: true,
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
-    autoFreshPrompt: undefined,
+    ...pendingFresh,
     autoReviewFixKey: undefined,
     autoReviewFixCount: undefined,
     autoReviewFindingFingerprint: undefined,
@@ -227,6 +252,10 @@ function exitAutoMode(state: WorkflowState): WorkflowState {
     autoRetryKey: undefined,
     autoRetryCount: undefined,
     autoFreshPrompt: undefined,
+    autoFreshExpandedPrompt: undefined,
+    autoFreshReason: undefined,
+    autoFreshDeliveryKey: undefined,
+    autoFreshConsumedKey: undefined,
     autoReviewFixKey: undefined,
     autoReviewFixCount: undefined,
     autoReviewFindingFingerprint: undefined,
@@ -358,6 +387,11 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.autoLastPrompt = baseState.autoLastPrompt;
   next.autoRetryKey = baseState.autoRetryKey;
   next.autoRetryCount = baseState.autoRetryCount;
+  next.autoFreshPrompt = baseState.autoFreshPrompt;
+  next.autoFreshExpandedPrompt = baseState.autoFreshExpandedPrompt;
+  next.autoFreshReason = baseState.autoFreshReason;
+  next.autoFreshDeliveryKey = baseState.autoFreshDeliveryKey;
+  next.autoFreshConsumedKey = baseState.autoFreshConsumedKey;
   next.autoReviewFixKey = baseState.autoReviewFixKey;
   next.autoReviewFixCount = baseState.autoReviewFixCount;
   next.autoReviewFindingFingerprint = baseState.autoReviewFindingFingerprint;
