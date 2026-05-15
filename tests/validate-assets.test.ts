@@ -307,7 +307,12 @@ test("stats prompt is read-only and prompts require completion stats", async () 
   assert.match(finish, /cycle completion stats/i);
   assert.match(finish, /full Addy Auto session/i);
   assert.match(finish, /build → simplify → verify → review → finish/);
-  assert.match(finish, /If the user chooses `commit`[^\n]*cycle completion stats[^\n]*then say `Finished!`/);
+  assert.match(finish, /If Addy Auto Mode is active, do not call `ask_user_question`/);
+  assert.match(finish, /If there are no unstaged or untracked working-tree changes, do not commit/);
+  assert.match(finish, /fresh-session continuation/);
+  assert.match(finish, /If there are unstaged or untracked working-tree changes, commit the completed plan work without asking the user/);
+  assert.match(finish, /Do not call `ask_user_question` for auto-mode finish commits/);
+  assert.doesNotMatch(finish, /- `finish without commit`/);
   assert.match(finish, /Turns:/);
   assert.match(finish, /Review runs:/);
   assert.match(finish, /Issues:/);

@@ -5,8 +5,8 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureGlobalAddyWorkflowConfig, loadAddyWorkflowConfig } from "./workflow-monitor/config.ts";
 import { archiveWorkflowStats, getContextWorkflowState, handleWorkflowEvent, initializeWorkflowWidget, openNextWorkflowPrompt, recordWorkflowReviewIssues, recordWorkflowReviewRun, recordWorkflowTaskTurn, recordWorkflowVerifyRun, resetWorkflow, setContextWorkflowState, type WorkflowStatsTarget } from "./workflow-monitor/workflow-handler.ts";
-import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
-import { nextWorkflowActionForActivePlanLifecycle, planTasksFromMarkdown, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
+import { WORKFLOW_PHASES, transitionWorkflow, type WorkflowIssueStats, type WorkflowPhase } from "./workflow-monitor/workflow-transitions.ts";
+import { nextUnfinishedSlicePlanPath, nextWorkflowActionForActivePlanLifecycle, planTasksFromMarkdown, renderWorkflowStatsText } from "./workflow-monitor/workflow-tracker.ts";
 
 type CommandEvent = string | { args?: string[]; input?: string };
 type InputEvent = { input?: string; text?: string; source?: string };
@@ -524,7 +524,7 @@ async function runFreshContextContinuation(pi: ExtensionAPI, ctx: unknown, reaso
 
   await showFreshContextNotice(ctx, reason);
   const parentSession = (ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }).sessionManager?.getSessionFile?.();
-  const result = await newSession.call(ctx, {
+  await newSession.call(ctx, {
     parentSession,
     withSession: async (newCtx: unknown) => {
       await showFreshContextNotice(newCtx, reason);
@@ -546,7 +546,6 @@ async function runFreshContextContinuation(pi: ExtensionAPI, ctx: unknown, reaso
     },
   });
 
-  if (result?.cancelled) notify("Addy auto fresh-session continuation was cancelled; auto mode is paused.", "warning");
 }
 
 function sendFreshContextContinuation(pi: ExtensionAPI, ctx: unknown, reason: FreshContextReason): void {
@@ -577,15 +576,13 @@ async function dispatchManualStepInFreshContext(pi: ExtensionAPI, input: string,
   }
 
   const parentSession = (ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }).sessionManager?.getSessionFile?.();
-  const result = await newSession.call(ctx, {
+  await newSession.call(ctx, {
     parentSession,
     withSession: async (newCtx: unknown) => {
       (newCtx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.("Addy workflow is running this step in a fresh session.", "info");
       await (newCtx as { sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" }) => void | Promise<void> }).sendUserMessage?.(expandedInput);
     },
   });
-
-  if (result?.cancelled) notify("Addy workflow fresh-session step was cancelled.", "warning");
   return true;
 }
 
@@ -622,7 +619,10 @@ function dispatchAutoPrompt(pi: ExtensionAPI, ctx: unknown, prompt: string, stat
       : autoStatsCommand(command)
         ? recordWorkflowTaskTurn(nextState, target)
         : nextState;
-  setContextWorkflowState(workflowCtx, stateWithStats, options.appendEntry === false ? undefined : appendWorkflowEntry(pi));
+  const stateWithPromptPhase = command?.startsWith("/addy-")
+    ? transitionWorkflow(stateWithStats, { source: "user-input", text: prompt, manualAddyCommand: false })
+    : stateWithStats;
+  setContextWorkflowState(workflowCtx, stateWithPromptPhase, options.appendEntry === false ? undefined : appendWorkflowEntry(pi));
   sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
 }
 
@@ -770,8 +770,22 @@ async function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, even
     autoReviewTask: committedTarget?.taskTitle,
     autoReviewTaskIndex: committedTarget?.taskIndex,
   };
-  setContextWorkflowState(ctx as never, stateAfterCommit, appendWorkflowEntry(pi));
-  const nextAction = nextWorkflowActionForActivePlanLifecycle(stateAfterCommit, (ctx as { cwd?: string }).cwd);
+  const cwd = (ctx as { cwd?: string }).cwd;
+  const nextSlicePlan = nextUnfinishedSlicePlanPath(stateAfterCommit, cwd);
+  const continuationState = nextSlicePlan
+    ? {
+        ...stateAfterCommit,
+        activePlan: nextSlicePlan,
+        currentTask: undefined,
+        nextTask: undefined,
+        currentTaskIndex: undefined,
+        taskCount: undefined,
+        currentTaskSummary: undefined,
+        nextTaskSummary: undefined,
+      }
+    : stateAfterCommit;
+  setContextWorkflowState(ctx as never, continuationState, appendWorkflowEntry(pi));
+  const nextAction = nextWorkflowActionForActivePlanLifecycle(continuationState, cwd);
   if (commandFromPrompt(nextAction?.prompt) === "/addy-finish") {
     await dispatchNextAutoWorkflowPrompt(pi, ctx);
     return true;
@@ -781,7 +795,6 @@ async function maybeContinueAfterTaskCommit(pi: ExtensionAPI, ctx: unknown, even
     else sendFreshContextContinuation(pi, ctx, "between-tasks");
     return true;
   }
-
   await dispatchNextAutoWorkflowPrompt(pi, ctx);
   return true;
 }

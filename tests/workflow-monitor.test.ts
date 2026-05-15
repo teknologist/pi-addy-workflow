@@ -209,6 +209,45 @@ test("auto loop dispatches verify after the current task is implemented", async 
 
   assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(sentMessages[0], `/addy-verify ${planPath}`, "Addy Verify");
+  assert.equal(ctx.state.current, "verify");
+  assert.equal(ctx.state.phases.verify, "active");
+});
+
+test("auto-dispatched workflow prompts advance the footer phase", async () => {
+  const cwd = join(stateDir, "auto-loop-footer-phase-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-footer-phase",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "active", review: "pending", finish: "pending" },
+      warnings: [],
+      current: "verify",
+      autoMode: true,
+      autoLastPrompt: `/addy-verify ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "Verified." }] }] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-review ${planPath}`, "Addy Review");
+  assert.equal(ctx.state.current, "review");
+  assert.equal(ctx.state.phases.verify, "complete");
+  assert.equal(ctx.state.phases.review, "active");
 });
 
 test("real workflow commands preserve auto mode so the loop can continue", async () => {
@@ -974,6 +1013,60 @@ test("auto loop starts next task in a new session after task commit", async () =
   assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${planPath}`, "Addy Build");
 });
 
+test("auto loop starts next slice in a new session after no-op task commit", async () => {
+  const cwd = join(stateDir, "auto-loop-noop-commit-next-slice-project");
+  const firstPlan = join("docs", "plans", "feature-slice-01-one.md");
+  const secondPlan = join("docs", "plans", "feature-slice-02-two.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, firstPlan), [
+    "## Task 1: Done",
+    "- [x] Implemented",
+    "- [x] Verified",
+    "- [x] Reviewed",
+  ].join("\n"));
+  writeFileSync(join(cwd, secondPlan), [
+    "## Task 1: Next slice task",
+    "- [ ] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const replacementMessages: string[] = [];
+  const statsKey = `${firstPlan}\u001f1\u001f1\u001fDone`;
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-noop-commit-next-slice",
+    state: {
+      phases: { define: "complete", plan: "complete", build: "complete", simplify: "pending", verify: "complete", review: "active", finish: "pending" },
+      warnings: [],
+      current: "review",
+      autoMode: true,
+      autoLastPrompt: [
+        "# Addy Auto Commit",
+        "",
+        "Invocation: `__addy-auto-task-commit__`",
+      ].join("\n"),
+      activePlan: firstPlan,
+      stats: { active: { tasks: { [statsKey]: { plan: firstPlan, sliceIndex: 1, taskIndex: 1, taskTitle: "Done", turns: 3, verifyRuns: 1, reviewRuns: 1, issues: { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 } } } }, history: [] },
+    },
+    sessionManager: { getSessionFile: () => "old-session.jsonl" },
+    newSession: async (options: { parentSession?: string; withSession: (ctx: unknown) => Promise<void> | void }) => {
+      await options.withSession({ cwd, id: "next-slice-replacement", ui: { setWidget() {}, notify() {} }, isIdle: () => true, sendUserMessage: (message: string) => replacementMessages.push(message) });
+      return { cancelled: false };
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get("agent_end")?.({ messages: [{ role: "assistant", content: [{ type: "text", text: "No changes to commit" }] }] }, ctx);
+
+  assert.deepEqual(sentMessages, []);
+  assert.equal(replacementMessages.length, 1);
+  assertSentWorkflowPrompt(replacementMessages[0], `/addy-build ${secondPlan}`, "Addy Build");
+});
+
 test("auto loop can disable between-task fresh context", async () => {
   const cwd = join(stateDir, "auto-loop-task-commit-no-fresh-project");
   const planPath = join("docs", "plans", "auto-loop.md");
@@ -1416,6 +1509,8 @@ test("auto mode starts finish in current session even when fresh before every st
     await commands.get("addy-auto")?.handler(planPath, ctx);
 
     assertSentWorkflowPrompt(sentMessages.at(-1), `/addy-finish ${planPath}`, "Addy Finish");
+    assert.equal(ctx.state.current, "finish");
+    assert.equal(ctx.state.phases.finish, "active");
     assert.equal(replacementMessages.length, 0);
   } finally {
     if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -1547,7 +1642,7 @@ test("internal auto continuation input does not exit auto mode", async () => {
   assert.equal(ctx.state.current, "verify");
 });
 
-test("auto continuation cancellation pauses without dispatching a lifecycle prompt", async () => {
+test("auto continuation cancellation does not use stale context after session replacement", async () => {
   const { pi, commands, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const notices: Array<[string, string | undefined]> = [];
@@ -1567,8 +1662,8 @@ test("auto continuation cancellation pauses without dispatching a lifecycle prom
   await commands.get("addy-auto-continue")?.handler("--fresh before-review", ctx);
 
   assert.equal(sentMessages.length, 0);
-  assert.match(notices.at(-1)?.[0] ?? "", /cancelled/);
-  assert.equal(notices.at(-1)?.[1], "warning");
+  assert.match(notices.at(-1)?.[0] ?? "", /clearing context/);
+  assert.equal(notices.at(-1)?.[1], "info");
 });
 
 test("auto loop stops after finish when all plan tasks are complete", async () => {

@@ -245,7 +245,6 @@ function slicePlanPathsFromIndexMarkdown(markdown: string, indexPlanPath: string
 function currentSlicePlanPathFromIndex(planPath: string, markdown: string, baseCwd?: string): string | undefined {
   const slicePaths = slicePlanPathsFromIndexMarkdown(markdown, planPath, baseCwd);
   let lastTaskSlice: string | undefined;
-
   for (const slicePath of slicePaths) {
     const sliceMarkdown = readPlanMarkdown(slicePath, baseCwd);
     if (!sliceMarkdown) continue;
@@ -254,8 +253,56 @@ function currentSlicePlanPathFromIndex(planPath: string, markdown: string, baseC
     lastTaskSlice = slicePath;
     if (tasks.some((task) => !task.complete)) return slicePath;
   }
-
   return lastTaskSlice;
+}
+
+export function nextUnfinishedSlicePlanPath(state: WorkflowState, baseCwd?: string): string | undefined {
+  if (!state.activePlan) return undefined;
+  const markdown = readPlanMarkdown(state.activePlan, baseCwd);
+  if (!markdown) return undefined;
+  const tasks = planTasksFromMarkdown(markdown);
+  if (tasks.length === 0) {
+    const slicePlan = currentSlicePlanPathFromIndex(state.activePlan, markdown, baseCwd);
+    return slicePlan && slicePlan !== state.activePlan ? slicePlan : undefined;
+  }
+  if (tasks.some((task) => !task.complete)) return undefined;
+
+  const resolvedPlanPath = resolvePlanPath(state.activePlan, baseCwd);
+  const currentMatch = basename(resolvedPlanPath).match(/^(.*?slice[-_]?)(\d+)/i);
+  if (!currentMatch) return undefined;
+  const currentPrefix = currentMatch[1].toLowerCase();
+  const currentNumber = Number.parseInt(currentMatch[2], 10);
+
+  let candidates: string[];
+  try {
+    candidates = readdirSync(dirname(resolvedPlanPath))
+      .map((entry) => resolve(dirname(resolvedPlanPath), entry))
+      .filter((candidate) => readablePlanFile(candidate));
+  } catch {
+    return undefined;
+  }
+
+  const nextCandidates = candidates
+    .map((candidate) => {
+      const match = basename(candidate).match(/^(.*?slice[-_]?)(\d+)/i);
+      return match ? { path: candidate, prefix: match[1].toLowerCase(), number: Number.parseInt(match[2], 10) } : undefined;
+    })
+    .filter((candidate): candidate is { path: string; prefix: string; number: number } => Boolean(
+      candidate
+      && candidate.number > currentNumber
+      && candidate.prefix === currentPrefix,
+    ))
+    .sort((left, right) => left.number - right.number);
+
+  for (const candidate of nextCandidates) {
+    const candidateMarkdown = readPlanMarkdown(candidate.path, baseCwd);
+    if (!candidateMarkdown) continue;
+    const candidateTasks = planTasksFromMarkdown(candidateMarkdown);
+    if (candidateTasks.length === 0 || candidateTasks.some((task) => !task.complete)) {
+      return planPathForDisplay(candidate.path, state.activePlan, baseCwd);
+    }
+  }
+  return undefined;
 }
 
 function sliceProgressForPlanPath(planPath: string, baseCwd?: string): { currentSliceIndex: number; sliceCount: number } | undefined {
