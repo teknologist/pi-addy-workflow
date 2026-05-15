@@ -681,7 +681,8 @@ test("auto loop commits a completed reviewed task before moving to the next task
   assert.match(sentMessages[0], /Completed task: Current/);
   assert.match(sentMessages[0], new RegExp(`Repository scope: ${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}; `));
   assert.match(sentMessages[0], /invoices-converter/);
-  assert.match(sentMessages[0], /`\/commit --non-interactive`/);
+  assert.match(sentMessages[0], /Do not try to invoke, search for, or print a `\/commit` slash command/);
+  assert.match(sentMessages[0], /`git -C <repo> status --short`/);
   assert.match(sentMessages[0], /Invocation: `__addy-auto-task-commit__`/);
   assert.match(sentMessages[0], /Do not call ask_user_question/);
 });
@@ -730,7 +731,7 @@ test("auto loop extracts cross-repo scope from slice index metadata", async () =
 
   assert.match(sentMessages[0], new RegExp(`Repository scope: ${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}; `));
   assert.match(sentMessages[0], new RegExp(join(stateDir, "invoices-converter").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(sentMessages[0], /Pass the full repository scope above to `\/commit`/);
+  assert.match(sentMessages[0], /Use the full repository scope above instead of relying on fresh-session file-touch history/);
 });
 
 test("auto loop resolves relative Index paths from the slice plan directory", async () => {
@@ -1455,7 +1456,7 @@ test("auto loop commits completed review-fix target before advancing to the next
     assert.match(sentMessages[0], /^# Addy Auto Commit/);
     assert.match(sentMessages[0], /Completed task: Done/);
     assert.doesNotMatch(sentMessages[0], /Completed task: Next/);
-    assert.match(sentMessages[0], /`\/commit`/);
+    assert.match(sentMessages[0], /Do not try to invoke, search for, or print a `\/commit` slash command/);
   } finally {
     if (previousEnv === undefined) delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
     else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;

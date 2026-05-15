@@ -83,7 +83,7 @@ test("define prompt accepts either a spec path or build idea", async () => {
   assert.match(content, /YYYY-MM-DD-HHMMSS-<meaningful-name>\.md/);
 });
 
-test("finish prompt advances tasks and slices with commit prompts", async () => {
+test("finish prompt advances tasks and slices with inline commit instructions", async () => {
   const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
 
   assert.match(content, /ask_user_question/);
@@ -102,28 +102,62 @@ test("finish prompt advances tasks and slices with commit prompts", async () => 
   assert.match(content, /`ship`/);
   assert.match(content, /\/addy-build <current-slice-plan-path>/);
   assert.match(content, /\/addy-build <next-slice-plan-path>/);
-  assert.match(content, /\/commit/);
-  assert.match(content, /cross-repo-aware `\/commit`/);
-  assert.match(content, /non-interactive mode/);
-  assert.match(content, /derive the full repository scope/);
+  assert.match(content, /Inline finish commit rule/);
+  assert.match(content, /inline commit procedure/);
+  assert.match(content, /non-interactive and auto-mode finish paths/);
+  assert.match(content, /active\/supplied plan and its index metadata/);
+  assert.match(content, /Repository scope:/);
   assert.match(content, /Owner repo/);
   assert.match(content, /Companion repo/);
-  assert.match(content, /Pass that full repository scope to `\/commit --non-interactive`/);
   assert.match(content, /fresh-session file-touch history/);
-  assert.match(content, /finish choice is already the confirmation/);
+  assert.match(content, /finish choice as the user's commit confirmation/);
   assert.match(content, /do not call `ask_user_question` again for commit confirmation/);
-  assert.match(content, /do not replace `\/commit` with a hand-rolled single-repository git flow/);
   assert.match(content, /\/addy-ship/);
   assert.match(content, /execute the selected action directly/);
   assert.match(content, /Never respond with only the slash command text/);
-  assert.match(content, /Do not merely print `\/commit`/);
   assert.match(content, /Do not merely print `\/addy-build <current-slice-plan-path>`/);
   assert.match(content, /Do not merely print `\/addy-build <next-slice-plan-path>`/);
   assert.match(content, /Do not merely print `\/addy-ship`/);
   assert.match(content, /User has answered/);
   assert.match(content, /do not wait for another user message/);
+  assert.doesNotMatch(content, /\/commit/);
   assert.doesNotMatch(content, /trigger `\/addy-build/);
   assert.doesNotMatch(content, /trigger the `\/addy-ship/);
+});
+
+test("finish prompt mirrors safe multi-repo commit behavior inline", async () => {
+  const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
+
+  assert.match(content, /inspect staged, unstaged, and untracked changes/);
+  assert.match(content, /Skip scoped repositories with no changes/);
+  assert.match(content, /Stage only those relevant paths/);
+  assert.match(content, /leave unrelated user work unstaged/);
+  assert.match(content, /conventional commit message/);
+  assert.match(content, /same message across all scoped repositories/);
+  assert.match(content, /concise multi-repository commit preview/);
+  assert.match(content, /commit directly after the preview without asking again/);
+  assert.match(content, /git commit -m/);
+  assert.match(content, /Stop on the first commit failure/);
+  assert.match(content, /failed repository/);
+  assert.match(content, /repositories already committed/);
+  assert.match(content, /COMMIT: <hash>/);
+  assert.match(content, /No changes to commit/);
+});
+
+test("finish prompt keeps auto-mode commit paths non-interactive", async () => {
+  const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
+
+  assert.match(content, /If Addy Auto Mode is active, do not call `ask_user_question`/);
+  assert.match(content, /without asking the user/);
+  assert.match(content, /Do not call `ask_user_question` for auto-mode finish commits/);
+  assert.match(content, /non-interactive and auto-mode finish paths/);
+});
+
+test("finish prompt does not introduce recursive plan refinement", async () => {
+  const content = await readFile(join("prompts", "addy-finish.md"), "utf8");
+
+  assert.doesNotMatch(content, /\/refine-plan/);
+  assert.doesNotMatch(content, /plan-refinement loop/i);
 });
 
 test("finish guidance does not advertise commit and push", async () => {
@@ -310,7 +344,7 @@ test("stats prompt is read-only and prompts require completion stats", async () 
   assert.match(finish, /If Addy Auto Mode is active, do not call `ask_user_question`/);
   assert.match(finish, /If there are no unstaged or untracked working-tree changes, do not commit/);
   assert.match(finish, /fresh-session continuation/);
-  assert.match(finish, /If there are unstaged or untracked working-tree changes, commit the completed plan work without asking the user/);
+  assert.match(finish, /If there are unstaged or untracked working-tree changes, run the inline commit procedure above for the completed plan work without asking the user/);
   assert.match(finish, /Do not call `ask_user_question` for auto-mode finish commits/);
   assert.doesNotMatch(finish, /- `finish without commit`/);
   assert.match(finish, /Turns:/);
@@ -329,6 +363,7 @@ test("auto workflow end-to-end validation evidence is recorded", async () => {
   const plan = await readFile(join("docs", "plans", "2026-05-12-addy-auto-command.md"), "utf8");
 
   assert.match(assetTests, /auto prompt documents autonomous plan execution/);
+  assert.match(assetTests, /finish prompt keeps auto-mode commit paths non-interactive/);
   assert.match(trackerTests, /auto mode toggles without changing lifecycle phase/);
   assert.match(monitorTests, /auto mode input preserves plan and task progress while toggling footer label/);
   assert.match(monitorTests, /auto loop commits a completed reviewed task before moving to the next task/);
