@@ -14,11 +14,15 @@ export function defaultAgentTargetRoot(home = process.env.HOME ?? process.cwd())
   return join(home, ".pi", "agent", "agents", "pi-addy-workflow");
 }
 
+function isParentRelativePath(relativePath: string): boolean {
+  return relativePath === ".." || relativePath.startsWith(`..${sep}`);
+}
+
 export function isSafeTargetPath(targetRoot: string, candidate: string): boolean {
   const root = resolve(targetRoot);
   const target = resolve(candidate);
   const relativeTarget = relative(root, target);
-  return relativeTarget === "" || (!!relativeTarget && !relativeTarget.startsWith("..") && !isAbsolute(relativeTarget));
+  return relativeTarget === "" || (!!relativeTarget && !isParentRelativePath(relativeTarget) && !isAbsolute(relativeTarget));
 }
 
 export function addGeneratedNotice(markdown: string): string {
@@ -64,7 +68,7 @@ async function assertNoSymlink(path: string): Promise<void> {
 
 async function assertNoSymlinkPathComponents(root: string, candidate: string): Promise<void> {
   const relativePath = relative(root, candidate);
-  if (!relativePath || relativePath.startsWith("..")) return;
+  if (!relativePath || isParentRelativePath(relativePath) || isAbsolute(relativePath)) return;
 
   let current = root;
   for (const part of relativePath.split(sep).filter(Boolean)) {

@@ -162,25 +162,34 @@ function writeStoredWorkflowState(key: string, state: WorkflowState): void {
   }
 }
 
+const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
+  "autoLastPrompt",
+  "autoRetryKey",
+  "autoRetryCount",
+  "autoReviewFixKey",
+  "autoReviewFixCount",
+  "autoReviewFindingFingerprint",
+  "autoReviewFixNeedsReview",
+  "autoReviewTask",
+  "autoReviewTaskIndex",
+  "reviewStatsKey",
+] as const satisfies readonly (keyof WorkflowState)[];
+
 function projectFallbackWorkflowState(key: string): WorkflowState | undefined {
   const state = workflowMemory.get(key) ?? readStoredWorkflowState(key);
   if (!state) return undefined;
-  if (state.autoFreshPrompt) return state;
 
-  return {
+  const preserveFreshRetry = Boolean(state.autoFreshPrompt && state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}\u001f`));
+  const sanitized = {
     ...state,
-    autoMode: false,
-    autoLastPrompt: undefined,
-    autoRetryKey: undefined,
-    autoRetryCount: undefined,
-    autoReviewFixKey: undefined,
-    autoReviewFixCount: undefined,
-    autoReviewFindingFingerprint: undefined,
-    autoReviewFixNeedsReview: undefined,
-    autoReviewTask: undefined,
-    autoReviewTaskIndex: undefined,
-    reviewStatsKey: undefined,
+    autoMode: Boolean(state.autoFreshPrompt),
   };
+  for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS) sanitized[field] = undefined;
+  if (preserveFreshRetry) {
+    sanitized.autoRetryKey = state.autoRetryKey;
+    sanitized.autoRetryCount = state.autoRetryCount;
+  }
+  return sanitized;
 }
 
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {

@@ -12,8 +12,12 @@ test("adds generated notice after YAML frontmatter", () => {
 });
 
 test("target path safety stays inside target root", () => {
-  assert.equal(isSafeTargetPath("/tmp/root", "/tmp/root/agent.md"), true);
-  assert.equal(isSafeTargetPath("/tmp/root", "/tmp/root2/agent.md"), false);
+  const root = join(tmpdir(), "addy-agent-target-root");
+  assert.equal(isSafeTargetPath(root, root), true);
+  assert.equal(isSafeTargetPath(root, join(root, "agent.md")), true);
+  assert.equal(isSafeTargetPath(root, join(root, "..cache", "agent.md")), true);
+  assert.equal(isSafeTargetPath(root, `${root}2/agent.md`), false);
+  assert.equal(isSafeTargetPath(root, join(root, "..", "outside", "agent.md")), false);
 });
 
 test("package agent source root decodes file URLs", () => {

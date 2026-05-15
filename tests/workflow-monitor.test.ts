@@ -1952,17 +1952,37 @@ test("session project restore clears stale auto loop controls", async () => {
   assert.equal(state.autoLastPrompt, undefined);
 });
 
-test("project restore preserves pending fresh auto continuation", () => {
+test("project restore preserves pending fresh auto continuation but clears stale controls", () => {
   const cwd = join(stateDir, "startup-auto-fresh-project");
   const firstCtx: any = { cwd, id: "startup-auto-fresh-first", ui: { setWidget() {} } };
   handleWorkflowEvent(firstCtx, { source: "user-input", text: "/addy-auto docs/plans/fresh.md" });
   firstCtx.state.autoFreshPrompt = "/addy-build docs/plans/fresh.md";
+  firstCtx.state.autoLastPrompt = "/addy-review docs/plans/old.md";
+  firstCtx.state.autoRetryKey = "old-retry";
+  firstCtx.state.autoRetryCount = 1;
+  firstCtx.state.autoReviewFixKey = "old-fix";
+  firstCtx.state.autoReviewFixCount = 2;
+  firstCtx.state.autoReviewFindingFingerprint = "old-finding";
+  firstCtx.state.autoReviewFixNeedsReview = true;
+  firstCtx.state.autoReviewTask = "Old task";
+  firstCtx.state.autoReviewTaskIndex = 3;
+  firstCtx.state.reviewStatsKey = "old-stats";
   setContextWorkflowState(firstCtx, firstCtx.state);
 
   const state = getContextWorkflowState({ cwd, id: "startup-auto-fresh-next" } as any);
 
   assert.equal(state.autoMode, true);
   assert.equal(state.autoFreshPrompt, "/addy-build docs/plans/fresh.md");
+  assert.equal(state.autoLastPrompt, undefined);
+  assert.equal(state.autoRetryKey, undefined);
+  assert.equal(state.autoRetryCount, undefined);
+  assert.equal(state.autoReviewFixKey, undefined);
+  assert.equal(state.autoReviewFixCount, undefined);
+  assert.equal(state.autoReviewFindingFingerprint, undefined);
+  assert.equal(state.autoReviewFixNeedsReview, undefined);
+  assert.equal(state.autoReviewTask, undefined);
+  assert.equal(state.autoReviewTaskIndex, undefined);
+  assert.equal(state.reviewStatsKey, undefined);
 });
 
 test("manual Addy turns record active task stats and addy-stats is read-only", async () => {

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureGlobalAddyWorkflowConfig, loadAddyWorkflowConfig } from "./workflow-monitor/config.ts";
@@ -435,9 +435,11 @@ function resolveWorkflowPlanPathRelativeTo(planPath: string, relativeTo: string,
 
   const relativeCandidate = resolve(dirname(relativeTo), filesystemPath);
   try {
-    readFileSync(relativeCandidate, "utf8");
+    statSync(relativeCandidate);
     return relativeCandidate;
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
     return resolveWorkflowPlanPath(planPath, baseCwd);
   }
 }
