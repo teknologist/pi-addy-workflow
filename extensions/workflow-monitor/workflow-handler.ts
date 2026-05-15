@@ -1,13 +1,34 @@
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { complete, type UserMessage } from "@earendil-works/pi-ai";
-import { WORKFLOW_PHASES, createInitialWorkflowState, transitionWorkflow, type PhaseStatus, type WorkflowEvent, type WorkflowIssueStats, type WorkflowPhase, type WorkflowState, type WorkflowTaskStats } from "./workflow-transitions.ts";
-import { WORKFLOW_STATE_ENTRY_TYPE, WORKFLOW_WIDGET_KEY, createEmptyWorkflowStats, nextPromptForPhase, parseWorkflowState, promptArtifactForPhase, refreshWorkflowTasksFromPlan, renderWorkflowWidget } from "./workflow-tracker.ts";
-import { workflowWarningText } from "./warnings.ts";
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { complete, type UserMessage } from '@earendil-works/pi-ai';
+import {
+  WORKFLOW_PHASES,
+  createInitialWorkflowState,
+  transitionWorkflow,
+  type PhaseStatus,
+  type WorkflowEvent,
+  type WorkflowIssueStats,
+  type WorkflowPhase,
+  type WorkflowState,
+  type WorkflowTaskStats,
+} from './workflow-transitions.ts';
+import {
+  WORKFLOW_STATE_ENTRY_TYPE,
+  WORKFLOW_WIDGET_KEY,
+  createEmptyWorkflowStats,
+  nextPromptForPhase,
+  parseWorkflowState,
+  promptArtifactForPhase,
+  refreshWorkflowTasksFromPlan,
+  renderWorkflowWidget,
+} from './workflow-tracker.ts';
+import { workflowWarningText } from './warnings.ts';
 
-type SessionEntry = { type?: string; customType?: string; data?: unknown } | [string, unknown];
+type SessionEntry =
+  | { type?: string; customType?: string; data?: unknown }
+  | [string, unknown];
 
 type WorkflowContext = {
   cwd?: string;
@@ -23,7 +44,12 @@ type WorkflowContext = {
   };
   model?: unknown;
   modelRegistry?: {
-    getApiKeyAndHeaders?: (model: unknown) => Promise<{ ok: boolean; apiKey?: string; headers?: Record<string, string>; error?: string }>;
+    getApiKeyAndHeaders?: (model: unknown) => Promise<{
+      ok: boolean;
+      apiKey?: string;
+      headers?: Record<string, string>;
+      error?: string;
+    }>;
   };
   signal?: AbortSignal;
   sessionManager?: {
@@ -37,74 +63,228 @@ type AppendEntry = (type: string, data: unknown) => void;
 const workflowMemory = new Map<string, WorkflowState>();
 
 function isPhaseStatus(value: unknown): value is PhaseStatus {
-  return value === "pending" || value === "active" || value === "complete";
+  return value === 'pending' || value === 'active' || value === 'complete';
 }
 
 function isPositiveSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function hasWorkflowStateShape(
+  value: unknown,
+): value is { phases: unknown; warnings: unknown } {
+  if (typeof value !== 'object') return false;
+  if (value === null) return false;
+  if (!('phases' in value)) return false;
+  return 'warnings' in value;
 }
 
 function coerceWorkflowState(value: unknown): WorkflowState | undefined {
-  if (typeof value !== "object" || value === null || !("phases" in value) || !("warnings" in value)) return undefined;
+  if (!hasWorkflowStateShape(value)) return undefined;
 
-  const candidate = value as Omit<Partial<WorkflowState>, "current"> & { current?: WorkflowPhase | "ship" };
+  const candidate = value as Omit<Partial<WorkflowState>, 'current'> & {
+    current?: WorkflowPhase | 'ship';
+  };
   const rawCurrent = candidate.current;
-  const current: WorkflowPhase | undefined = rawCurrent === "ship" ? "finish" : rawCurrent;
-  if (current !== undefined && !WORKFLOW_PHASES.includes(current)) return undefined;
-  if (!Array.isArray(candidate.warnings) || !candidate.warnings.every((warning) => typeof warning === "string")) return undefined;
-  if (candidate.activeSpec !== undefined && typeof candidate.activeSpec !== "string") return undefined;
-  if (candidate.activePlan !== undefined && typeof candidate.activePlan !== "string") return undefined;
-  if (candidate.autoMode !== undefined && typeof candidate.autoMode !== "boolean") return undefined;
-  if (candidate.autoLastPrompt !== undefined && typeof candidate.autoLastPrompt !== "string") return undefined;
-  if (candidate.autoFreshPrompt !== undefined && typeof candidate.autoFreshPrompt !== "string") return undefined;
-  if (candidate.autoFreshExpandedPrompt !== undefined && typeof candidate.autoFreshExpandedPrompt !== "string") return undefined;
-  if (candidate.autoFreshReason !== undefined && !["between-tasks", "before-step", "before-review"].includes(candidate.autoFreshReason)) return undefined;
-  if (candidate.autoFreshDeliveryKey !== undefined && typeof candidate.autoFreshDeliveryKey !== "string") return undefined;
-  if (candidate.autoFreshConsumedKey !== undefined && typeof candidate.autoFreshConsumedKey !== "string") return undefined;
-  if (candidate.autoRetryKey !== undefined && typeof candidate.autoRetryKey !== "string") return undefined;
-  if (candidate.autoRetryCount !== undefined && !isNonNegativeSafeInteger(candidate.autoRetryCount)) return undefined;
-  if (candidate.autoReviewFixKey !== undefined && typeof candidate.autoReviewFixKey !== "string") return undefined;
-  if (candidate.autoReviewFixCount !== undefined && !isNonNegativeSafeInteger(candidate.autoReviewFixCount)) return undefined;
-  if (candidate.autoReviewFindingFingerprint !== undefined && typeof candidate.autoReviewFindingFingerprint !== "string") return undefined;
-  if (candidate.autoReviewFixNeedsReview !== undefined && typeof candidate.autoReviewFixNeedsReview !== "boolean") return undefined;
-  if (candidate.autoReviewTask !== undefined && typeof candidate.autoReviewTask !== "string") return undefined;
-  if (candidate.autoReviewTaskIndex !== undefined && !isPositiveSafeInteger(candidate.autoReviewTaskIndex)) return undefined;
-  if (candidate.reviewStatsKey !== undefined && typeof candidate.reviewStatsKey !== "string") return undefined;
-  if (candidate.currentTask !== undefined && typeof candidate.currentTask !== "string") return undefined;
-  if (candidate.nextTask !== undefined && typeof candidate.nextTask !== "string") return undefined;
-  if (candidate.currentTaskIndex !== undefined && !isPositiveSafeInteger(candidate.currentTaskIndex)) return undefined;
-  if (candidate.taskCount !== undefined && !isPositiveSafeInteger(candidate.taskCount)) return undefined;
-  if (candidate.currentTaskIndex !== undefined && candidate.taskCount !== undefined && candidate.currentTaskIndex > candidate.taskCount) return undefined;
-  if (candidate.currentSliceIndex !== undefined && !isPositiveSafeInteger(candidate.currentSliceIndex)) return undefined;
-  if (candidate.sliceCount !== undefined && !isPositiveSafeInteger(candidate.sliceCount)) return undefined;
-  if (candidate.currentSliceIndex !== undefined && candidate.sliceCount !== undefined && candidate.currentSliceIndex > candidate.sliceCount) return undefined;
-  if (candidate.currentTaskSummary !== undefined && typeof candidate.currentTaskSummary !== "string") return undefined;
-  if (candidate.nextTaskSummary !== undefined && typeof candidate.nextTaskSummary !== "string") return undefined;
-  if (typeof candidate.phases !== "object" || candidate.phases === null) return undefined;
+  const current: WorkflowPhase | undefined =
+    rawCurrent === 'ship' ? 'finish' : rawCurrent;
+  if (current !== undefined && !WORKFLOW_PHASES.includes(current))
+    return undefined;
+  if (
+    !Array.isArray(candidate.warnings) ||
+    !candidate.warnings.every((warning) => typeof warning === 'string')
+  )
+    return undefined;
+  if (
+    candidate.activeSpec !== undefined &&
+    typeof candidate.activeSpec !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.activePlan !== undefined &&
+    typeof candidate.activePlan !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoMode !== undefined &&
+    typeof candidate.autoMode !== 'boolean'
+  )
+    return undefined;
+  if (
+    candidate.autoLastPrompt !== undefined &&
+    typeof candidate.autoLastPrompt !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoFreshPrompt !== undefined &&
+    typeof candidate.autoFreshPrompt !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoFreshExpandedPrompt !== undefined &&
+    typeof candidate.autoFreshExpandedPrompt !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoFreshReason !== undefined &&
+    !['between-tasks', 'before-step', 'before-review'].includes(
+      candidate.autoFreshReason,
+    )
+  )
+    return undefined;
+  if (
+    candidate.autoFreshDeliveryKey !== undefined &&
+    typeof candidate.autoFreshDeliveryKey !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoFreshConsumedKey !== undefined &&
+    typeof candidate.autoFreshConsumedKey !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoRetryKey !== undefined &&
+    typeof candidate.autoRetryKey !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoRetryCount !== undefined &&
+    !isNonNegativeSafeInteger(candidate.autoRetryCount)
+  )
+    return undefined;
+  if (
+    candidate.autoReviewFixKey !== undefined &&
+    typeof candidate.autoReviewFixKey !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoReviewFixCount !== undefined &&
+    !isNonNegativeSafeInteger(candidate.autoReviewFixCount)
+  )
+    return undefined;
+  if (
+    candidate.autoReviewFindingFingerprint !== undefined &&
+    typeof candidate.autoReviewFindingFingerprint !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoReviewFixNeedsReview !== undefined &&
+    typeof candidate.autoReviewFixNeedsReview !== 'boolean'
+  )
+    return undefined;
+  if (
+    candidate.autoReviewTask !== undefined &&
+    typeof candidate.autoReviewTask !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.autoReviewTaskIndex !== undefined &&
+    !isPositiveSafeInteger(candidate.autoReviewTaskIndex)
+  )
+    return undefined;
+  if (
+    candidate.reviewStatsKey !== undefined &&
+    typeof candidate.reviewStatsKey !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.reviewStatsAgent !== undefined &&
+    typeof candidate.reviewStatsAgent !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.currentTask !== undefined &&
+    typeof candidate.currentTask !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.nextTask !== undefined &&
+    typeof candidate.nextTask !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.currentTaskIndex !== undefined &&
+    !isPositiveSafeInteger(candidate.currentTaskIndex)
+  )
+    return undefined;
+  if (
+    candidate.taskCount !== undefined &&
+    !isPositiveSafeInteger(candidate.taskCount)
+  )
+    return undefined;
+  if (
+    candidate.currentTaskIndex !== undefined &&
+    candidate.taskCount !== undefined &&
+    candidate.currentTaskIndex > candidate.taskCount
+  )
+    return undefined;
+  if (
+    candidate.currentSliceIndex !== undefined &&
+    !isPositiveSafeInteger(candidate.currentSliceIndex)
+  )
+    return undefined;
+  if (
+    candidate.sliceCount !== undefined &&
+    !isPositiveSafeInteger(candidate.sliceCount)
+  )
+    return undefined;
+  if (
+    candidate.currentSliceIndex !== undefined &&
+    candidate.sliceCount !== undefined &&
+    candidate.currentSliceIndex > candidate.sliceCount
+  )
+    return undefined;
+  if (
+    candidate.currentTaskSummary !== undefined &&
+    typeof candidate.currentTaskSummary !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.nextTaskSummary !== undefined &&
+    typeof candidate.nextTaskSummary !== 'string'
+  )
+    return undefined;
+  if (typeof candidate.phases !== 'object' || candidate.phases === null)
+    return undefined;
 
   const legacyPhases = candidate.phases as Record<string, unknown>;
-  const phases = Object.fromEntries(WORKFLOW_PHASES.map((phase) => {
-    const status = phase === "finish" ? legacyPhases.finish ?? legacyPhases.ship : legacyPhases[phase];
-    return [phase, isPhaseStatus(status) ? status : undefined];
-  })) as Record<WorkflowPhase, PhaseStatus | undefined>;
+  const phases = Object.fromEntries(
+    WORKFLOW_PHASES.map((phase) => {
+      const status =
+        phase === 'finish'
+          ? (legacyPhases.finish ?? legacyPhases.ship)
+          : legacyPhases[phase];
+      return [phase, isPhaseStatus(status) ? status : undefined];
+    }),
+  ) as Record<WorkflowPhase, PhaseStatus | undefined>;
   if (!WORKFLOW_PHASES.every((phase) => phases[phase])) return undefined;
 
-  return { ...candidate, current, phases: phases as Record<WorkflowPhase, PhaseStatus>, warnings: candidate.warnings };
+  return {
+    ...candidate,
+    current,
+    phases: phases as Record<WorkflowPhase, PhaseStatus>,
+    warnings: candidate.warnings,
+  };
 }
 
-function parsePersistedWorkflowState(value: unknown): WorkflowState | undefined {
+function parsePersistedWorkflowState(
+  value: unknown,
+): WorkflowState | undefined {
   const directState = coerceWorkflowState(value);
   if (directState) return parseWorkflowState(directState);
 
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== 'string') return undefined;
 
   try {
     const parsed = JSON.parse(value);
-    const parsedState = parsed?.type === WORKFLOW_STATE_ENTRY_TYPE ? coerceWorkflowState(parsed.state) : coerceWorkflowState(parsed);
+    const parsedState =
+      parsed?.type === WORKFLOW_STATE_ENTRY_TYPE
+        ? coerceWorkflowState(parsed.state)
+        : coerceWorkflowState(parsed);
     if (parsedState) return parseWorkflowState(parsedState);
   } catch {
     return undefined;
@@ -113,32 +293,52 @@ function parsePersistedWorkflowState(value: unknown): WorkflowState | undefined 
   return undefined;
 }
 
-function workflowStateFromEntry(entry: SessionEntry): WorkflowState | undefined {
+function workflowStateFromEntry(
+  entry: SessionEntry,
+): WorkflowState | undefined {
   if (Array.isArray(entry)) {
     const [type, data] = entry;
-    return type === WORKFLOW_STATE_ENTRY_TYPE ? parsePersistedWorkflowState(data) : undefined;
+    return type === WORKFLOW_STATE_ENTRY_TYPE
+      ? parsePersistedWorkflowState(data)
+      : undefined;
   }
 
-  if (entry.type === "custom" && entry.customType === WORKFLOW_STATE_ENTRY_TYPE) return parsePersistedWorkflowState(entry.data);
-  if (entry.type === WORKFLOW_STATE_ENTRY_TYPE) return parsePersistedWorkflowState(entry.data);
+  if (entry.type === 'custom' && entry.customType === WORKFLOW_STATE_ENTRY_TYPE)
+    return parsePersistedWorkflowState(entry.data);
+  if (entry.type === WORKFLOW_STATE_ENTRY_TYPE)
+    return parsePersistedWorkflowState(entry.data);
 
   return undefined;
 }
 
 function workflowStateKey(ctx: WorkflowContext): string {
-  const explicitSessionScope = [ctx.sessionId, ctx.conversationId, ctx.id].find((value) => typeof value === "string" && value.length > 0);
-  const projectScope = [ctx.cwd, process.cwd()].find((value) => typeof value === "string" && value.length > 0) ?? "default";
+  const explicitSessionScope = [ctx.sessionId, ctx.conversationId, ctx.id].find(
+    (value) => typeof value === 'string' && value.length > 0,
+  );
+  const projectScope =
+    [ctx.cwd, process.cwd()].find(
+      (value) => typeof value === 'string' && value.length > 0,
+    ) ?? 'default';
   const scope = explicitSessionScope ?? `${process.pid}:${projectScope}`;
-  return createHash("sha256").update(scope).digest("hex").slice(0, 24);
+  return createHash('sha256').update(scope).digest('hex').slice(0, 24);
 }
 
 function projectWorkflowStateKey(ctx: WorkflowContext): string {
-  const projectScope = [ctx.cwd, process.cwd()].find((value) => typeof value === "string" && value.length > 0) ?? "default";
-  return createHash("sha256").update(`project:${projectScope}`).digest("hex").slice(0, 24);
+  const projectScope =
+    [ctx.cwd, process.cwd()].find(
+      (value) => typeof value === 'string' && value.length > 0,
+    ) ?? 'default';
+  return createHash('sha256')
+    .update(`project:${projectScope}`)
+    .digest('hex')
+    .slice(0, 24);
 }
 
 function workflowStateDir(): string {
-  return process.env.PI_ADDY_WORKFLOW_STATE_DIR ?? join(homedir(), ".pi", "agent", "state", "pi-addy-workflow");
+  return (
+    process.env.PI_ADDY_WORKFLOW_STATE_DIR ??
+    join(homedir(), '.pi', 'agent', 'state', 'pi-addy-workflow')
+  );
 }
 
 function workflowStatePath(key: string): string {
@@ -150,7 +350,7 @@ function readStoredWorkflowState(key: string): WorkflowState | undefined {
   if (!existsSync(path)) return undefined;
 
   try {
-    return parsePersistedWorkflowState(readFileSync(path, "utf8"));
+    return parsePersistedWorkflowState(readFileSync(path, 'utf8'));
   } catch {
     return undefined;
   }
@@ -160,41 +360,52 @@ function writeStoredWorkflowState(key: string, state: WorkflowState): void {
   const path = workflowStatePath(key);
   try {
     mkdirSync(workflowStateDir(), { recursive: true });
-    writeFileSync(path, JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state }), "utf8");
+    writeFileSync(
+      path,
+      JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state }),
+      'utf8',
+    );
   } catch {
     // Persistence is best-effort; in-memory/session state still drives the current turn.
   }
 }
 
 const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
-  "autoLastPrompt",
-  "autoRetryKey",
-  "autoRetryCount",
-  "autoFreshPrompt",
-  "autoFreshExpandedPrompt",
-  "autoFreshReason",
-  "autoFreshDeliveryKey",
-  "autoFreshConsumedKey",
-  "autoReviewFixKey",
-  "autoReviewFixCount",
-  "autoReviewFindingFingerprint",
-  "autoReviewFixNeedsReview",
-  "autoReviewTask",
-  "autoReviewTaskIndex",
-  "reviewStatsKey",
+  'autoLastPrompt',
+  'autoRetryKey',
+  'autoRetryCount',
+  'autoFreshPrompt',
+  'autoFreshExpandedPrompt',
+  'autoFreshReason',
+  'autoFreshDeliveryKey',
+  'autoFreshConsumedKey',
+  'autoReviewFixKey',
+  'autoReviewFixCount',
+  'autoReviewFindingFingerprint',
+  'autoReviewFixNeedsReview',
+  'autoReviewTask',
+  'autoReviewTaskIndex',
+  'reviewStatsKey',
+  'reviewStatsAgent',
 ] as const satisfies readonly (keyof WorkflowState)[];
 
 function projectFallbackWorkflowState(key: string): WorkflowState | undefined {
   const state = workflowMemory.get(key) ?? readStoredWorkflowState(key);
   if (!state) return undefined;
-  const validPendingFresh = Boolean(state.autoFreshPrompt && state.autoFreshReason);
-  const preserveFreshRetry = Boolean(validPendingFresh && state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}`));
+  const validPendingFresh = Boolean(
+    state.autoFreshPrompt && state.autoFreshReason,
+  );
+  const preserveFreshRetry = Boolean(
+    validPendingFresh &&
+    state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}`),
+  );
   const sanitized = {
     ...state,
     autoMode: validPendingFresh,
   };
   if (!validPendingFresh) {
-    for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS) sanitized[field] = undefined;
+    for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS)
+      sanitized[field] = undefined;
     return sanitized;
   }
   sanitized.autoLastPrompt = undefined;
@@ -205,6 +416,7 @@ function projectFallbackWorkflowState(key: string): WorkflowState | undefined {
   sanitized.autoReviewTask = undefined;
   sanitized.autoReviewTaskIndex = undefined;
   sanitized.reviewStatsKey = undefined;
+  sanitized.reviewStatsAgent = undefined;
   if (!preserveFreshRetry) {
     sanitized.autoRetryKey = undefined;
     sanitized.autoRetryCount = undefined;
@@ -216,14 +428,21 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   const entries = ctx.sessionManager?.getBranch?.() ?? [];
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);
-  const projectState = workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey);
+  const projectState =
+    workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey);
   const stateIfNotStalePending = (state: WorkflowState): WorkflowState => {
+    const projectConsumedPendingFresh = Boolean(
+      projectState &&
+      state.autoFreshPrompt &&
+      state.autoFreshDeliveryKey &&
+      projectState.autoFreshConsumedKey === state.autoFreshDeliveryKey,
+    );
     if (
-      state.autoFreshPrompt
-      && state.autoFreshDeliveryKey
-      && projectState?.autoFreshConsumedKey === state.autoFreshDeliveryKey
-      && !projectState.autoFreshPrompt
-    ) return parseWorkflowState(projectState);
+      projectState &&
+      projectConsumedPendingFresh &&
+      !projectState.autoFreshPrompt
+    )
+      return parseWorkflowState(projectState);
     return state;
   };
 
@@ -234,10 +453,19 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
 
   if (ctx.state) return stateIfNotStalePending(parseWorkflowState(ctx.state));
 
-  return workflowMemory.get(key) ?? readStoredWorkflowState(key) ?? projectFallbackWorkflowState(projectKey) ?? createInitialWorkflowState();
+  return (
+    workflowMemory.get(key) ??
+    readStoredWorkflowState(key) ??
+    projectFallbackWorkflowState(projectKey) ??
+    createInitialWorkflowState()
+  );
 }
 
-export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowState, appendEntry?: AppendEntry): void {
+export function setContextWorkflowState(
+  ctx: WorkflowContext,
+  state: WorkflowState,
+  appendEntry?: AppendEntry,
+): void {
   state = refreshWorkflowTasksFromPlan(state, ctx.cwd);
   ctx.state = state;
   const key = workflowStateKey(ctx);
@@ -247,35 +475,51 @@ export function setContextWorkflowState(ctx: WorkflowContext, state: WorkflowSta
   writeStoredWorkflowState(key, state);
   writeStoredWorkflowState(projectKey, state);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
-  ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, renderWorkflowWidget(state, ctx.cwd));
+  ctx.ui?.setWidget?.(
+    WORKFLOW_WIDGET_KEY,
+    renderWorkflowWidget(state, ctx.cwd),
+  );
   const warning = workflowWarningText(state);
-  if (warning) ctx.ui?.notify?.(warning, "warning");
+  if (warning) ctx.ui?.notify?.(warning, 'warning');
 }
 
-function taskNeedsSummary(task: string | undefined, summary: string | undefined): boolean {
-  return !!task && task !== "none" && task !== "all tasks complete" && (!summary || summary.length > 36 || summary === task);
+function taskNeedsSummary(
+  task: string | undefined,
+  summary: string | undefined,
+): boolean {
+  return (
+    !!task &&
+    task !== 'none' &&
+    task !== 'all tasks complete' &&
+    (!summary || summary.length > 36 || summary === task)
+  );
 }
 
 function commandNameFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const [command] = text.trim().split(/\s+/, 1);
-  return command?.startsWith("/addy-") ? command : undefined;
+  return command?.startsWith('/addy-') ? command : undefined;
 }
 
 function manualTurnCommand(command: string | undefined): boolean {
-  return command === "/addy-build"
-    || command === "/addy-verify"
-    || command === "/addy-review"
-    || command === "/addy-code-simplify"
-    || command === "/addy-fix-all"
-    || command === "/addy-finish";
+  return (
+    command === '/addy-build' ||
+    command === '/addy-verify' ||
+    command === '/addy-review' ||
+    command === '/addy-code-simplify' ||
+    command === '/addy-fix-all' ||
+    command === '/addy-finish'
+  );
 }
 
 function emptyIssueStats(): WorkflowIssueStats {
   return { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 };
 }
 
-function addIssueStats(left: WorkflowIssueStats, right: WorkflowIssueStats): WorkflowIssueStats {
+function addIssueStats(
+  left: WorkflowIssueStats,
+  right: WorkflowIssueStats,
+): WorkflowIssueStats {
   return {
     critical: left.critical + right.critical,
     important: left.important + right.important,
@@ -292,21 +536,45 @@ export type WorkflowStatsTarget = {
   taskTitle?: string;
 };
 
-function statsTaskKey(state: WorkflowState, target: WorkflowStatsTarget = {}): string {
-  return [target.plan ?? state.activePlan ?? "", target.sliceIndex ?? state.currentSliceIndex ?? "", target.taskIndex ?? state.currentTaskIndex ?? "", target.taskTitle ?? state.currentTask ?? ""].join("\u001f");
+function statsTaskKey(
+  state: WorkflowState,
+  target: WorkflowStatsTarget = {},
+): string {
+  return [
+    target.plan ?? state.activePlan ?? '',
+    target.sliceIndex ?? state.currentSliceIndex ?? '',
+    target.taskIndex ?? state.currentTaskIndex ?? '',
+    target.taskTitle ?? state.currentTask ?? '',
+  ].join('\u001f');
 }
 
-function workflowStatsTarget(state: WorkflowState, target: WorkflowStatsTarget = {}): Required<WorkflowStatsTarget> {
+function workflowStatsTarget(
+  state: WorkflowState,
+  target: WorkflowStatsTarget = {},
+): Required<WorkflowStatsTarget> {
   return {
-    plan: target.plan ?? state.activePlan ?? "",
+    plan: target.plan ?? state.activePlan ?? '',
     sliceIndex: target.sliceIndex ?? state.currentSliceIndex ?? 0,
     taskIndex: target.taskIndex ?? state.currentTaskIndex ?? 0,
-    taskTitle: target.taskTitle ?? state.currentTask ?? "",
+    taskTitle: target.taskTitle ?? state.currentTask ?? '',
   };
 }
 
-function updateWorkflowTaskStats(state: WorkflowState, target: WorkflowStatsTarget, update: (existing: WorkflowTaskStats) => WorkflowTaskStats): WorkflowState {
-  if (!state.activePlan && !state.currentTask && !target.plan && !target.taskTitle) return state;
+function hasWorkflowStatsTarget(
+  state: WorkflowState,
+  target: WorkflowStatsTarget,
+): boolean {
+  return Boolean(
+    state.activePlan || state.currentTask || target.plan || target.taskTitle,
+  );
+}
+
+function updateWorkflowTaskStats(
+  state: WorkflowState,
+  target: WorkflowStatsTarget,
+  update: (existing: WorkflowTaskStats) => WorkflowTaskStats,
+): WorkflowState {
+  if (!hasWorkflowStatsTarget(state, target)) return state;
 
   const stats = state.stats ?? createEmptyWorkflowStats();
   const resolved = workflowStatsTarget(state, target);
@@ -327,7 +595,9 @@ function updateWorkflowTaskStats(state: WorkflowState, target: WorkflowStatsTarg
   };
 }
 
-function emptyTaskStats(target: Required<WorkflowStatsTarget>): WorkflowTaskStats {
+function emptyTaskStats(
+  target: Required<WorkflowStatsTarget>,
+): WorkflowTaskStats {
   return {
     plan: target.plan || undefined,
     sliceIndex: target.sliceIndex || undefined,
@@ -340,11 +610,20 @@ function emptyTaskStats(target: Required<WorkflowStatsTarget>): WorkflowTaskStat
   };
 }
 
-export function recordWorkflowTaskTurn(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
-  return updateWorkflowTaskStats(state, target, (existing) => ({ ...existing, turns: existing.turns + 1 }));
+export function recordWorkflowTaskTurn(
+  state: WorkflowState,
+  target: WorkflowStatsTarget = {},
+): WorkflowState {
+  return updateWorkflowTaskStats(state, target, (existing) => ({
+    ...existing,
+    turns: existing.turns + 1,
+  }));
 }
 
-export function recordWorkflowVerifyRun(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
+export function recordWorkflowVerifyRun(
+  state: WorkflowState,
+  target: WorkflowStatsTarget = {},
+): WorkflowState {
   const withTurn = recordWorkflowTaskTurn(state, target);
   const key = statsTaskKey(withTurn, target);
   const stats = withTurn.stats ?? createEmptyWorkflowStats();
@@ -369,7 +648,10 @@ export function recordWorkflowVerifyRun(state: WorkflowState, target: WorkflowSt
   };
 }
 
-export function recordWorkflowReviewRun(state: WorkflowState, target: WorkflowStatsTarget = {}): WorkflowState {
+export function recordWorkflowReviewRun(
+  state: WorkflowState,
+  target: WorkflowStatsTarget = {},
+): WorkflowState {
   const withTurn = recordWorkflowTaskTurn(state, target);
   const key = statsTaskKey(withTurn, target);
   const stats = withTurn.stats ?? createEmptyWorkflowStats();
@@ -395,17 +677,22 @@ export function recordWorkflowReviewRun(state: WorkflowState, target: WorkflowSt
   };
 }
 
-export function recordWorkflowReviewIssues(state: WorkflowState, issues: WorkflowIssueStats): WorkflowState {
+export function recordWorkflowReviewIssues(
+  state: WorkflowState,
+  issues: WorkflowIssueStats,
+): WorkflowState {
   const key = state.reviewStatsKey;
   if (!key) return state;
 
   const stats = state.stats ?? createEmptyWorkflowStats();
   const existing = stats.active.tasks[key];
-  if (!existing) return { ...state, reviewStatsKey: undefined };
+  if (!existing)
+    return { ...state, reviewStatsKey: undefined, reviewStatsAgent: undefined };
 
   return {
     ...state,
     reviewStatsKey: undefined,
+    reviewStatsAgent: undefined,
     stats: {
       active: {
         ...stats.active,
@@ -422,110 +709,184 @@ export function recordWorkflowReviewIssues(state: WorkflowState, issues: Workflo
   };
 }
 
-function recordManualTaskTurn(previous: WorkflowState, state: WorkflowState, event: WorkflowEvent): WorkflowState {
+function reviewSubagentName(event: WorkflowEvent): string | undefined {
+  if (event.source !== 'subagent-call') return undefined;
+  if (!event.agentName?.startsWith('addy-')) return undefined;
+  if (!event.agentName.includes('review')) return undefined;
+  return event.agentName;
+}
+
+function recordReviewSubagentStats(
+  state: WorkflowState,
+  agentName: string,
+): WorkflowState {
+  if (state.reviewStatsKey) return { ...state, reviewStatsAgent: agentName };
+  return { ...recordWorkflowReviewRun(state), reviewStatsAgent: agentName };
+}
+
+function recordManualTaskTurn(
+  previous: WorkflowState,
+  state: WorkflowState,
+  event: WorkflowEvent,
+): WorkflowState {
   if (previous.autoMode) return state;
-  if (event.source !== "user-input" && event.source !== "command") return state;
+  const reviewAgent = reviewSubagentName(event);
+  if (reviewAgent) return recordReviewSubagentStats(state, reviewAgent);
+  if (event.source !== 'user-input' && event.source !== 'command') return state;
   const command = commandNameFromText(event.text ?? event.command);
   if (!manualTurnCommand(command)) return state;
-  if (command === "/addy-verify") return recordWorkflowVerifyRun(state);
-  if (command === "/addy-review") return recordWorkflowReviewRun(state);
+  if (command === '/addy-verify') return recordWorkflowVerifyRun(state);
+  if (command === '/addy-review') return recordWorkflowReviewRun(state);
   return recordWorkflowTaskTurn(state);
 }
 
-export function archiveWorkflowStats(state: WorkflowState, endedReason: string): WorkflowState {
+export function archiveWorkflowStats(
+  state: WorkflowState,
+  endedReason: string,
+): WorkflowState {
   const stats = state.stats ?? createEmptyWorkflowStats();
   const hasActiveStats = Object.keys(stats.active.tasks).length > 0;
   return {
     ...state,
     stats: hasActiveStats
-      ? { active: { tasks: {} }, history: [...stats.history, { ...stats.active, endedReason }] }
+      ? {
+          active: { tasks: {} },
+          history: [...stats.history, { ...stats.active, endedReason }],
+        }
       : stats,
   };
 }
 
 function fallbackTaskSummary(task: string): string {
   const cleaned = task
-    .replace(/\s*;.*$/, "")
-    .replace(/\s*—.*$/, "")
-    .replace(/\s+-\s+.*$/, "")
-    .replace(/\s+/g, " ")
+    .replace(/\s*;.*$/, '')
+    .replace(/\s*—.*$/, '')
+    .replace(/\s+-\s+.*$/, '')
+    .replace(/\s+/g, ' ')
     .trim();
   return cleaned.length <= 36 ? cleaned : `${cleaned.slice(0, 33).trimEnd()}…`;
 }
 
-function parseTaskSummaryResponse(text: string, state: WorkflowState): Pick<WorkflowState, "currentTaskSummary" | "nextTaskSummary"> {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const current = lines.find((line) => /^current\s*:/i.test(line))?.replace(/^current\s*:\s*/i, "");
-  const next = lines.find((line) => /^next\s*:/i.test(line))?.replace(/^next\s*:\s*/i, "");
+function parseTaskSummaryResponse(
+  text: string,
+  state: WorkflowState,
+): Pick<WorkflowState, 'currentTaskSummary' | 'nextTaskSummary'> {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const current = lines
+    .find((line) => /^current\s*:/i.test(line))
+    ?.replace(/^current\s*:\s*/i, '');
+  const next = lines
+    .find((line) => /^next\s*:/i.test(line))
+    ?.replace(/^next\s*:\s*/i, '');
   return {
-    currentTaskSummary: current ? fallbackTaskSummary(current) : state.currentTaskSummary,
+    currentTaskSummary: current
+      ? fallbackTaskSummary(current)
+      : state.currentTaskSummary,
     nextTaskSummary: next ? fallbackTaskSummary(next) : state.nextTaskSummary,
   };
 }
 
-export async function summarizeWorkflowTasks(ctx: WorkflowContext, state: WorkflowState): Promise<WorkflowState> {
-  if (!taskNeedsSummary(state.currentTask, state.currentTaskSummary) && !taskNeedsSummary(state.nextTask, state.nextTaskSummary)) return state;
+export async function summarizeWorkflowTasks(
+  ctx: WorkflowContext,
+  state: WorkflowState,
+): Promise<WorkflowState> {
+  if (
+    !taskNeedsSummary(state.currentTask, state.currentTaskSummary) &&
+    !taskNeedsSummary(state.nextTask, state.nextTaskSummary)
+  )
+    return state;
 
   const fallbackState = {
     ...state,
-    currentTaskSummary: state.currentTask ? fallbackTaskSummary(state.currentTask) : undefined,
-    nextTaskSummary: state.nextTask ? fallbackTaskSummary(state.nextTask) : undefined,
+    currentTaskSummary: state.currentTask
+      ? fallbackTaskSummary(state.currentTask)
+      : undefined,
+    nextTaskSummary: state.nextTask
+      ? fallbackTaskSummary(state.nextTask)
+      : undefined,
   };
 
-  if (!ctx.model || !ctx.modelRegistry?.getApiKeyAndHeaders) return fallbackState;
+  if (!ctx.model || !ctx.modelRegistry?.getApiKeyAndHeaders)
+    return fallbackState;
 
   try {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
     if (!auth.ok || !auth.apiKey) return fallbackState;
 
     const userMessage: UserMessage = {
-      role: "user",
-      content: [{
-        type: "text",
-        text: `Summarize these workflow task names for a narrow terminal footer. Each summary must be 2-5 words, <= 32 characters, clear, and meaningful. Keep domain nouns. No markdown.\n\nCurrent: ${state.currentTask ?? "none"}\nNext: ${state.nextTask ?? "none"}\n\nReturn exactly:\nCurrent: <summary>\nNext: <summary>`,
-      }],
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: `Summarize these workflow task names for a narrow terminal footer. Each summary must be 2-5 words, <= 32 characters, clear, and meaningful. Keep domain nouns. No markdown.\n\nCurrent: ${state.currentTask ?? 'none'}\nNext: ${state.nextTask ?? 'none'}\n\nReturn exactly:\nCurrent: <summary>\nNext: <summary>`,
+        },
+      ],
       timestamp: Date.now(),
     };
 
     const response = await complete(
       ctx.model as never,
-      { systemPrompt: "You produce short labels for a coding workflow footer.", messages: [userMessage] },
+      {
+        systemPrompt: 'You produce short labels for a coding workflow footer.',
+        messages: [userMessage],
+      },
       { apiKey: auth.apiKey, headers: auth.headers, signal: ctx.signal },
     );
-    if (response.stopReason === "aborted") return fallbackState;
+    if (response.stopReason === 'aborted') return fallbackState;
 
     const text = response.content
-      .filter((content): content is { type: "text"; text: string } => content.type === "text")
+      .filter(
+        (content): content is { type: 'text'; text: string } =>
+          content.type === 'text',
+      )
       .map((content) => content.text)
-      .join("\n");
-    return { ...fallbackState, ...parseTaskSummaryResponse(text, fallbackState) };
+      .join('\n');
+    return {
+      ...fallbackState,
+      ...parseTaskSummaryResponse(text, fallbackState),
+    };
   } catch {
     return fallbackState;
   }
 }
 
-export function handleWorkflowEvent(ctx: WorkflowContext, event: WorkflowEvent, appendEntry?: AppendEntry): WorkflowState {
+export function handleWorkflowEvent(
+  ctx: WorkflowContext,
+  event: WorkflowEvent,
+  appendEntry?: AppendEntry,
+): WorkflowState {
   const previous = getContextWorkflowState(ctx);
   const transitioned = transitionWorkflow(previous, event);
-  const next = recordManualTaskTurn(previous, refreshWorkflowTasksFromPlan(transitioned, ctx.cwd), event);
+  const next = recordManualTaskTurn(
+    previous,
+    refreshWorkflowTasksFromPlan(transitioned, ctx.cwd),
+    event,
+  );
   setContextWorkflowState(ctx, next, appendEntry);
   const source = ctx.state ?? next;
   void summarizeWorkflowTasks(ctx, source).then((summarized) => {
     try {
       const latest = ctx.state ?? next;
-      if (
+      const workflowTargetChanged =
         latest.current !== source.current ||
         latest.activePlan !== source.activePlan ||
         latest.currentTask !== source.currentTask ||
-        latest.nextTask !== source.nextTask
-      ) return;
+        latest.nextTask !== source.nextTask;
+      if (workflowTargetChanged) return;
 
       if (summarized === source) return;
-      setContextWorkflowState(ctx, {
-        ...latest,
-        currentTaskSummary: summarized.currentTaskSummary,
-        nextTaskSummary: summarized.nextTaskSummary,
-      }, appendEntry);
+      setContextWorkflowState(
+        ctx,
+        {
+          ...latest,
+          currentTaskSummary: summarized.currentTaskSummary,
+          nextTaskSummary: summarized.nextTaskSummary,
+        },
+        appendEntry,
+      );
     } catch {
       // Best-effort task summaries may resolve after ctx.newSession() invalidates the old context.
     }
@@ -539,11 +900,14 @@ export function initializeWorkflowWidget(ctx: WorkflowContext): WorkflowState {
   return ctx.state ?? state;
 }
 
-export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): WorkflowState {
+export function resetWorkflow(
+  ctx: WorkflowContext,
+  appendEntry?: AppendEntry,
+): WorkflowState {
   const previous = getContextWorkflowState(ctx);
   const state = {
     ...createInitialWorkflowState(),
-    stats: archiveWorkflowStats(previous, "reset").stats,
+    stats: archiveWorkflowStats(previous, 'reset').stats,
   };
   ctx.state = state;
   const key = workflowStateKey(ctx);
@@ -557,8 +921,15 @@ export function resetWorkflow(ctx: WorkflowContext, appendEntry?: AppendEntry): 
   return state;
 }
 
-export function openNextWorkflowPrompt(ctx: WorkflowContext, phase: WorkflowPhase, artifact?: string): string {
-  const prompt = nextPromptForPhase(phase, artifact ?? promptArtifactForPhase(getContextWorkflowState(ctx), phase));
+export function openNextWorkflowPrompt(
+  ctx: WorkflowContext,
+  phase: WorkflowPhase,
+  artifact?: string,
+): string {
+  const prompt = nextPromptForPhase(
+    phase,
+    artifact ?? promptArtifactForPhase(getContextWorkflowState(ctx), phase),
+  );
   ctx.input?.prefill?.(prompt);
   return prompt;
 }

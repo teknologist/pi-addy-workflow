@@ -102,7 +102,7 @@ Likely minimal state additions:
 type WorkflowState = {
   // existing fields...
   autoFreshContextReason?: "between-tasks" | "before-review";
-}
+};
 ```
 
 But this may not be necessary if the continuation command recomputes the next action from persisted project state.
@@ -136,21 +136,34 @@ pi.registerCommand?.("addy-auto-continue", {
     const parentSession = ctx.sessionManager?.getSessionFile?.();
 
     if (typeof ctx.newSession !== "function") {
-      ctx.ui?.notify?.("Addy auto could not start a fresh session; continuing in current session.", "warning");
-      dispatchNextAutoWorkflowPrompt(pi, ctx, false, { freshContextBypassReason: reason });
+      ctx.ui?.notify?.(
+        "Addy auto could not start a fresh session; continuing in current session.",
+        "warning",
+      );
+      dispatchNextAutoWorkflowPrompt(pi, ctx, false, {
+        freshContextBypassReason: reason,
+      });
       return { action: "continue" as const };
     }
 
     const result = await ctx.newSession({
       parentSession,
       withSession: async (newCtx) => {
-        newCtx.ui?.notify?.(`Addy auto continued in a fresh session (${reason}).`, "info");
-        dispatchNextAutoWorkflowPrompt(pi, newCtx, false, { freshContextBypassReason: reason });
+        newCtx.ui?.notify?.(
+          `Addy auto continued in a fresh session (${reason}).`,
+          "info",
+        );
+        dispatchNextAutoWorkflowPrompt(pi, newCtx, false, {
+          freshContextBypassReason: reason,
+        });
       },
     });
 
     if (result.cancelled) {
-      ctx.ui?.notify?.("Addy auto fresh-session continuation was cancelled; auto mode paused.", "warning");
+      ctx.ui?.notify?.(
+        "Addy auto fresh-session continuation was cancelled; auto mode paused.",
+        "warning",
+      );
     }
 
     return { action: "continue" as const };
@@ -212,9 +225,9 @@ Then:
 
 ```ts
 if (
-  phase === "review"
-  && config.auto.freshContext.beforeReview
-  && options.freshContextBypassReason !== "before-review"
+  phase === "review" &&
+  config.auto.freshContext.beforeReview &&
+  options.freshContextBypassReason !== "before-review"
 ) {
   sendFreshContinuationCommand(pi, ctx, "before-review");
   return;

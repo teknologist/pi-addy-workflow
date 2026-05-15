@@ -55,20 +55,25 @@ Produce a single output:
 ## Ship Decision: GO | NO-GO
 
 ### Blockers (must fix before ship)
+
 - [Source persona: Critical finding + file:line]
 
 ### Recommended fixes (should fix before ship)
+
 - [Source persona: Important finding + file:line]
 
 ### Acknowledged risks (shipping anyway)
+
 - [Risk + mitigation]
 
 ### Rollback plan
+
 - Trigger conditions: [what signals would prompt rollback]
 - Rollback procedure: [exact steps]
 - Recovery time objective: [target]
 
 ### Specialist reports (full)
+
 - [addy-reviewer report]
 - [addy-security-auditor report]
 - [addy-test-engineer report]

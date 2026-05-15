@@ -141,7 +141,14 @@ Use this initial manifest; adjust import package names only if tests prove the i
   "type": "module",
   "license": "MIT",
   "keywords": ["pi-package", "pi", "addy", "agent-skills", "workflow"],
-  "files": ["extensions/", "skills/", "prompts/", "agents/", "README.md", "LICENSE"],
+  "files": [
+    "extensions/",
+    "skills/",
+    "prompts/",
+    "agents/",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=22.6.0"
   },
@@ -149,7 +156,11 @@ Use this initial manifest; adjust import package names only if tests prove the i
     "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "pi": {
-    "extensions": ["extensions/bootstrap.ts", "extensions/agent-installer.ts", "extensions/workflow-monitor.ts"],
+    "extensions": [
+      "extensions/bootstrap.ts",
+      "extensions/agent-installer.ts",
+      "extensions/workflow-monitor.ts"
+    ],
     "skills": ["skills"],
     "prompts": ["prompts"]
   },
@@ -169,15 +180,15 @@ Notes:
 
 ## Lifecycle mapping
 
-| Stage | Prompt | Required primary skill | Widget phase |
-|---|---|---|---|
-| DEFINE | `/addy-define` | `spec-driven-development` | `define` |
-| PLAN | `/addy-plan` | `planning-and-task-breakdown` | `plan` |
-| BUILD | `/addy-build` | `incremental-implementation` | `build` |
-| VERIFY | `/addy-verify` | `debugging-and-error-recovery` | `verify` |
-| REVIEW | `/addy-review` | `code-review-and-quality` | `review` |
-| SHIP | `/addy-ship` | `shipping-and-launch` | `ship` |
-| SIMPLIFY | `/addy-code-simplify` | `code-simplification` | `simplify` |
+| Stage    | Prompt                | Required primary skill         | Widget phase |
+| -------- | --------------------- | ------------------------------ | ------------ |
+| DEFINE   | `/addy-define`        | `spec-driven-development`      | `define`     |
+| PLAN     | `/addy-plan`          | `planning-and-task-breakdown`  | `plan`       |
+| BUILD    | `/addy-build`         | `incremental-implementation`   | `build`      |
+| VERIFY   | `/addy-verify`        | `debugging-and-error-recovery` | `verify`     |
+| REVIEW   | `/addy-review`        | `code-review-and-quality`      | `review`     |
+| SHIP     | `/addy-ship`          | `shipping-and-launch`          | `ship`       |
+| SIMPLIFY | `/addy-code-simplify` | `code-simplification`          | `simplify`   |
 
 Supporting skills and agents are copied only when referenced by prompts, primary skills, or included agent configs.
 
@@ -259,11 +270,18 @@ Required behavior:
   - current: accent `[phase]`
   - complete: success `✓phase`
   - skipped/pending: dim
-  - separator: dim ` → `
+  - separator: dim `→`
 - Phases:
 
 ```ts
-export const WORKFLOW_PHASES = ["define", "plan", "build", "verify", "review", "ship"] as const;
+export const WORKFLOW_PHASES = [
+  "define",
+  "plan",
+  "build",
+  "verify",
+  "review",
+  "ship",
+] as const;
 ```
 
 Prompt transitions:
@@ -295,24 +313,24 @@ Transition algorithm:
 
 Trigger table:
 
-| Event source | Exact trigger | Target phase | Extra behavior |
-|---|---|---|---|
-| user input | contains `/addy-define` | `define` | prompt trigger wins over artifact triggers in same event |
-| user input | contains `/addy-plan` | `plan` | completes current active phase if moving forward |
-| user input | contains `/addy-build` | `build` | completes current active phase if moving forward |
-| user input | contains `/addy-verify` | `verify` | completes current active phase if moving forward |
-| user input | contains `/addy-review` | `review` | completes current active phase if moving forward |
-| user input | contains `/addy-ship` | `ship` | completes current active phase if moving forward |
-| user input | contains `/addy-code-simplify` | `simplify` | optional phase trigger |
-| file write | `SPEC.md`, `spec.md`, `docs/specs/**`, `docs/prd/**` | `define` | record artifact path |
-| file write | `tasks/plan.md`, `tasks/todo.md`, `docs/plans/**` | `plan` | record artifact path |
-| file write | source file outside `tests/**`, `docs/**`, `tasks/**`, `agents/**`, `skills/**`, `prompts/**`, `extensions/**` | `build` | ignored if current phase is after `build` |
-| file write | `**/*.test.*`, `**/*.spec.*`, `tests/**` | `verify` | ignored if current phase is after `verify` |
-| tool result | successful test command detected by command text matching `test`, `vitest`, `jest`, `node --test`, `npm test`, or `pnpm test` | `verify` | record test status if available |
-| subagent call | agent name `addy-reviewer` or `addy-spec-reviewer` | `review` | requires `subagent` tool availability |
-| file write | `CHANGELOG*`, `RELEASE*`, `docs/releases/**`, `docs/deploy/**` | `ship` | record artifact path |
-| command | `/addy-workflow-reset` | none | clear all state and remove widget |
-| command | `/addy-workflow-next <phase> [artifact]` | requested phase | open new session prefilled for requested phase |
+| Event source  | Exact trigger                                                                                                                 | Target phase    | Extra behavior                                           |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------- | -------------------------------------------------------- |
+| user input    | contains `/addy-define`                                                                                                       | `define`        | prompt trigger wins over artifact triggers in same event |
+| user input    | contains `/addy-plan`                                                                                                         | `plan`          | completes current active phase if moving forward         |
+| user input    | contains `/addy-build`                                                                                                        | `build`         | completes current active phase if moving forward         |
+| user input    | contains `/addy-verify`                                                                                                       | `verify`        | completes current active phase if moving forward         |
+| user input    | contains `/addy-review`                                                                                                       | `review`        | completes current active phase if moving forward         |
+| user input    | contains `/addy-ship`                                                                                                         | `ship`          | completes current active phase if moving forward         |
+| user input    | contains `/addy-code-simplify`                                                                                                | `simplify`      | optional phase trigger                                   |
+| file write    | `SPEC.md`, `spec.md`, `docs/specs/**`, `docs/prd/**`                                                                          | `define`        | record artifact path                                     |
+| file write    | `tasks/plan.md`, `tasks/todo.md`, `docs/plans/**`                                                                             | `plan`          | record artifact path                                     |
+| file write    | source file outside `tests/**`, `docs/**`, `tasks/**`, `agents/**`, `skills/**`, `prompts/**`, `extensions/**`                | `build`         | ignored if current phase is after `build`                |
+| file write    | `**/*.test.*`, `**/*.spec.*`, `tests/**`                                                                                      | `verify`        | ignored if current phase is after `verify`               |
+| tool result   | successful test command detected by command text matching `test`, `vitest`, `jest`, `node --test`, `npm test`, or `pnpm test` | `verify`        | record test status if available                          |
+| subagent call | agent name `addy-reviewer` or `addy-spec-reviewer`                                                                            | `review`        | requires `subagent` tool availability                    |
+| file write    | `CHANGELOG*`, `RELEASE*`, `docs/releases/**`, `docs/deploy/**`                                                                | `ship`          | record artifact path                                     |
+| command       | `/addy-workflow-reset`                                                                                                        | none            | clear all state and remove widget                        |
+| command       | `/addy-workflow-next <phase> [artifact]`                                                                                      | requested phase | open new session prefilled for requested phase           |
 
 Warning behavior:
 
@@ -387,7 +405,8 @@ Agents:
    - Install from local path into a clean Pi test environment.
    - Verify prompts, skills, synced agents, and widget behavior.
 10. Polish README.
-   - Include install command, lifecycle table, prompt table, optional companion notes, and troubleshooting.
+
+- Include install command, lifecycle table, prompt table, optional companion notes, and troubleshooting.
 
 ## Acceptance criteria
 

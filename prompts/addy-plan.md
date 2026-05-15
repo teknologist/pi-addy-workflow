@@ -40,6 +40,7 @@ Then read the relevant codebase sections and:
    - `[ ] Implemented`
    - `[ ] Verified`
    - `[ ] Reviewed`
+
 6. Add checkpoints between phases
 7. Present the plan for human review
 

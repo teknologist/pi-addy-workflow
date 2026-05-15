@@ -1,8 +1,16 @@
-export const WORKFLOW_PHASES = ["define", "plan", "build", "simplify", "verify", "review", "finish"] as const;
-export const ENFORCED_WORKFLOW_PHASES = ["build", "verify", "review"] as const;
+export const WORKFLOW_PHASES = [
+  'define',
+  'plan',
+  'build',
+  'simplify',
+  'verify',
+  'review',
+  'finish',
+] as const;
+export const ENFORCED_WORKFLOW_PHASES = ['build', 'verify', 'review'] as const;
 
 export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
-export type PhaseStatus = "pending" | "active" | "complete";
+export type PhaseStatus = 'pending' | 'active' | 'complete';
 
 export type WorkflowIssueStats = {
   critical: number;
@@ -33,7 +41,7 @@ export type WorkflowStats = {
   history: WorkflowStatsSession[];
 };
 
-export type AutoFreshReason = "between-tasks" | "before-step" | "before-review";
+export type AutoFreshReason = 'between-tasks' | 'before-step' | 'before-review';
 
 export type WorkflowState = {
   current?: WorkflowPhase;
@@ -52,7 +60,7 @@ export type WorkflowState = {
   nextTaskSummary?: string;
   lastTrigger?: string;
   lastArtifact?: string;
-  testStatus?: "detected" | "passed" | "failed";
+  testStatus?: 'detected' | 'passed' | 'failed';
   autoMode?: boolean;
   autoLastPrompt?: string;
   autoRetryKey?: string;
@@ -69,10 +77,16 @@ export type WorkflowState = {
   autoReviewTask?: string;
   autoReviewTaskIndex?: number;
   reviewStatsKey?: string;
+  reviewStatsAgent?: string;
 };
 
 export type WorkflowEvent = {
-  source: "user-input" | "file-write" | "tool-result" | "subagent-call" | "command";
+  source:
+    | 'user-input'
+    | 'file-write'
+    | 'tool-result'
+    | 'subagent-call'
+    | 'command';
   text?: string;
   command?: string;
   manualAddyCommand?: boolean;
@@ -85,7 +99,9 @@ export type WorkflowEvent = {
 
 export function createInitialWorkflowState(): WorkflowState {
   return {
-    phases: Object.fromEntries(WORKFLOW_PHASES.map((phase) => [phase, "pending"])) as Record<WorkflowPhase, PhaseStatus>,
+    phases: Object.fromEntries(
+      WORKFLOW_PHASES.map((phase) => [phase, 'pending']),
+    ) as Record<WorkflowPhase, PhaseStatus>,
     warnings: [],
   };
 }
@@ -98,25 +114,41 @@ function enforcedPhaseIndex(phase: WorkflowPhase): number {
   return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).indexOf(phase);
 }
 
-function skippedEnforcedPhases(state: WorkflowState, target: WorkflowPhase, next: WorkflowState): WorkflowPhase[] {
-  const targetIndex = target === "finish" ? ENFORCED_WORKFLOW_PHASES.length : enforcedPhaseIndex(target);
+function skippedEnforcedPhases(
+  state: WorkflowState,
+  target: WorkflowPhase,
+  next: WorkflowState,
+): WorkflowPhase[] {
+  const targetIndex =
+    target === 'finish'
+      ? ENFORCED_WORKFLOW_PHASES.length
+      : enforcedPhaseIndex(target);
   if (targetIndex === -1) return [];
 
-  return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).filter((phase) => {
-    const index = enforcedPhaseIndex(phase);
-    return index < targetIndex && state.phases[phase] !== "complete" && next.phases[phase] !== "complete";
-  });
+  return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).filter(
+    (phase) => {
+      const index = enforcedPhaseIndex(phase);
+      return (
+        index < targetIndex &&
+        state.phases[phase] !== 'complete' &&
+        next.phases[phase] !== 'complete'
+      );
+    },
+  );
 }
 
-function completeSpecAndPlanAfterPlanning(state: WorkflowState, target: WorkflowPhase): WorkflowState {
-  if (phaseIndex(target) <= phaseIndex("plan")) return state;
+function completeSpecAndPlanAfterPlanning(
+  state: WorkflowState,
+  target: WorkflowPhase,
+): WorkflowState {
+  if (phaseIndex(target) <= phaseIndex('plan')) return state;
 
   return {
     ...state,
     phases: {
       ...state.phases,
-      define: "complete",
-      plan: "complete",
+      define: 'complete',
+      plan: 'complete',
     },
   };
 }
@@ -125,19 +157,55 @@ function matchesAny(path: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(path));
 }
 
-function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPhase | undefined {
-  const normalized = path.replace(/\\/g, "/").replace(/^@/, "");
+function fileWriteTargetPhase(
+  path: string,
+  current?: WorkflowPhase,
+): WorkflowPhase | undefined {
+  const normalized = path.replace(/\\/g, '/').replace(/^@/, '');
 
-  if (matchesAny(normalized, [/(^|\/)(SPEC|spec)\.md$/, /(^|\/)docs\/specs\//, /(^|\/)docs\/prd\//])) return "define";
+  if (
+    matchesAny(normalized, [
+      /(^|\/)(SPEC|spec)\.md$/,
+      /(^|\/)docs\/specs\//,
+      /(^|\/)docs\/prd\//,
+    ])
+  )
+    return 'define';
   if (matchesAny(normalized, [/(^|\/)docs\/plans\//])) {
-    return current && phaseIndex(current) > phaseIndex("plan") ? undefined : "plan";
+    return current && phaseIndex(current) > phaseIndex('plan')
+      ? undefined
+      : 'plan';
   }
-  if (matchesAny(normalized, [/(^|\/)[^/]+\.(test|spec)\.[^/]+$/, /^tests\//])) {
-    return current && phaseIndex(current) > phaseIndex("verify") ? undefined : "verify";
+  if (
+    matchesAny(normalized, [/(^|\/)[^/]+\.(test|spec)\.[^/]+$/, /^tests\//])
+  ) {
+    return current && phaseIndex(current) > phaseIndex('verify')
+      ? undefined
+      : 'verify';
   }
-  if (matchesAny(normalized, [/^CHANGELOG/, /^RELEASE/, /^docs\/releases\//, /^docs\/deploy\//])) return "finish";
-  if (!matchesAny(normalized, [/^tests\//, /^docs\//, /^tasks\//, /^agents\//, /^skills\//, /^prompts\//, /^extensions\//])) {
-    return current && phaseIndex(current) > phaseIndex("build") ? undefined : "build";
+  if (
+    matchesAny(normalized, [
+      /^CHANGELOG/,
+      /^RELEASE/,
+      /^docs\/releases\//,
+      /^docs\/deploy\//,
+    ])
+  )
+    return 'finish';
+  if (
+    !matchesAny(normalized, [
+      /^tests\//,
+      /^docs\//,
+      /^tasks\//,
+      /^agents\//,
+      /^skills\//,
+      /^prompts\//,
+      /^extensions\//,
+    ])
+  ) {
+    return current && phaseIndex(current) > phaseIndex('build')
+      ? undefined
+      : 'build';
   }
 
   return undefined;
@@ -146,7 +214,11 @@ function fileWriteTargetPhase(path: string, current?: WorkflowPhase): WorkflowPh
 function unquoteArgument(value: string): string {
   const trimmed = value.trim();
   const quote = trimmed[0];
-  return trimmed.length >= 2 && (quote === '"' || quote === "'") && trimmed.endsWith(quote) ? trimmed.slice(1, -1).trim() : trimmed;
+  return trimmed.length >= 2 &&
+    (quote === '"' || quote === "'") &&
+    trimmed.endsWith(quote)
+    ? trimmed.slice(1, -1).trim()
+    : trimmed;
 }
 
 function isLikelySpecArgument(value: string): boolean {
@@ -157,34 +229,45 @@ function isLikelySpecArgument(value: string): boolean {
   if (!unquoted) return false;
   if (/\.md$/i.test(unquoted)) return true;
   if (isQuoted && /\s/.test(unquoted)) return false;
-  if (unquoted.includes("/") || unquoted.includes("\\") || unquoted.startsWith("@")) return true;
+  if (
+    unquoted.includes('/') ||
+    unquoted.includes('\\') ||
+    unquoted.startsWith('@')
+  )
+    return true;
   return !/\s/.test(unquoted);
 }
 
 function commandNameFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const [command] = text.trim().split(/\s+/, 1);
-  return command?.startsWith("/addy-") ? command : undefined;
+  return command?.startsWith('/addy-') ? command : undefined;
 }
 
 function artifactFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const parts = text.trim().split(/\s+/);
-  if (!parts[0]?.startsWith("/addy-")) return undefined;
-  if (parts[0] === "/addy-workflow-next") return parts.slice(2).join(" ") || undefined;
-  return parts.slice(1).join(" ") || undefined;
+  if (!parts[0]?.startsWith('/addy-')) return undefined;
+  if (parts[0] === '/addy-workflow-next')
+    return parts.slice(2).join(' ') || undefined;
+  return parts.slice(1).join(' ') || undefined;
 }
 
-function autoModeArtifactFromText(text: string | undefined): string | undefined {
+function autoModeArtifactFromText(
+  text: string | undefined,
+): string | undefined {
   if (!text) return undefined;
   const parts = text.trim().split(/\s+/);
-  if (parts[0] !== "/addy-auto") return undefined;
-  if (parts[1] === "stop") return undefined;
-  return parts.slice(1).join(" ") || undefined;
+  if (parts[0] !== '/addy-auto') return undefined;
+  if (parts[1] === 'stop') return undefined;
+  return parts.slice(1).join(' ') || undefined;
 }
 
-function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): WorkflowState | undefined {
-  const text = event.text ?? event.command ?? "";
+function applyAutoModeEvent(
+  state: WorkflowState,
+  event: WorkflowEvent,
+): WorkflowState | undefined {
+  const text = event.text ?? event.command ?? '';
   if (!/^\/addy-auto(?:\s|$)/.test(text.trim())) return undefined;
 
   const lastTrigger = event.text ?? event.command ?? event.agentName;
@@ -210,21 +293,22 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     };
   }
 
-  const pendingFresh = state.autoFreshPrompt && state.autoFreshReason
-    ? {
-      autoFreshPrompt: state.autoFreshPrompt,
-      autoFreshExpandedPrompt: state.autoFreshExpandedPrompt,
-      autoFreshReason: state.autoFreshReason,
-      autoFreshDeliveryKey: state.autoFreshDeliveryKey,
-      autoFreshConsumedKey: state.autoFreshConsumedKey,
-    }
-    : {
-      autoFreshPrompt: undefined,
-      autoFreshExpandedPrompt: undefined,
-      autoFreshReason: undefined,
-      autoFreshDeliveryKey: undefined,
-      autoFreshConsumedKey: undefined,
-    };
+  const pendingFresh =
+    state.autoFreshPrompt && state.autoFreshReason
+      ? {
+          autoFreshPrompt: state.autoFreshPrompt,
+          autoFreshExpandedPrompt: state.autoFreshExpandedPrompt,
+          autoFreshReason: state.autoFreshReason,
+          autoFreshDeliveryKey: state.autoFreshDeliveryKey,
+          autoFreshConsumedKey: state.autoFreshConsumedKey,
+        }
+      : {
+          autoFreshPrompt: undefined,
+          autoFreshExpandedPrompt: undefined,
+          autoFreshReason: undefined,
+          autoFreshDeliveryKey: undefined,
+          autoFreshConsumedKey: undefined,
+        };
   return {
     ...state,
     autoMode: true,
@@ -238,7 +322,8 @@ function applyAutoModeEvent(state: WorkflowState, event: WorkflowEvent): Workflo
     autoReviewFixNeedsReview: undefined,
     autoReviewTask: undefined,
     autoReviewTaskIndex: undefined,
-    activePlan: event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
+    activePlan:
+      event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
     lastTrigger,
     lastArtifact: event.artifact ?? state.lastArtifact,
   };
@@ -265,79 +350,119 @@ function exitAutoMode(state: WorkflowState): WorkflowState {
   };
 }
 
-function applyActiveArtifact(state: WorkflowState, event: WorkflowEvent, target: WorkflowPhase): WorkflowState {
+function applyActiveArtifact(
+  state: WorkflowState,
+  event: WorkflowEvent,
+  target: WorkflowPhase,
+): WorkflowState {
   const artifact = event.artifact ?? artifactFromText(event.text);
   if (!artifact) return state;
 
-  const normalized = artifact.replace(/\\/g, "/");
+  const normalized = artifact.replace(/\\/g, '/');
   const targetFromArtifact = fileWriteTargetPhase(normalized, state.current);
   const commandName = commandNameFromText(event.text);
 
-  if (event.source === "file-write") {
-    if (targetFromArtifact === "define") return { ...state, activeSpec: artifact };
-    if (targetFromArtifact === "plan") return { ...state, activePlan: artifact };
+  if (event.source === 'file-write') {
+    if (targetFromArtifact === 'define')
+      return { ...state, activeSpec: artifact };
+    if (targetFromArtifact === 'plan')
+      return { ...state, activePlan: artifact };
     return state;
   }
 
-  if (targetFromArtifact === "plan") return { ...state, activePlan: artifact };
-  if (targetFromArtifact === "define" || target === "plan") return { ...state, activeSpec: artifact };
-  if (target === "define" && (commandName !== "/addy-define" || isLikelySpecArgument(artifact))) return { ...state, activeSpec: unquoteArgument(artifact) };
-  if (phaseIndex(target) > phaseIndex("plan")) return { ...state, activePlan: artifact };
+  if (targetFromArtifact === 'plan') return { ...state, activePlan: artifact };
+  if (targetFromArtifact === 'define' || target === 'plan')
+    return { ...state, activeSpec: artifact };
+  if (
+    target === 'define' &&
+    (commandName !== '/addy-define' || isLikelySpecArgument(artifact))
+  )
+    return { ...state, activeSpec: unquoteArgument(artifact) };
+  if (phaseIndex(target) > phaseIndex('plan'))
+    return { ...state, activePlan: artifact };
 
   return state;
 }
 
-function skippedPhaseWarningConfirmed(event: WorkflowEvent, target: WorkflowPhase, skippedPhases: WorkflowPhase[]): boolean {
+function skippedPhaseWarningConfirmed(
+  event: WorkflowEvent,
+  target: WorkflowPhase,
+  skippedPhases: WorkflowPhase[],
+): boolean {
   if (event.skipConfirmed) return true;
   if (skippedPhases.length === 0) return true;
 
   const confirmed = event.confirmedSkippedPhases ?? [];
   if (skippedPhases.every((phase) => confirmed.includes(phase))) return true;
 
-  const text = `${event.text ?? ""} ${event.command ?? ""}`;
+  const text = `${event.text ?? ''} ${event.command ?? ''}`;
   if (/--skip-workflow-warning-confirmed\b/.test(text)) return true;
-  if (target === "review" && skippedPhases.includes("verify") && /--skip-verify-confirmed\b/.test(text)) return true;
-  if (target === "finish" && /--skip-missing-steps-confirmed\b/.test(text)) return true;
+  if (
+    target === 'review' &&
+    skippedPhases.includes('verify') &&
+    /--skip-verify-confirmed\b/.test(text)
+  )
+    return true;
+  if (target === 'finish' && /--skip-missing-steps-confirmed\b/.test(text))
+    return true;
 
   return false;
 }
 
-export function resolveTargetPhase(event: WorkflowEvent, current?: WorkflowPhase): WorkflowPhase | undefined {
-  const text = event.text ?? "";
+export function resolveTargetPhase(
+  event: WorkflowEvent,
+  current?: WorkflowPhase,
+): WorkflowPhase | undefined {
+  const text = event.text ?? '';
 
-  if (event.source === "user-input" || event.source === "command") {
-    const workflowNext = text.trim().match(/^\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|finish)\b/);
+  if (event.source === 'user-input' || event.source === 'command') {
+    const workflowNext = text
+      .trim()
+      .match(
+        /^\/addy-workflow-next\s+(define|plan|build|simplify|verify|review|finish)\b/,
+      );
     if (workflowNext) return workflowNext[1] as WorkflowPhase;
     const commandName = commandNameFromText(text);
-    if (commandName === "/addy-code-simplify") return "simplify";
-    if (commandName === "/addy-define") return "define";
-    if (commandName === "/addy-plan") return "plan";
-    if (commandName === "/addy-build") return "build";
-    if (commandName === "/addy-verify") return "verify";
-    if (commandName === "/addy-review") return "review";
-    if (commandName === "/addy-finish") return "finish";
+    if (commandName === '/addy-code-simplify') return 'simplify';
+    if (commandName === '/addy-define') return 'define';
+    if (commandName === '/addy-plan') return 'plan';
+    if (commandName === '/addy-build') return 'build';
+    if (commandName === '/addy-verify') return 'verify';
+    if (commandName === '/addy-review') return 'review';
+    if (commandName === '/addy-finish') return 'finish';
   }
 
-  if (event.source === "file-write" && event.artifact) return fileWriteTargetPhase(event.artifact, current);
+  if (event.source === 'file-write' && event.artifact)
+    return fileWriteTargetPhase(event.artifact, current);
 
-  if (event.source === "tool-result" && event.success !== false) {
+  if (event.source === 'tool-result' && event.success !== false) {
     const command = event.command ?? text;
-    if (/\b(test|vitest|jest|node --test|npm test|pnpm test)\b/i.test(command)) return "verify";
+    if (/\b(test|vitest|jest|node --test|npm test|pnpm test)\b/i.test(command))
+      return 'verify';
   }
 
-  if (event.source === "subagent-call") {
-    if (event.agentName === "addy-reviewer" || event.agentName === "addy-spec-reviewer") return "review";
+  if (event.source === 'subagent-call') {
+    if (
+      event.agentName === 'addy-reviewer' ||
+      event.agentName === 'addy-spec-reviewer'
+    )
+      return 'review';
   }
 
   return undefined;
 }
 
-export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): WorkflowState {
+export function transitionWorkflow(
+  state: WorkflowState,
+  event: WorkflowEvent,
+): WorkflowState {
   const autoModeState = applyAutoModeEvent(state, event);
   if (autoModeState) return autoModeState;
 
   const commandName = commandNameFromText(event.text ?? event.command);
-  const manualAddyCommand = event.manualAddyCommand || (event.source === "command" && commandName !== undefined);
+  const manualAddyCommand =
+    event.manualAddyCommand ||
+    (event.source === 'command' && commandName !== undefined);
   const baseState = manualAddyCommand ? exitAutoMode(state) : state;
 
   const target = resolveTargetPhase(event, baseState.current);
@@ -345,40 +470,67 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
 
   const current = baseState.current;
   if (current === target) {
-    return applyActiveArtifact(completeSpecAndPlanAfterPlanning({
-      ...baseState,
-      warnings: [],
-      lastTrigger: event.text ?? event.command ?? event.agentName,
-      lastArtifact: event.artifact ?? baseState.lastArtifact,
-      testStatus: target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : baseState.testStatus,
-    }, target), event, target);
+    return applyActiveArtifact(
+      completeSpecAndPlanAfterPlanning(
+        {
+          ...baseState,
+          warnings: [],
+          lastTrigger: event.text ?? event.command ?? event.agentName,
+          lastArtifact: event.artifact ?? baseState.lastArtifact,
+          testStatus:
+            target === 'verify' && event.source === 'tool-result'
+              ? event.success === false
+                ? 'failed'
+                : 'detected'
+              : baseState.testStatus,
+        },
+        target,
+      ),
+      event,
+      target,
+    );
   }
 
-  const next = completeSpecAndPlanAfterPlanning(createInitialWorkflowState(), target);
+  const next = completeSpecAndPlanAfterPlanning(
+    createInitialWorkflowState(),
+    target,
+  );
   const warnings: string[] = [];
   const targetIndex = phaseIndex(target);
 
   for (const phase of WORKFLOW_PHASES) {
     const index = phaseIndex(phase);
-    if (index < targetIndex && baseState.phases[phase] === "complete") next.phases[phase] = "complete";
+    if (index < targetIndex && baseState.phases[phase] === 'complete')
+      next.phases[phase] = 'complete';
   }
 
-  if (current && phaseIndex(target) > phaseIndex(current)) next.phases[current] = "complete";
+  if (current && phaseIndex(target) > phaseIndex(current))
+    next.phases[current] = 'complete';
 
   const skippedPhases = skippedEnforcedPhases(baseState, target, next);
-  if (skippedPhases.length > 0) warnings.push(`${target} started before ${skippedPhases.join(" and ")}.`);
+  if (skippedPhases.length > 0)
+    warnings.push(`${target} started before ${skippedPhases.join(' and ')}.`);
 
-  if (current && warnings.length > 0 && (target === "review" || target === "finish") && !skippedPhaseWarningConfirmed(event, target, skippedPhases)) {
-    return applyActiveArtifact({
-      ...baseState,
-      warnings,
-      lastTrigger: event.text ?? event.command ?? event.agentName,
-      lastArtifact: event.artifact ?? baseState.lastArtifact,
-    }, event, target);
+  if (
+    current &&
+    warnings.length > 0 &&
+    (target === 'review' || target === 'finish') &&
+    !skippedPhaseWarningConfirmed(event, target, skippedPhases)
+  ) {
+    return applyActiveArtifact(
+      {
+        ...baseState,
+        warnings,
+        lastTrigger: event.text ?? event.command ?? event.agentName,
+        lastArtifact: event.artifact ?? baseState.lastArtifact,
+      },
+      event,
+      target,
+    );
   }
 
   next.current = target;
-  next.phases[target] = "active";
+  next.phases[target] = 'active';
   next.warnings = warnings;
   next.activeSpec = baseState.activeSpec;
   next.activePlan = baseState.activePlan;
@@ -399,9 +551,15 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   next.autoReviewTask = baseState.autoReviewTask;
   next.autoReviewTaskIndex = baseState.autoReviewTaskIndex;
   next.reviewStatsKey = baseState.reviewStatsKey;
+  next.reviewStatsAgent = baseState.reviewStatsAgent;
   next.lastTrigger = event.text ?? event.command ?? event.agentName;
   next.lastArtifact = event.artifact;
-  next.testStatus = target === "verify" && event.source === "tool-result" ? (event.success === false ? "failed" : "detected") : baseState.testStatus;
+  next.testStatus =
+    target === 'verify' && event.source === 'tool-result'
+      ? event.success === false
+        ? 'failed'
+        : 'detected'
+      : baseState.testStatus;
 
   return applyActiveArtifact(next, event, target);
 }

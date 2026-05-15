@@ -1,24 +1,46 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
-import { WORKFLOW_PHASES, type WorkflowIssueStats, type WorkflowPhase, type WorkflowState, type WorkflowStats, type WorkflowStatsSession, type WorkflowTaskStats, createInitialWorkflowState } from "./workflow-transitions.ts";
+import { truncateToWidth } from '@earendil-works/pi-tui';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import {
+  WORKFLOW_PHASES,
+  phaseIndex,
+  type WorkflowIssueStats,
+  type WorkflowPhase,
+  type WorkflowState,
+  type WorkflowStats,
+  type WorkflowStatsSession,
+  type WorkflowTaskStats,
+  createInitialWorkflowState,
+} from './workflow-transitions.ts';
 
-export const WORKFLOW_WIDGET_KEY = "pi-addy-workflow";
-export const WORKFLOW_STATE_ENTRY_TYPE = "pi-addy-workflow-state";
-const OPTIONAL_PHASES = new Set<WorkflowPhase>(["simplify"]);
-
-function phaseIndex(phase: WorkflowPhase): number {
-  return WORKFLOW_PHASES.indexOf(phase);
-}
+export const WORKFLOW_WIDGET_KEY = 'pi-addy-workflow';
+export const WORKFLOW_STATE_ENTRY_TYPE = 'pi-addy-workflow-state';
+const OPTIONAL_PHASES = new Set<WorkflowPhase>(['simplify']);
 
 function emptyIssueStats(): WorkflowIssueStats {
   return { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 };
 }
 
+function addIssueStats(
+  left: WorkflowIssueStats,
+  right: WorkflowIssueStats,
+): WorkflowIssueStats {
+  return {
+    critical: left.critical + right.critical,
+    important: left.important + right.important,
+    suggestion: left.suggestion + right.suggestion,
+    unknown: left.unknown + right.unknown,
+    total: left.total + right.total,
+  };
+}
+
 function normalizeIssueStats(value: unknown): WorkflowIssueStats {
-  if (typeof value !== "object" || value === null) return emptyIssueStats();
+  if (typeof value !== 'object' || value === null) return emptyIssueStats();
   const candidate = value as Partial<WorkflowIssueStats>;
-  const nonNegative = (number: unknown) => (typeof number === "number" && Number.isSafeInteger(number) && number >= 0 ? number : 0);
+  const nonNegative = (number: unknown) =>
+    typeof number === 'number' && Number.isSafeInteger(number) && number >= 0
+      ? number
+      : 0;
   return {
     critical: nonNegative(candidate.critical),
     important: nonNegative(candidate.important),
@@ -29,14 +51,28 @@ function normalizeIssueStats(value: unknown): WorkflowIssueStats {
 }
 
 function normalizeTaskStats(value: unknown): WorkflowTaskStats | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
+  if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Partial<WorkflowTaskStats>;
-  const nonNegative = (number: unknown) => (typeof number === "number" && Number.isSafeInteger(number) && number >= 0 ? number : 0);
+  const nonNegative = (number: unknown) =>
+    typeof number === 'number' && Number.isSafeInteger(number) && number >= 0
+      ? number
+      : 0;
   return {
-    plan: typeof candidate.plan === "string" ? candidate.plan : undefined,
-    sliceIndex: typeof candidate.sliceIndex === "number" && Number.isSafeInteger(candidate.sliceIndex) && candidate.sliceIndex > 0 ? candidate.sliceIndex : undefined,
-    taskIndex: typeof candidate.taskIndex === "number" && Number.isSafeInteger(candidate.taskIndex) && candidate.taskIndex > 0 ? candidate.taskIndex : undefined,
-    taskTitle: typeof candidate.taskTitle === "string" ? candidate.taskTitle : undefined,
+    plan: typeof candidate.plan === 'string' ? candidate.plan : undefined,
+    sliceIndex:
+      typeof candidate.sliceIndex === 'number' &&
+      Number.isSafeInteger(candidate.sliceIndex) &&
+      candidate.sliceIndex > 0
+        ? candidate.sliceIndex
+        : undefined,
+    taskIndex:
+      typeof candidate.taskIndex === 'number' &&
+      Number.isSafeInteger(candidate.taskIndex) &&
+      candidate.taskIndex > 0
+        ? candidate.taskIndex
+        : undefined,
+    taskTitle:
+      typeof candidate.taskTitle === 'string' ? candidate.taskTitle : undefined,
     turns: nonNegative(candidate.turns),
     verifyRuns: nonNegative(candidate.verifyRuns),
     reviewRuns: nonNegative(candidate.reviewRuns),
@@ -45,16 +81,22 @@ function normalizeTaskStats(value: unknown): WorkflowTaskStats | undefined {
 }
 
 function normalizeStatsSession(value: unknown): WorkflowStatsSession {
-  if (typeof value !== "object" || value === null) return { tasks: {} };
+  if (typeof value !== 'object' || value === null) return { tasks: {} };
   const candidate = value as Partial<WorkflowStatsSession>;
   const tasks: Record<string, WorkflowTaskStats> = {};
-  if (typeof candidate.tasks === "object" && candidate.tasks !== null) {
+  if (typeof candidate.tasks === 'object' && candidate.tasks !== null) {
     for (const [key, task] of Object.entries(candidate.tasks)) {
       const normalized = normalizeTaskStats(task);
       if (normalized) tasks[key] = normalized;
     }
   }
-  return { tasks, endedReason: typeof candidate.endedReason === "string" ? candidate.endedReason : undefined };
+  return {
+    tasks,
+    endedReason:
+      typeof candidate.endedReason === 'string'
+        ? candidate.endedReason
+        : undefined,
+  };
 }
 
 export function createEmptyWorkflowStats(): WorkflowStats {
@@ -62,31 +104,36 @@ export function createEmptyWorkflowStats(): WorkflowStats {
 }
 
 function normalizeWorkflowStats(value: unknown): WorkflowStats {
-  if (typeof value !== "object" || value === null) return createEmptyWorkflowStats();
+  if (typeof value !== 'object' || value === null)
+    return createEmptyWorkflowStats();
   const candidate = value as Partial<WorkflowStats>;
   return {
     active: normalizeStatsSession(candidate.active),
-    history: Array.isArray(candidate.history) ? candidate.history.map(normalizeStatsSession) : [],
+    history: Array.isArray(candidate.history)
+      ? candidate.history.map(normalizeStatsSession)
+      : [],
   };
 }
 
 function normalizeWorkflowState(state: WorkflowState): WorkflowState {
-  const normalizedTasks = state.currentTask || state.nextTask
-    ? {
-      currentTask: state.currentTask,
-      nextTask: state.nextTask,
-      currentTaskIndex: state.currentTaskIndex,
-      taskCount: state.taskCount,
-      currentSliceIndex: state.currentSliceIndex,
-      sliceCount: state.sliceCount,
-      currentTaskSummary: state.currentTaskSummary,
-      nextTaskSummary: state.nextTaskSummary,
-    }
-    : {};
+  const normalizedTasks =
+    state.currentTask || state.nextTask
+      ? {
+          currentTask: state.currentTask,
+          nextTask: state.nextTask,
+          currentTaskIndex: state.currentTaskIndex,
+          taskCount: state.taskCount,
+          currentSliceIndex: state.currentSliceIndex,
+          sliceCount: state.sliceCount,
+          currentTaskSummary: state.currentTaskSummary,
+          nextTaskSummary: state.nextTaskSummary,
+        }
+      : {};
 
   const normalizedStats = { stats: normalizeWorkflowStats(state.stats) };
 
-  if (!state.current || phaseIndex(state.current) <= phaseIndex("plan")) return { ...state, ...normalizedTasks, ...normalizedStats };
+  if (!state.current || phaseIndex(state.current) <= phaseIndex('plan'))
+    return { ...state, ...normalizedTasks, ...normalizedStats };
 
   return {
     ...state,
@@ -94,8 +141,8 @@ function normalizeWorkflowState(state: WorkflowState): WorkflowState {
     ...normalizedStats,
     phases: {
       ...state.phases,
-      define: "complete",
-      plan: "complete",
+      define: 'complete',
+      plan: 'complete',
     },
   };
 }
@@ -107,62 +154,97 @@ export function serializeWorkflowState(state: WorkflowState): string {
 export function parseWorkflowState(value: unknown): WorkflowState {
   if (!value) return createInitialWorkflowState();
 
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value);
-      if (parsed?.type === WORKFLOW_STATE_ENTRY_TYPE && parsed.state) return normalizeWorkflowState(parsed.state as WorkflowState);
-      if (parsed?.phases) return normalizeWorkflowState(parsed as WorkflowState);
+      if (parsed?.type === WORKFLOW_STATE_ENTRY_TYPE && parsed.state)
+        return normalizeWorkflowState(parsed.state as WorkflowState);
+      if (parsed?.phases)
+        return normalizeWorkflowState(parsed as WorkflowState);
     } catch {
       return createInitialWorkflowState();
     }
   }
 
-  if (typeof value === "object" && value !== null && "phases" in value) return normalizeWorkflowState(value as WorkflowState);
+  if (typeof value === 'object' && value !== null && 'phases' in value)
+    return normalizeWorkflowState(value as WorkflowState);
   return createInitialWorkflowState();
 }
 
-function currentWorkflowTaskStats(state: WorkflowState): WorkflowTaskStats | undefined {
+function currentWorkflowTaskStats(
+  state: WorkflowState,
+): WorkflowTaskStats | undefined {
   const tasks = Object.values(state.stats?.active.tasks ?? {});
   return tasks.find((task) => {
-    if (state.activePlan && task.plan && task.plan !== state.activePlan) return false;
-    if (state.currentTaskIndex && task.taskIndex && task.taskIndex !== state.currentTaskIndex) return false;
-    if (state.currentTask && task.taskTitle && task.taskTitle !== state.currentTask) return false;
+    if (state.activePlan && task.plan && task.plan !== state.activePlan)
+      return false;
+    if (
+      state.currentTaskIndex &&
+      task.taskIndex &&
+      task.taskIndex !== state.currentTaskIndex
+    )
+      return false;
+    if (
+      state.currentTask &&
+      task.taskTitle &&
+      task.taskTitle !== state.currentTask
+    )
+      return false;
     return !!task.taskTitle || !!task.taskIndex;
   });
 }
 
-export function renderWorkflowStrip(state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }): string {
+export function renderWorkflowStrip(
+  state: WorkflowState,
+  theme?: { fg?: (name: string, text: string) => string },
+): string {
   const currentStats = currentWorkflowTaskStats(state);
-  const setupPhases = WORKFLOW_PHASES.slice(0, phaseIndex("build")).map((phase) => renderPhase(phase, state, theme, currentStats));
-  const loopPhases = WORKFLOW_PHASES.slice(phaseIndex("build")).map((phase) => renderPhase(phase, state, theme, currentStats));
-  return `${setupPhases.join(" → ")} => { ${loopPhases.join(" → ")} }`;
+  const setupPhases = WORKFLOW_PHASES.slice(0, phaseIndex('build')).map(
+    (phase) => renderPhase(phase, state, theme, currentStats),
+  );
+  const loopPhases = WORKFLOW_PHASES.slice(phaseIndex('build')).map((phase) =>
+    renderPhase(phase, state, theme, currentStats),
+  );
+  return `${setupPhases.join(' → ')} => { ${loopPhases.join(' → ')} }`;
 }
 
-export function workflowArtifactForFooter(state: WorkflowState): string | undefined {
+export function workflowArtifactForFooter(
+  state: WorkflowState,
+): string | undefined {
   if (!state.current) return undefined;
 
-  if (state.current === "define" || state.current === "plan") return state.activeSpec;
-  if (phaseIndex(state.current) > phaseIndex("plan")) return state.activePlan;
+  if (state.current === 'define' || state.current === 'plan')
+    return state.activeSpec;
+  if (phaseIndex(state.current) > phaseIndex('plan')) return state.activePlan;
 
   return undefined;
 }
 
 export function workflowArtifactName(path: string): string {
-  return path.replace(/\\/g, "/").split("/").filter(Boolean).at(-1) ?? path;
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) ?? path;
 }
 
-type PlanTaskStatus = "Implemented" | "Verified" | "Reviewed";
-type PlanTask = { title: string; complete: boolean; missingStatuses?: PlanTaskStatus[] };
+type PlanTaskStatus = 'Implemented' | 'Verified' | 'Reviewed';
+type PlanTask = {
+  title: string;
+  complete: boolean;
+  missingStatuses?: PlanTaskStatus[];
+};
 
-const REQUIRED_TASK_STATUSES: PlanTaskStatus[] = ["Implemented", "Verified", "Reviewed"];
-const STATUS_CHECKBOX = /^\s*[-*]\s+\[[ xX]\]\s+(Implemented|Verified|Reviewed)\b/;
+const REQUIRED_TASK_STATUSES: PlanTaskStatus[] = [
+  'Implemented',
+  'Verified',
+  'Reviewed',
+];
+const STATUS_CHECKBOX =
+  /^\s*[-*]\s+\[[ xX]\]\s+(Implemented|Verified|Reviewed)\b/;
 const TASK_CHECKBOX = /^\s*[-*]\s+\[([ xX])\]\s+(.+)$/;
 const TASK_HEADING = /^#{2,4}\s+(.+)$/;
 
 function cleanTaskTitle(title: string): string {
   return title
-    .replace(/^\s*(?:slice|task)\s*\d+[.:) -]*/i, "")
-    .replace(/`/g, "")
+    .replace(/^\s*(?:slice|task)\s*\d+[.:) -]*/i, '')
+    .replace(/`/g, '')
     .trim();
 }
 
@@ -171,15 +253,22 @@ function taskMissingStatuses(statuses: PlanTaskStatus[]): PlanTaskStatus[] {
 }
 
 function resolvePlanPath(planPath: string, baseCwd?: string): string {
-  const filesystemPath = planPath.startsWith("@") ? planPath.slice(1) : planPath;
-  return isAbsolute(filesystemPath) ? filesystemPath : resolve(baseCwd ?? process.cwd(), filesystemPath);
+  const filesystemPath = planPath.startsWith('@')
+    ? planPath.slice(1)
+    : planPath;
+  return isAbsolute(filesystemPath)
+    ? filesystemPath
+    : resolve(baseCwd ?? process.cwd(), filesystemPath);
 }
 
-function readPlanMarkdown(planPath: string, baseCwd?: string): string | undefined {
+function readPlanMarkdown(
+  planPath: string,
+  baseCwd?: string,
+): string | undefined {
   try {
     const resolved = resolvePlanPath(planPath, baseCwd);
     if (!statSync(resolved).isFile()) return undefined;
-    return readFileSync(resolved, "utf8");
+    return readFileSync(resolved, 'utf8');
   } catch {
     return undefined;
   }
@@ -193,18 +282,28 @@ function readablePlanFile(path: string): boolean {
   }
 }
 
-function planPathForDisplay(resolvedPlanPath: string, previousPlanPath: string, baseCwd?: string): string {
-  if (isAbsolute(previousPlanPath.replace(/^@/, ""))) return resolvedPlanPath;
+function planPathForDisplay(
+  resolvedPlanPath: string,
+  previousPlanPath: string,
+  baseCwd?: string,
+): string {
+  if (isAbsolute(previousPlanPath.replace(/^@/, ''))) return resolvedPlanPath;
 
   const cwd = baseCwd ?? process.cwd();
-  const relativePath = relative(cwd, resolvedPlanPath).replace(/\\/g, "/");
-  return previousPlanPath.startsWith("@") ? `@${relativePath}` : relativePath;
+  const relativePath = relative(cwd, resolvedPlanPath).replace(/\\/g, '/');
+  return previousPlanPath.startsWith('@') ? `@${relativePath}` : relativePath;
 }
 
-function numberedSliceParts(planPath: string): { prefix: string; number: number; width: number } | undefined {
+function numberedSliceParts(
+  planPath: string,
+): { prefix: string; number: number; width: number } | undefined {
   const name = basename(planPath);
   const sliceMatch = name.match(/^(.*?slice[-_]?)(\d+)(.*\.md)$/i);
-  const match = sliceMatch ?? (/^\d{4}[-_]\d{2}[-_]\d{2}/.test(name) ? undefined : name.match(/^()(\d+)([-_].*\.md)$/i));
+  const match =
+    sliceMatch ??
+    (/^\d{4}[-_]\d{2}[-_]\d{2}/.test(name)
+      ? undefined
+      : name.match(/^()(\d+)([-_].*\.md)$/i));
   if (!match) return undefined;
 
   return {
@@ -214,26 +313,48 @@ function numberedSliceParts(planPath: string): { prefix: string; number: number;
   };
 }
 
-function slicePlanPathFromIndexCandidate(rawPath: string, indexPlanPath: string, baseCwd?: string): string | undefined {
-  const path = rawPath.replace(/^@/, "");
-  const direct = isAbsolute(path) ? path : resolve(baseCwd ?? process.cwd(), path);
-  if (readablePlanFile(direct)) return planPathForDisplay(direct, indexPlanPath, baseCwd);
+function slicePlanPathFromIndexCandidate(
+  rawPath: string,
+  indexPlanPath: string,
+  baseCwd?: string,
+): string | undefined {
+  const path = rawPath.replace(/^@/, '');
+  const direct = isAbsolute(path)
+    ? path
+    : resolve(baseCwd ?? process.cwd(), path);
+  if (readablePlanFile(direct))
+    return planPathForDisplay(direct, indexPlanPath, baseCwd);
 
   if (!isAbsolute(path)) {
-    const sibling = resolve(dirname(resolvePlanPath(indexPlanPath, baseCwd)), path);
-    if (readablePlanFile(sibling)) return planPathForDisplay(sibling, indexPlanPath, baseCwd);
+    const sibling = resolve(
+      dirname(resolvePlanPath(indexPlanPath, baseCwd)),
+      path,
+    );
+    if (readablePlanFile(sibling))
+      return planPathForDisplay(sibling, indexPlanPath, baseCwd);
   }
 
   return undefined;
 }
 
-function slicePlanPathsFromIndexMarkdown(markdown: string, indexPlanPath: string, baseCwd?: string): string[] {
-  const candidates = markdown.match(/@?(?:[A-Za-z0-9._~/-]+\/)?[A-Za-z0-9._~/-]*slice[-_]\d+[A-Za-z0-9._~/-]*\.md\b/gi) ?? [];
+function slicePlanPathsFromIndexMarkdown(
+  markdown: string,
+  indexPlanPath: string,
+  baseCwd?: string,
+): string[] {
+  const candidates =
+    markdown.match(
+      /@?(?:[A-Za-z0-9._~/-]+\/)?[A-Za-z0-9._~/-]*slice[-_]\d+[A-Za-z0-9._~/-]*\.md\b/gi,
+    ) ?? [];
   const paths: string[] = [];
   const seen = new Set<string>();
 
   for (const candidate of candidates) {
-    const path = slicePlanPathFromIndexCandidate(candidate, indexPlanPath, baseCwd);
+    const path = slicePlanPathFromIndexCandidate(
+      candidate,
+      indexPlanPath,
+      baseCwd,
+    );
     if (!path || path === indexPlanPath || seen.has(path)) continue;
     seen.add(path);
     paths.push(path);
@@ -242,8 +363,16 @@ function slicePlanPathsFromIndexMarkdown(markdown: string, indexPlanPath: string
   return paths;
 }
 
-function currentSlicePlanPathFromIndex(planPath: string, markdown: string, baseCwd?: string): string | undefined {
-  const slicePaths = slicePlanPathsFromIndexMarkdown(markdown, planPath, baseCwd);
+function currentSlicePlanPathFromIndex(
+  planPath: string,
+  markdown: string,
+  baseCwd?: string,
+): string | undefined {
+  const slicePaths = slicePlanPathsFromIndexMarkdown(
+    markdown,
+    planPath,
+    baseCwd,
+  );
   let lastTaskSlice: string | undefined;
   for (const slicePath of slicePaths) {
     const sliceMarkdown = readPlanMarkdown(slicePath, baseCwd);
@@ -256,19 +385,28 @@ function currentSlicePlanPathFromIndex(planPath: string, markdown: string, baseC
   return lastTaskSlice;
 }
 
-export function nextUnfinishedSlicePlanPath(state: WorkflowState, baseCwd?: string): string | undefined {
+export function nextUnfinishedSlicePlanPath(
+  state: WorkflowState,
+  baseCwd?: string,
+): string | undefined {
   if (!state.activePlan) return undefined;
   const markdown = readPlanMarkdown(state.activePlan, baseCwd);
   if (!markdown) return undefined;
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
-    const slicePlan = currentSlicePlanPathFromIndex(state.activePlan, markdown, baseCwd);
+    const slicePlan = currentSlicePlanPathFromIndex(
+      state.activePlan,
+      markdown,
+      baseCwd,
+    );
     return slicePlan && slicePlan !== state.activePlan ? slicePlan : undefined;
   }
   if (tasks.some((task) => !task.complete)) return undefined;
 
   const resolvedPlanPath = resolvePlanPath(state.activePlan, baseCwd);
-  const currentMatch = basename(resolvedPlanPath).match(/^(.*?slice[-_]?)(\d+)/i);
+  const currentMatch = basename(resolvedPlanPath).match(
+    /^(.*?slice[-_]?)(\d+)/i,
+  );
   if (!currentMatch) return undefined;
   const currentPrefix = currentMatch[1].toLowerCase();
   const currentNumber = Number.parseInt(currentMatch[2], 10);
@@ -285,69 +423,127 @@ export function nextUnfinishedSlicePlanPath(state: WorkflowState, baseCwd?: stri
   const nextCandidates = candidates
     .map((candidate) => {
       const match = basename(candidate).match(/^(.*?slice[-_]?)(\d+)/i);
-      return match ? { path: candidate, prefix: match[1].toLowerCase(), number: Number.parseInt(match[2], 10) } : undefined;
+      return match
+        ? {
+            path: candidate,
+            prefix: match[1].toLowerCase(),
+            number: Number.parseInt(match[2], 10),
+          }
+        : undefined;
     })
-    .filter((candidate): candidate is { path: string; prefix: string; number: number } => Boolean(
-      candidate
-      && candidate.number > currentNumber
-      && candidate.prefix === currentPrefix,
-    ))
+    .filter(
+      (
+        candidate,
+      ): candidate is { path: string; prefix: string; number: number } =>
+        Boolean(
+          candidate &&
+          candidate.number > currentNumber &&
+          candidate.prefix === currentPrefix,
+        ),
+    )
     .sort((left, right) => left.number - right.number);
 
   for (const candidate of nextCandidates) {
     const candidateMarkdown = readPlanMarkdown(candidate.path, baseCwd);
     if (!candidateMarkdown) continue;
     const candidateTasks = planTasksFromMarkdown(candidateMarkdown);
-    if (candidateTasks.length === 0 || candidateTasks.some((task) => !task.complete)) {
+    if (
+      candidateTasks.length === 0 ||
+      candidateTasks.some((task) => !task.complete)
+    ) {
       return planPathForDisplay(candidate.path, state.activePlan, baseCwd);
     }
   }
   return undefined;
 }
 
-function sliceProgressForPlanPath(planPath: string, baseCwd?: string): { currentSliceIndex: number; sliceCount: number } | undefined {
+function sliceProgressForPlanPath(
+  planPath: string,
+  baseCwd?: string,
+): { currentSliceIndex: number; sliceCount: number } | undefined {
   const resolved = resolvePlanPath(planPath, baseCwd);
   const current = numberedSliceParts(resolved);
   if (!current || current.number <= 0) return undefined;
 
   let candidates: string[];
   try {
-    candidates = readdirSync(dirname(resolved)).filter((entry) => entry.endsWith(".md"));
+    candidates = readdirSync(dirname(resolved)).filter((entry) =>
+      entry.endsWith('.md'),
+    );
   } catch {
     return undefined;
   }
 
   const sliceNumbers = candidates
     .map((candidate) => numberedSliceParts(candidate))
-    .filter((parts): parts is NonNullable<ReturnType<typeof numberedSliceParts>> => !!parts && parts.number > 0 && parts.prefix.toLowerCase() === current.prefix.toLowerCase())
+    .filter(
+      (parts): parts is NonNullable<ReturnType<typeof numberedSliceParts>> => {
+        if (!parts) return false;
+        if (parts.number <= 0) return false;
+        return parts.prefix.toLowerCase() === current.prefix.toLowerCase();
+      },
+    )
     .map((parts) => parts.number);
   const sliceCount = Math.max(...sliceNumbers, 0);
 
-  return sliceCount >= current.number ? { currentSliceIndex: current.number, sliceCount } : undefined;
+  return sliceCount >= current.number
+    ? { currentSliceIndex: current.number, sliceCount }
+    : undefined;
 }
 
-function isValidProgress(index: number | undefined, count: number | undefined): index is number {
-  return Number.isSafeInteger(index) && Number.isSafeInteger(count) && !!index && !!count && index > 0 && count > 0 && index <= count;
+function isValidProgress(
+  index: number | undefined,
+  count: number | undefined,
+): index is number {
+  if (!Number.isSafeInteger(index)) return false;
+  if (!Number.isSafeInteger(count)) return false;
+  if (!index || !count) return false;
+  if (index <= 0 || count <= 0) return false;
+  return index <= count;
 }
 
-function progressSuffix(label: string, index: number | undefined, count: number | undefined, styleLabel: (text: string) => string): string {
-  return isValidProgress(index, count) ? ` | ${styleLabel(label)}${index}/${count}` : "";
+function progressSuffix(
+  label: string,
+  index: number | undefined,
+  count: number | undefined,
+  styleLabel: (text: string) => string,
+): string {
+  return isValidProgress(index, count)
+    ? ` | ${styleLabel(label)}${index}/${count}`
+    : '';
 }
 
-function sliceProgressSuffix(planPath: string | undefined, baseCwd: string | undefined, styleLabel: (text: string) => string): string {
-  const progress = planPath ? sliceProgressForPlanPath(planPath, baseCwd) : undefined;
-  return progressSuffix("Slice ", progress?.currentSliceIndex, progress?.sliceCount, styleLabel);
+function sliceProgressSuffix(
+  planPath: string | undefined,
+  baseCwd: string | undefined,
+  styleLabel: (text: string) => string,
+): string {
+  const progress = planPath
+    ? sliceProgressForPlanPath(planPath, baseCwd)
+    : undefined;
+  return progressSuffix(
+    'Slice ',
+    progress?.currentSliceIndex,
+    progress?.sliceCount,
+    styleLabel,
+  );
 }
 
 export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   const headingTasks: PlanTask[] = [];
   const checkboxTasks: PlanTask[] = [];
-  let currentHeading: { title: string; statuses: PlanTaskStatus[]; sawStatus: boolean } | undefined;
+  let currentHeading:
+    | { title: string; statuses: PlanTaskStatus[]; sawStatus: boolean }
+    | undefined;
 
   function flushHeadingTask() {
     if (!currentHeading || !currentHeading.sawStatus) return;
     const missingStatuses = taskMissingStatuses(currentHeading.statuses);
-    headingTasks.push({ title: cleanTaskTitle(currentHeading.title), complete: missingStatuses.length === 0, missingStatuses });
+    headingTasks.push({
+      title: cleanTaskTitle(currentHeading.title),
+      complete: missingStatuses.length === 0,
+      missingStatuses,
+    });
   }
 
   for (const line of markdown.split(/\r?\n/)) {
@@ -361,13 +557,17 @@ export function planTasksFromMarkdown(markdown: string): PlanTask[] {
     const status = line.match(STATUS_CHECKBOX);
     if (status && currentHeading) {
       currentHeading.sawStatus = true;
-      if (/\[[xX]\]/.test(line)) currentHeading.statuses.push(status[1] as PlanTaskStatus);
+      if (/\[[xX]\]/.test(line))
+        currentHeading.statuses.push(status[1] as PlanTaskStatus);
       continue;
     }
 
     const checkbox = line.match(TASK_CHECKBOX);
     if (checkbox && !STATUS_CHECKBOX.test(line)) {
-      checkboxTasks.push({ title: cleanTaskTitle(checkbox[2]), complete: checkbox[1].toLowerCase() === "x" });
+      checkboxTasks.push({
+        title: cleanTaskTitle(checkbox[2]),
+        complete: checkbox[1].toLowerCase() === 'x',
+      });
     }
   }
 
@@ -376,42 +576,62 @@ export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   return tasks.filter((task) => task.title.length > 0);
 }
 
-export function unfinishedLifecycleStepsFromMarkdown(markdown: string): Array<{ title: string; missingStatuses: PlanTaskStatus[] }> {
+export function unfinishedLifecycleStepsFromMarkdown(
+  markdown: string,
+): Array<{ title: string; missingStatuses: PlanTaskStatus[] }> {
   return planTasksFromMarkdown(markdown)
     .map((task) => ({
       title: task.title,
       allMissingStatuses: task.missingStatuses ?? [],
     }))
-    .filter((task) => !task.allMissingStatuses.includes("Implemented"))
+    .filter((task) => !task.allMissingStatuses.includes('Implemented'))
     .map((task) => ({
       title: task.title,
-      missingStatuses: task.allMissingStatuses.filter((status) => status !== "Implemented"),
+      missingStatuses: task.allMissingStatuses.filter(
+        (status) => status !== 'Implemented',
+      ),
     }))
     .filter((task) => task.missingStatuses.length > 0);
 }
 
-export function workflowTaskFooterLine(planPath: string | undefined, baseCwd?: string, theme?: { fg?: (name: string, text: string) => string }): string | undefined {
+export function workflowTaskFooterLine(
+  planPath: string | undefined,
+  baseCwd?: string,
+  theme?: { fg?: (name: string, text: string) => string },
+): string | undefined {
   if (!planPath) return undefined;
   const markdown = readPlanMarkdown(planPath, baseCwd);
   if (!markdown) return undefined;
 
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
-    const slicePlan = currentSlicePlanPathFromIndex(planPath, markdown, baseCwd);
-    if (slicePlan && slicePlan !== planPath) return workflowTaskFooterLine(slicePlan, baseCwd, theme);
+    const slicePlan = currentSlicePlanPathFromIndex(
+      planPath,
+      markdown,
+      baseCwd,
+    );
+    if (slicePlan && slicePlan !== planPath)
+      return workflowTaskFooterLine(slicePlan, baseCwd, theme);
   }
 
-  const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
+  const styleLabel = (text: string) =>
+    theme?.fg?.('accent', text) ?? theme?.fg?.('blue', text) ?? text;
   const sliceProgress = sliceProgressSuffix(planPath, baseCwd, styleLabel);
   const currentIndex = tasks.findIndex((task) => !task.complete);
-  if (currentIndex === -1) return tasks.length > 0 ? `${styleLabel("Current task: ")}all tasks complete | ${styleLabel("Next task: ")}none${sliceProgress}${progressSuffix("Task ", tasks.length, tasks.length, styleLabel)}` : undefined;
+  if (currentIndex === -1)
+    return tasks.length > 0
+      ? `${styleLabel('Current task: ')}all tasks complete | ${styleLabel('Next task: ')}none${sliceProgress}${progressSuffix('Task ', tasks.length, tasks.length, styleLabel)}`
+      : undefined;
 
   const current = tasks[currentIndex];
   const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
-  return `${styleLabel("Current task: ")}${current.title} | ${styleLabel("Next task: ")}${next?.title ?? "none"}${sliceProgress}${progressSuffix("Task ", currentIndex + 1, tasks.length, styleLabel)}`;
+  return `${styleLabel('Current task: ')}${current.title} | ${styleLabel('Next task: ')}${next?.title ?? 'none'}${sliceProgress}${progressSuffix('Task ', currentIndex + 1, tasks.length, styleLabel)}`;
 }
 
-export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: string): WorkflowState {
+export function refreshWorkflowTasksFromPlan(
+  state: WorkflowState,
+  baseCwd?: string,
+): WorkflowState {
   if (!state.activePlan) return state;
 
   const sliceProgress = sliceProgressForPlanPath(state.activePlan, baseCwd);
@@ -421,8 +641,16 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
 
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
-    const slicePlan = currentSlicePlanPathFromIndex(state.activePlan, markdown, baseCwd);
-    if (slicePlan && slicePlan !== state.activePlan) return refreshWorkflowTasksFromPlan({ ...state, activePlan: slicePlan }, baseCwd);
+    const slicePlan = currentSlicePlanPathFromIndex(
+      state.activePlan,
+      markdown,
+      baseCwd,
+    );
+    if (slicePlan && slicePlan !== state.activePlan)
+      return refreshWorkflowTasksFromPlan(
+        { ...state, activePlan: slicePlan },
+        baseCwd,
+      );
 
     return {
       ...state,
@@ -439,8 +667,8 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
 
   const currentIndex = tasks.findIndex((task) => !task.complete);
   if (currentIndex === -1) {
-    const currentTask = "all tasks complete";
-    const nextTask = "none";
+    const currentTask = 'all tasks complete';
+    const nextTask = 'none';
     return {
       ...state,
       currentTask,
@@ -449,15 +677,19 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
       taskCount: tasks.length,
       currentSliceIndex: sliceProgress?.currentSliceIndex,
       sliceCount: sliceProgress?.sliceCount,
-      currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
-      nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
+      currentTaskSummary:
+        state.currentTask === currentTask
+          ? state.currentTaskSummary
+          : undefined,
+      nextTaskSummary:
+        state.nextTask === nextTask ? state.nextTaskSummary : undefined,
     };
   }
 
   const current = tasks[currentIndex];
   const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
   const currentTask = current.title;
-  const nextTask = next?.title ?? "none";
+  const nextTask = next?.title ?? 'none';
   return {
     ...state,
     currentTask,
@@ -466,138 +698,291 @@ export function refreshWorkflowTasksFromPlan(state: WorkflowState, baseCwd?: str
     taskCount: tasks.length,
     currentSliceIndex: sliceProgress?.currentSliceIndex,
     sliceCount: sliceProgress?.sliceCount,
-    currentTaskSummary: state.currentTask === currentTask ? state.currentTaskSummary : undefined,
-    nextTaskSummary: state.nextTask === nextTask ? state.nextTaskSummary : undefined,
+    currentTaskSummary:
+      state.currentTask === currentTask ? state.currentTaskSummary : undefined,
+    nextTaskSummary:
+      state.nextTask === nextTask ? state.nextTaskSummary : undefined,
   };
 }
 
-export function promptArtifactForPhase(state: WorkflowState, phase: WorkflowPhase): string | undefined {
-  if (phase === "plan") return state.activeSpec;
-  if (phaseIndex(phase) > phaseIndex("plan")) return state.activePlan;
+export function promptArtifactForPhase(
+  state: WorkflowState,
+  phase: WorkflowPhase,
+): string | undefined {
+  if (phase === 'plan') return state.activeSpec;
+  if (phaseIndex(phase) > phaseIndex('plan')) return state.activePlan;
   return undefined;
 }
 
 export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
-  return (_tui?: unknown, theme?: { fg?: (name: string, text: string) => string }) => ({
+  return (
+    _tui?: unknown,
+    theme?: { fg?: (name: string, text: string) => string },
+  ) => ({
     invalidate() {},
     render(width?: number): string[] {
-      const styleLabel = (text: string) => theme?.fg?.("accent", text) ?? theme?.fg?.("blue", text) ?? text;
-      const label = styleLabel(state.autoMode ? "🔁 Addy Workflow: " : "Addy Workflow: ");
+      const styleLabel = (text: string) =>
+        theme?.fg?.('accent', text) ?? theme?.fg?.('blue', text) ?? text;
+      const label = styleLabel(
+        state.autoMode ? '🔁 Addy Workflow: ' : 'Addy Workflow: ',
+      );
       const artifact = workflowArtifactForFooter(state);
-      const artifactName = artifact ? workflowArtifactName(artifact) : undefined;
-      const styledArtifactName = artifactName ? (theme?.fg?.("mdLinkUrl", artifactName) ?? theme?.fg?.("accent", artifactName) ?? artifactName) : undefined;
-      const artifactSuffix = styledArtifactName ? ` | ${styledArtifactName}` : "";
+      const artifactName = artifact
+        ? workflowArtifactName(artifact)
+        : undefined;
+      const styledArtifactName = artifactName
+        ? (theme?.fg?.('mdLinkUrl', artifactName) ??
+          theme?.fg?.('accent', artifactName) ??
+          artifactName)
+        : undefined;
+      const artifactSuffix = styledArtifactName
+        ? ` | ${styledArtifactName}`
+        : '';
       const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
       const currentTask = state.currentTaskSummary ?? state.currentTask;
       const nextTask = state.nextTaskSummary ?? state.nextTask;
-      const taskProgress = progressSuffix("Task ", state.currentTaskIndex, state.taskCount, styleLabel);
-      const sliceProgress = progressSuffix("Slice ", state.currentSliceIndex, state.sliceCount, styleLabel);
+      const taskProgress = progressSuffix(
+        'Task ',
+        state.currentTaskIndex,
+        state.taskCount,
+        styleLabel,
+      );
+      const sliceProgress = progressSuffix(
+        'Slice ',
+        state.currentSliceIndex,
+        state.sliceCount,
+        styleLabel,
+      );
       const taskLine = currentTask
-        ? `${styleLabel("Current task: ")}${currentTask} | ${styleLabel("Next task: ")}${nextTask ?? "none"}${sliceProgress}${taskProgress}`
+        ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}`
         : workflowTaskFooterLine(state.activePlan, baseCwd, theme);
       const lines = taskLine ? [line, taskLine] : [line];
-      return width ? lines.map((value) => truncateToWidth(value, Math.max(1, width), "", true)) : lines;
+      return width
+        ? lines.map((value) =>
+            truncateToWidth(value, Math.max(1, width), '', true),
+          )
+        : lines;
     },
   });
 }
 
-function phaseRunCountSuffix(phase: WorkflowPhase, stats?: WorkflowTaskStats): string {
-  const count = phase === "verify" ? stats?.verifyRuns : phase === "review" ? stats?.reviewRuns : undefined;
-  return count && count > 1 ? ` (${count})` : "";
+function phaseRunCountSuffix(
+  phase: WorkflowPhase,
+  stats?: WorkflowTaskStats,
+): string {
+  const count =
+    phase === 'verify'
+      ? stats?.verifyRuns
+      : phase === 'review'
+        ? stats?.reviewRuns
+        : undefined;
+  return count && count > 1 ? ` (${count})` : '';
 }
 
-function renderPhase(phase: WorkflowPhase, state: WorkflowState, theme?: { fg?: (name: string, text: string) => string }, currentStats?: WorkflowTaskStats): string {
+function renderPhase(
+  phase: WorkflowPhase,
+  state: WorkflowState,
+  theme?: { fg?: (name: string, text: string) => string },
+  currentStats?: WorkflowTaskStats,
+): string {
   const status = state.phases[phase];
   const countSuffix = phaseRunCountSuffix(phase, currentStats);
-  if (status === "complete") return `✓${phase}${countSuffix}`;
-  if (status === "active") {
+  if (status === 'complete') return `✓${phase}${countSuffix}`;
+  if (status === 'active') {
     const text = `[${phase}]${countSuffix}`;
-    return theme?.fg?.("success", text) ?? theme?.fg?.("green", text) ?? text;
+    return theme?.fg?.('success', text) ?? theme?.fg?.('green', text) ?? text;
   }
-  if (OPTIONAL_PHASES.has(phase)) return theme?.fg?.("dim", phase) ?? theme?.fg?.("muted", phase) ?? phase;
+  if (OPTIONAL_PHASES.has(phase))
+    return theme?.fg?.('dim', phase) ?? theme?.fg?.('muted', phase) ?? phase;
   return `${phase}${countSuffix}`;
 }
 
-function totalStatsTasks(session: WorkflowStatsSession, planPath?: string): WorkflowTaskStats[] {
-  return Object.values(session.tasks).filter((task) => !planPath || task.plan === planPath);
+function totalStatsTasks(
+  session: WorkflowStatsSession,
+  planPath?: string,
+): WorkflowTaskStats[] {
+  return Object.values(session.tasks).filter(
+    (task) => !planPath || task.plan === planPath,
+  );
 }
 
-function sumTaskStats(tasks: WorkflowTaskStats[]): { turns: number; reviewRuns: number; issues: WorkflowIssueStats } {
-  return tasks.reduce((total, task) => ({
-    turns: total.turns + task.turns,
-    reviewRuns: total.reviewRuns + task.reviewRuns,
-    issues: {
-      critical: total.issues.critical + task.issues.critical,
-      important: total.issues.important + task.issues.important,
-      suggestion: total.issues.suggestion + task.issues.suggestion,
-      unknown: total.issues.unknown + task.issues.unknown,
-      total: total.issues.total + task.issues.total,
-    },
-  }), { turns: 0, reviewRuns: 0, issues: emptyIssueStats() });
+function sumTaskStats(tasks: WorkflowTaskStats[]): {
+  turns: number;
+  verifyRuns: number;
+  reviewRuns: number;
+  issues: WorkflowIssueStats;
+} {
+  return tasks.reduce(
+    (total, task) => ({
+      turns: total.turns + task.turns,
+      verifyRuns: total.verifyRuns + task.verifyRuns,
+      reviewRuns: total.reviewRuns + task.reviewRuns,
+      issues: {
+        critical: total.issues.critical + task.issues.critical,
+        important: total.issues.important + task.issues.important,
+        suggestion: total.issues.suggestion + task.issues.suggestion,
+        unknown: total.issues.unknown + task.issues.unknown,
+        total: total.issues.total + task.issues.total,
+      },
+    }),
+    { turns: 0, verifyRuns: 0, reviewRuns: 0, issues: emptyIssueStats() },
+  );
 }
 
-export function renderWorkflowStatsText(state: WorkflowState, planPath?: string): string {
+function statsTaskIdentity(task: WorkflowTaskStats): string {
+  return [
+    task.plan ?? '',
+    task.sliceIndex ?? '',
+    task.taskIndex ?? '',
+    task.taskTitle ?? '',
+  ].join('\u001f');
+}
+
+function mergeTaskStats(tasks: WorkflowTaskStats[]): WorkflowTaskStats[] {
+  const merged = new Map<string, WorkflowTaskStats>();
+  for (const task of tasks) {
+    const key = statsTaskIdentity(task);
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...task, issues: { ...task.issues } });
+      continue;
+    }
+    merged.set(key, {
+      ...existing,
+      turns: existing.turns + task.turns,
+      verifyRuns: existing.verifyRuns + task.verifyRuns,
+      reviewRuns: existing.reviewRuns + task.reviewRuns,
+      issues: addIssueStats(existing.issues, task.issues),
+    });
+  }
+  return [...merged.values()];
+}
+
+function renderTaskStatsLine(
+  task: WorkflowTaskStats,
+  current: boolean,
+): string {
+  const slice = task.sliceIndex ? `slice ${task.sliceIndex}, ` : '';
+  const taskLabel = task.taskIndex ? `task ${task.taskIndex}` : 'task';
+  const title = task.taskTitle ? `: ${task.taskTitle}` : '';
+  return `${current ? 'Current' : 'Completed'} ${slice}${taskLabel}${title} — ${task.turns} turns, verify ${task.verifyRuns}, review ${task.reviewRuns}, issues ${task.issues.total}`;
+}
+
+export function renderWorkflowStatsText(
+  state: WorkflowState,
+  planPath?: string,
+): string {
   const stats = normalizeWorkflowStats(state.stats);
   const activeTasks = totalStatsTasks(stats.active, planPath);
-  const historyTasks = stats.history.flatMap((session) => totalStatsTasks(session, planPath));
+  const historyTasks = stats.history.flatMap((session) =>
+    totalStatsTasks(session, planPath),
+  );
   const allTasks = [...activeTasks, ...historyTasks];
-  if (allTasks.length === 0) return "No Addy stats recorded yet";
+  if (allTasks.length === 0) return 'No Addy stats recorded yet';
 
   const totals = sumTaskStats(allTasks);
+  const activeKeys = new Set(activeTasks.map(statsTaskIdentity));
   const lines = [
-    "Addy stats",
+    'Addy stats',
     `Turns: ${totals.turns}`,
+    `Verify runs: ${totals.verifyRuns}`,
     `Review runs: ${totals.reviewRuns}`,
     `Issues: ${totals.issues.total} (Critical ${totals.issues.critical}, Important ${totals.issues.important}, Suggestions ${totals.issues.suggestion}, Unknown ${totals.issues.unknown})`,
   ];
 
-  for (const task of activeTasks) {
-    const slice = task.sliceIndex ? `slice ${task.sliceIndex}, ` : "";
-    const taskLabel = task.taskIndex ? `task ${task.taskIndex}` : "task";
-    const title = task.taskTitle ? `: ${task.taskTitle}` : "";
-    lines.push(`Current ${slice}${taskLabel}${title} — ${task.turns} turns`);
+  for (const task of mergeTaskStats(allTasks)) {
+    lines.push(
+      renderTaskStatsLine(task, activeKeys.has(statsTaskIdentity(task))),
+    );
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
-export function nextPromptForPhase(phase: WorkflowPhase, artifact?: string): string {
+export function nextPromptForPhase(
+  phase: WorkflowPhase,
+  artifact?: string,
+): string {
   const promptByPhase: Record<WorkflowPhase, string> = {
-    define: "/addy-define",
-    plan: "/addy-plan",
-    build: "/addy-build",
-    simplify: "/addy-code-simplify",
-    verify: "/addy-verify",
-    review: "/addy-review",
-    finish: "/addy-finish",
+    define: '/addy-define',
+    plan: '/addy-plan',
+    build: '/addy-build',
+    simplify: '/addy-code-simplify',
+    verify: '/addy-verify',
+    review: '/addy-review',
+    finish: '/addy-finish',
   };
 
-  return artifact ? `${promptByPhase[phase]} ${artifact}` : promptByPhase[phase];
+  return artifact
+    ? `${promptByPhase[phase]} ${artifact}`
+    : promptByPhase[phase];
 }
 
-export function nextPromptForActivePlanLifecycle(state: WorkflowState, baseCwd?: string): string | undefined {
+export function nextPromptForActivePlanLifecycle(
+  state: WorkflowState,
+  baseCwd?: string,
+): string | undefined {
   return nextWorkflowActionForActivePlanLifecycle(state, baseCwd)?.prompt;
 }
 
-export function nextWorkflowActionForActivePlanLifecycle(state: WorkflowState, baseCwd?: string): { prompt: string; taskTitle?: string; missingStatuses?: PlanTaskStatus[] } | undefined {
+export function nextWorkflowActionForActivePlanLifecycle(
+  state: WorkflowState,
+  baseCwd?: string,
+):
+  | { prompt: string; taskTitle?: string; missingStatuses?: PlanTaskStatus[] }
+  | undefined {
   if (!state.activePlan) return undefined;
 
   const markdown = readPlanMarkdown(state.activePlan, baseCwd);
-  if (!markdown) return { prompt: nextPromptForPhase("build", state.activePlan) };
+  if (!markdown)
+    return { prompt: nextPromptForPhase('build', state.activePlan) };
 
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
-    const slicePlan = currentSlicePlanPathFromIndex(state.activePlan, markdown, baseCwd);
-    if (slicePlan && slicePlan !== state.activePlan) return nextWorkflowActionForActivePlanLifecycle({ ...state, activePlan: slicePlan }, baseCwd);
+    const slicePlan = currentSlicePlanPathFromIndex(
+      state.activePlan,
+      markdown,
+      baseCwd,
+    );
+    if (slicePlan && slicePlan !== state.activePlan)
+      return nextWorkflowActionForActivePlanLifecycle(
+        { ...state, activePlan: slicePlan },
+        baseCwd,
+      );
   }
 
   const task = tasks.find((candidate) => !candidate.complete);
-  if (!task) return { prompt: tasks.length > 0 ? nextPromptForPhase("finish", state.activePlan) : nextPromptForPhase("build", state.activePlan) };
+  if (!task)
+    return {
+      prompt:
+        tasks.length > 0
+          ? nextPromptForPhase('finish', state.activePlan)
+          : nextPromptForPhase('build', state.activePlan),
+    };
 
-  const missingStatuses = task.missingStatuses ?? ["Implemented"];
-  if (missingStatuses.includes("Implemented")) return { prompt: nextPromptForPhase("build", state.activePlan), taskTitle: task.title, missingStatuses };
-  if (missingStatuses.includes("Verified")) return { prompt: nextPromptForPhase("verify", state.activePlan), taskTitle: task.title, missingStatuses };
-  if (missingStatuses.includes("Reviewed")) return { prompt: nextPromptForPhase("review", state.activePlan), taskTitle: task.title, missingStatuses };
+  const missingStatuses = task.missingStatuses ?? ['Implemented'];
+  if (missingStatuses.includes('Implemented'))
+    return {
+      prompt: nextPromptForPhase('build', state.activePlan),
+      taskTitle: task.title,
+      missingStatuses,
+    };
+  if (missingStatuses.includes('Verified'))
+    return {
+      prompt: nextPromptForPhase('verify', state.activePlan),
+      taskTitle: task.title,
+      missingStatuses,
+    };
+  if (missingStatuses.includes('Reviewed'))
+    return {
+      prompt: nextPromptForPhase('review', state.activePlan),
+      taskTitle: task.title,
+      missingStatuses,
+    };
 
-  return { prompt: nextPromptForPhase("build", state.activePlan), taskTitle: task.title, missingStatuses };
+  return {
+    prompt: nextPromptForPhase('build', state.activePlan),
+    taskTitle: task.title,
+    missingStatuses,
+  };
 }

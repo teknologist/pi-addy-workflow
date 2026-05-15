@@ -160,22 +160,28 @@ type WorkflowStatsSession = {
   startedAt: string;
   endedAt?: string;
   endReason?: "completed" | "reset" | "superseded" | "stopped";
-  slices: Record<string, {
-    label?: string;
-    tasks: Record<string, {
-      title: string;
-      taskIndex?: number;
-      turns: number;
-      reviewRuns: number;
-      surfacedIssues: number;
-      issuesBySeverity?: {
-        critical?: number;
-        important?: number;
-        suggestion?: number;
-        unknown?: number;
-      };
-    }>;
-  }>;
+  slices: Record<
+    string,
+    {
+      label?: string;
+      tasks: Record<
+        string,
+        {
+          title: string;
+          taskIndex?: number;
+          turns: number;
+          reviewRuns: number;
+          surfacedIssues: number;
+          issuesBySeverity?: {
+            critical?: number;
+            important?: number;
+            suggestion?: number;
+            unknown?: number;
+          };
+        }
+      >;
+    }
+  >;
 };
 ```
 

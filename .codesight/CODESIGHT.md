@@ -3,8 +3,8 @@
 > **Stack:** raw-http | none | unknown | typescript
 
 > 0 routes | 0 models | 0 components | 7 lib files | 5 env vars | 0 middleware | 0% test coverage
-> **Token savings:** this file is ~1,500 tokens. Without it, AI exploration would cost ~9,600 tokens. **Saves ~8,100 tokens per conversation.**
-> **Last scanned:** 2026-05-15 11:19 — re-run after significant changes
+> **Token savings:** this file is ~1,300 tokens. Without it, AI exploration would cost ~9,000 tokens. **Saves ~7,800 tokens per conversation.**
+> **Last scanned:** 2026-05-15 22:06 — re-run after significant changes
 
 ---
 
@@ -79,29 +79,23 @@
 
 ## Most Imported Files (change these carefully)
 
-- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **5** files
-- `extensions/workflow-monitor/workflow-tracker.ts` — imported by **4** files
-- `extensions/workflow-monitor/workflow-handler.ts` — imported by **3** files
-- `extensions/agent-installer/core.ts` — imported by **2** files
-- `extensions/bootstrap/core.ts` — imported by **2** files
-- `extensions/workflow-monitor/config.ts` — imported by **2** files
 - `extensions/workflow-monitor.ts` — imported by **2** files
+- `extensions/bootstrap/core.ts` — imported by **1** files
+- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **1** files
 - `extensions/workflow-monitor/warnings.ts` — imported by **1** files
 - `extensions/bootstrap.ts` — imported by **1** files
 - `extensions/agent-installer.ts` — imported by **1** files
+- `extensions/workflow-monitor/config.ts` — imported by **1** files
 
 ## Import Map (who imports what)
 
-- `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/warnings.ts`, `extensions/workflow-monitor/workflow-handler.ts`, `extensions/workflow-monitor/workflow-tracker.ts`, `extensions/workflow-monitor.ts`, `tests/workflow-tracker.test.ts`
-- `extensions/workflow-monitor/workflow-tracker.ts` ← `extensions/workflow-monitor/workflow-handler.ts`, `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`, `tests/workflow-tracker.test.ts`
-- `extensions/workflow-monitor/workflow-handler.ts` ← `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`, `tests/workflow-tracker.test.ts`
-- `extensions/agent-installer/core.ts` ← `extensions/agent-installer.ts`, `tests/agent-installer.test.ts`
-- `extensions/bootstrap/core.ts` ← `extensions/bootstrap.ts`, `tests/bootstrap.test.ts`
-- `extensions/workflow-monitor/config.ts` ← `extensions/workflow-monitor.ts`, `tests/workflow-monitor.test.ts`
 - `extensions/workflow-monitor.ts` ← `tests/validate-assets.test.ts`, `tests/workflow-monitor.test.ts`
+- `extensions/bootstrap/core.ts` ← `extensions/bootstrap.ts`
+- `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/warnings.ts`
 - `extensions/workflow-monitor/warnings.ts` ← `extensions/workflow-monitor/workflow-handler.ts`
 - `extensions/bootstrap.ts` ← `tests/validate-assets.test.ts`
 - `extensions/agent-installer.ts` ← `tests/validate-assets.test.ts`
+- `extensions/workflow-monitor/config.ts` ← `tests/workflow-monitor.test.ts`
 
 ---
 
