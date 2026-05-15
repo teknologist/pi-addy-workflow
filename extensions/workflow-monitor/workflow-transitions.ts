@@ -329,14 +329,12 @@ export function transitionWorkflow(state: WorkflowState, event: WorkflowEvent): 
   const warnings: string[] = [];
   const targetIndex = phaseIndex(target);
 
-  if (current) {
-    for (const phase of WORKFLOW_PHASES) {
-      const index = phaseIndex(phase);
-      if (index < targetIndex && baseState.phases[phase] === "complete") next.phases[phase] = "complete";
-    }
-
-    if (phaseIndex(target) > phaseIndex(current)) next.phases[current] = "complete";
+  for (const phase of WORKFLOW_PHASES) {
+    const index = phaseIndex(phase);
+    if (index < targetIndex && baseState.phases[phase] === "complete") next.phases[phase] = "complete";
   }
+
+  if (current && phaseIndex(target) > phaseIndex(current)) next.phases[current] = "complete";
 
   const skippedPhases = skippedEnforcedPhases(baseState, target, next);
   if (skippedPhases.length > 0) warnings.push(`${target} started before ${skippedPhases.join(" and ")}.`);

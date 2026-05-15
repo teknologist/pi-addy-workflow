@@ -213,6 +213,38 @@ test("auto loop dispatches verify after the current task is implemented", async 
   assert.equal(ctx.state.phases.verify, "active");
 });
 
+test("auto loop starts verify from an implemented plan without skipped-build warning", async () => {
+  const cwd = join(stateDir, "auto-loop-implemented-entry-project");
+  const planPath = join("docs", "plans", "auto-loop.md");
+  mkdirSync(join(cwd, "docs", "plans"), { recursive: true });
+  writeFileSync(join(cwd, planPath), [
+    "## Task 1: Current",
+    "- [x] Implemented",
+    "- [ ] Verified",
+    "- [ ] Reviewed",
+  ].join("\n"));
+
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: "auto-loop-implemented-entry",
+    ui: { setWidget() {}, notify: (message: string, level?: string) => notices.push([message, level]) },
+    isIdle: () => true,
+  };
+
+  await commands.get("addy-auto")?.handler(planPath, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(sentMessages[0], `/addy-verify ${planPath}`, "Addy Verify");
+  assert.equal(ctx.state.current, "verify");
+  assert.equal(ctx.state.phases.build, "complete");
+  assert.equal(ctx.state.phases.verify, "active");
+  assert.deepEqual(ctx.state.warnings, []);
+  assert.equal(notices.some(([message, level]) => level === "warning" && /verify started before build/.test(message)), false);
+});
+
 test("auto-dispatched workflow prompts advance the footer phase", async () => {
   const cwd = join(stateDir, "auto-loop-footer-phase-project");
   const planPath = join("docs", "plans", "auto-loop.md");

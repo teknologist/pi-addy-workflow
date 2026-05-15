@@ -4,7 +4,7 @@
 
 > 0 routes | 0 models | 0 components | 7 lib files | 5 env vars | 0 middleware | 0% test coverage
 > **Token savings:** this file is ~1,500 tokens. Without it, AI exploration would cost ~9,600 tokens. **Saves ~8,100 tokens per conversation.**
-> **Last scanned:** 2026-05-15 02:25 — re-run after significant changes
+> **Last scanned:** 2026-05-15 02:44 — re-run after significant changes
 
 ---
 
@@ -47,7 +47,7 @@
   - function renderWorkflowStrip: (state, theme?, text) => void
   - function workflowArtifactForFooter: (state) => string | undefined
   - function workflowArtifactName: (path) => string
-  - _...12 more_
+  - _...13 more_
 - `extensions/workflow-monitor/workflow-transitions.ts`
   - function createInitialWorkflowState: () => WorkflowState
   - function phaseIndex: (phase) => number

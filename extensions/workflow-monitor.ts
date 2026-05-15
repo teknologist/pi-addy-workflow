@@ -478,6 +478,23 @@ function autoPauseWarning(prompt: string, action: ReturnType<typeof nextWorkflow
   return `Addy auto paused at ${prompt}; the current lifecycle step is still incomplete after retry.${task}${missingText} Re-run the step after fixing the work, or update the plan checkbox only if that phase is actually complete.`;
 }
 
+function stateWithCompletedLifecyclePhasesFromPlan(state: ReturnType<typeof getContextWorkflowState>, action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>): ReturnType<typeof getContextWorkflowState> {
+  const command = commandFromPrompt(action?.prompt);
+  const missingStatuses = action?.missingStatuses;
+  const phases = { ...state.phases };
+
+  if (command === "/addy-finish") {
+    phases.build = "complete";
+    phases.verify = "complete";
+    phases.review = "complete";
+  } else {
+    if (missingStatuses && !missingStatuses.includes("Implemented")) phases.build = "complete";
+    if (missingStatuses && !missingStatuses.includes("Verified")) phases.verify = "complete";
+  }
+
+  return { ...state, phases };
+}
+
 function freshContextCommand(reason: FreshContextReason): string {
   return `/addy-auto-continue --fresh ${reason}`;
 }
@@ -849,24 +866,25 @@ async function dispatchNextAutoWorkflowPrompt(pi: ExtensionAPI, ctx: unknown, al
     return;
   }
 
+  const lifecycleSyncedState = stateWithCompletedLifecyclePhasesFromPlan(refreshedState, action);
   const phase = phaseFromWorkflowPrompt(prompt);
-  const retryKey = autoRetryKey(refreshedState, prompt);
-  const isSameIncompletePhase = phase && phase === refreshedState.current;
-  const retryCount = refreshedState.autoRetryKey === retryKey ? refreshedState.autoRetryCount ?? 0 : 0;
+  const retryKey = autoRetryKey(lifecycleSyncedState, prompt);
+  const isSameIncompletePhase = phase && phase === lifecycleSyncedState.current;
+  const retryCount = lifecycleSyncedState.autoRetryKey === retryKey ? lifecycleSyncedState.autoRetryCount ?? 0 : 0;
   if (!allowSamePhase && isSameIncompletePhase && retryCount >= 1) {
     (ctx as { ui?: { notify?: (message: string, level?: string) => void } }).ui?.notify?.(autoPauseWarning(prompt, action), "warning");
     return;
   }
 
-  const reviewTask = phase === "review" ? action.taskTitle ?? refreshedState.currentTask : undefined;
-  const finishTask = phase === "finish" ? refreshedState.autoReviewTask : undefined;
-  await dispatchAutoPromptFreshAware(pi, ctx, prompt, refreshedState, {
+  const reviewTask = phase === "review" ? action.taskTitle ?? lifecycleSyncedState.currentTask : undefined;
+  const finishTask = phase === "finish" ? lifecycleSyncedState.autoReviewTask : undefined;
+  await dispatchAutoPromptFreshAware(pi, ctx, prompt, lifecycleSyncedState, {
     autoRetryKey: retryKey,
     autoRetryCount: isSameIncompletePhase ? retryCount + 1 : 0,
     autoReviewTask: reviewTask ?? finishTask,
-    autoReviewTaskIndex: phase === "review" ? refreshedState.currentTaskIndex : phase === "finish" ? refreshedState.autoReviewTaskIndex : undefined,
+    autoReviewTaskIndex: phase === "review" ? lifecycleSyncedState.currentTaskIndex : phase === "finish" ? lifecycleSyncedState.autoReviewTaskIndex : undefined,
   }, reviewTask || finishTask ? {
-    taskIndex: phase === "review" ? refreshedState.currentTaskIndex : refreshedState.autoReviewTaskIndex,
+    taskIndex: phase === "review" ? lifecycleSyncedState.currentTaskIndex : lifecycleSyncedState.autoReviewTaskIndex,
     taskTitle: reviewTask ?? finishTask,
   } : undefined, options);
 }
