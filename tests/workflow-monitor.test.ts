@@ -2696,44 +2696,20 @@ test('fresh context fallback dispatches pending review-fix prompt when newSessio
   }
 });
 
-test('manual Addy workflow steps start in a new session when configured', async () => {
+test('manual Addy workflow steps do not replace the Pi session when beforeEveryStep is configured', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
-    const { pi, commands, entries, sentMessages } = createPiMock();
+    const { pi, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
-    const replacementMessages: string[] = [];
-    const replacementEntries: Array<[string, unknown]> = [];
     const notices: Array<[string, string | undefined]> = [];
-    let oldPiIsStale = false;
-    pi.appendEntry = (type: string, data: unknown) => {
-      if (oldPiIsStale) throw new Error('old extension API is stale');
-      return entries.push([type, data]);
-    };
+    let newSessionCalled = false;
     const ctx: any = {
       id: 'manual-step-fresh',
       sessionManager: { getSessionFile: () => 'old-session.jsonl' },
-      newSession: async (options: {
-        parentSession?: string;
-        withSession: (ctx: unknown) => Promise<void> | void;
-      }) => {
-        assert.equal(options.parentSession, 'old-session.jsonl');
-        oldPiIsStale = true;
-        await options.withSession({
-          id: 'manual-step-replacement',
-          sessionManager: {
-            appendCustomEntry: (type: string, data: unknown) =>
-              replacementEntries.push([type, data]),
-          },
-          ui: {
-            setWidget() {},
-            notify: (message: string, level?: string) =>
-              notices.push([message, level]),
-          },
-          sendUserMessage: (message: string) =>
-            replacementMessages.push(message),
-        });
-        return { cancelled: false };
+      newSession: () => {
+        newSessionCalled = true;
+        throw new Error('manual workflow commands must not replace session');
       },
       ui: {
         setWidget() {},
@@ -2747,27 +2723,24 @@ test('manual Addy workflow steps start in a new session when configured', async 
       ?.handler({ args: ['docs/plans/current.md'] }, ctx);
 
     assert.deepEqual(result, { action: 'continue' });
-    assert.equal(sentMessages.length, 0);
-    assert.equal(replacementMessages.length, 1);
-    assert.equal(replacementEntries.at(-1)?.[0], WORKFLOW_STATE_ENTRY_TYPE);
-    assert.match(replacementMessages[0], /# Addy Finish/);
+    assert.equal(newSessionCalled, false);
+    assert.equal(sentMessages.length, 1);
+    assert.match(sentMessages[0], /# Addy Finish/);
     assert.ok(
-      replacementMessages[0].includes(
+      sentMessages[0].includes(
         'Invocation: `/addy-finish docs/plans/current.md`',
       ),
     );
-    assert.match(notices.at(-1)?.[0] ?? '', /fresh session/);
+    assert.match(notices.at(-1)?.[0] ?? '', /manual workflow commands/);
 
-    oldPiIsStale = false;
-    replacementMessages.length = 0;
+    sentMessages.length = 0;
     await commands
       .get('addy-define')
       ?.handler({ args: ['Implement invoices'] }, ctx);
-    assert.match(replacementMessages[0], /# Addy Define/);
+    assert.equal(newSessionCalled, false);
+    assert.match(sentMessages[0], /# Addy Define/);
     assert.ok(
-      replacementMessages[0].includes(
-        'Invocation: `/addy-define Implement invoices`',
-      ),
+      sentMessages[0].includes('Invocation: `/addy-define Implement invoices`'),
     );
   } finally {
     if (previousEnv === undefined)
@@ -4213,7 +4186,7 @@ test('manual review records severity buckets and unknown fallback', async () => 
   assert.equal(ctx.state.stats.active.tasks[statsKey].issues.total, 4);
 });
 
-test('manual fresh review records issue stats in replacement session', async () => {
+test('manual review records issue stats in current session when beforeEveryStep is configured', async () => {
   const previousFreshEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = '1';
   try {
@@ -4230,25 +4203,15 @@ test('manual fresh review records issue stats in replacement session', async () 
       ].join('\n'),
     );
 
-    const { pi, events, commands } = createPiMock();
+    const { pi, events, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
-    const replacementMessages: string[] = [];
-    let replacementCtx: any;
+    let newSessionCalled = false;
     const ctx: any = {
       cwd,
       id: 'manual-fresh-review-issue-stats',
-      newSession: async (options: {
-        parentSession?: string;
-        withSession: (ctx: unknown) => Promise<void> | void;
-      }) => {
-        replacementCtx = {
-          cwd,
-          id: 'manual-fresh-review-replacement',
-          ui: { setWidget() {}, notify() {} },
-          sendUserMessage: (message: string) =>
-            replacementMessages.push(message),
-        };
-        await options.withSession(replacementCtx);
+      newSession: () => {
+        newSessionCalled = true;
+        throw new Error('manual review must not replace session');
       },
       ui: { setWidget() {}, notify() {} },
     };
@@ -4256,12 +4219,10 @@ test('manual fresh review records issue stats in replacement session', async () 
     await commands.get('addy-review')?.handler({ args: [planPath] }, ctx);
 
     const statsKey = `${planPath}\u001f\u001f1\u001fFresh review task`;
-    assert.equal(replacementMessages.length, 1);
-    assert.equal(replacementCtx.state.reviewStatsKey, statsKey);
-    assert.equal(
-      replacementCtx.state.stats.active.tasks[statsKey].reviewRuns,
-      1,
-    );
+    assert.equal(newSessionCalled, false);
+    assert.equal(sentMessages.length, 1);
+    assert.equal(ctx.state.reviewStatsKey, statsKey);
+    assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 1);
 
     await events.get('agent_end')?.(
       {
@@ -4272,17 +4233,11 @@ test('manual fresh review records issue stats in replacement session', async () 
           },
         ],
       },
-      replacementCtx,
+      ctx,
     );
 
-    assert.equal(
-      replacementCtx.state.stats.active.tasks[statsKey].issues.important,
-      1,
-    );
-    assert.equal(
-      replacementCtx.state.stats.active.tasks[statsKey].issues.total,
-      1,
-    );
+    assert.equal(ctx.state.stats.active.tasks[statsKey].issues.important, 1);
+    assert.equal(ctx.state.stats.active.tasks[statsKey].issues.total, 1);
   } finally {
     if (previousFreshEnv === undefined)
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;

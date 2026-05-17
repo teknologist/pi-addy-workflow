@@ -1239,7 +1239,7 @@ function shouldFreshContextBeforeStep(input: string, ctx: unknown): boolean {
   ).auto.freshContext.beforeEveryStep;
 }
 
-async function dispatchManualStepInFreshContext(
+async function dispatchManualStepWithFreshContextConfig(
   pi: ExtensionAPI,
   input: string,
   ctx: unknown,
@@ -1249,52 +1249,11 @@ async function dispatchManualStepInFreshContext(
       ctx as { ui?: { notify?: (message: string, level?: string) => void } }
     ).ui?.notify?.(message, level);
   const expandedInput = expandPackagedPromptTemplate(input);
-  const newSession = (
-    ctx as {
-      newSession?: (options: {
-        parentSession?: string;
-        withSession: (ctx: unknown) => Promise<void> | void;
-      }) => Promise<{ cancelled?: boolean } | void>;
-    }
-  ).newSession;
-  if (!newSession) {
-    notify(
-      'Addy workflow could not start a fresh session; continuing in the current session.',
-      'warning',
-    );
-    sendUserMessage(pi, ctx, expandedInput);
-    return true;
-  }
-
-  const parentSession = (
-    ctx as { sessionManager?: { getSessionFile?: () => string | undefined } }
-  ).sessionManager?.getSessionFile?.();
-  await newSession.call(ctx, {
-    parentSession,
-    withSession: async (newCtx: unknown) => {
-      setContextWorkflowState(
-        newCtx as never,
-        getContextWorkflowState(ctx as never),
-        appendWorkflowEntryFromContext(newCtx),
-      );
-      (
-        newCtx as {
-          ui?: { notify?: (message: string, level?: string) => void };
-        }
-      ).ui?.notify?.(
-        'Addy workflow is running this step in a fresh session.',
-        'info',
-      );
-      await (
-        newCtx as {
-          sendUserMessage?: (
-            content: string,
-            options?: UserMessageDeliveryOptions,
-          ) => void | Promise<void>;
-        }
-      ).sendUserMessage?.(expandedInput, followUpDeliveryOptions());
-    },
-  });
+  notify(
+    'Addy beforeEveryStep fresh sessions are applied to auto-dispatched steps; manual workflow commands continue in the current session.',
+    'info',
+  );
+  sendUserMessage(pi, ctx, expandedInput);
   return true;
 }
 
@@ -1938,7 +1897,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
           appendWorkflowEntry(pi),
         );
         if (shouldFreshContextBeforeStep(input, ctx))
-          await dispatchManualStepInFreshContext(pi, input, ctx);
+          await dispatchManualStepWithFreshContextConfig(pi, input, ctx);
         else sendUserMessage(pi, ctx, input);
         return { action: 'continue' as const };
       },
