@@ -2700,10 +2700,16 @@ test('manual Addy workflow steps start in a new session when configured', async 
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
-    const { pi, commands, sentMessages } = createPiMock();
+    const { pi, commands, entries, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
+    const replacementEntries: Array<[string, unknown]> = [];
     const notices: Array<[string, string | undefined]> = [];
+    let oldPiIsStale = false;
+    pi.appendEntry = (type: string, data: unknown) => {
+      if (oldPiIsStale) throw new Error('old extension API is stale');
+      return entries.push([type, data]);
+    };
     const ctx: any = {
       id: 'manual-step-fresh',
       sessionManager: { getSessionFile: () => 'old-session.jsonl' },
@@ -2712,8 +2718,13 @@ test('manual Addy workflow steps start in a new session when configured', async 
         withSession: (ctx: unknown) => Promise<void> | void;
       }) => {
         assert.equal(options.parentSession, 'old-session.jsonl');
+        oldPiIsStale = true;
         await options.withSession({
           id: 'manual-step-replacement',
+          sessionManager: {
+            appendCustomEntry: (type: string, data: unknown) =>
+              replacementEntries.push([type, data]),
+          },
           ui: {
             setWidget() {},
             notify: (message: string, level?: string) =>
@@ -2738,6 +2749,7 @@ test('manual Addy workflow steps start in a new session when configured', async 
     assert.deepEqual(result, { action: 'continue' });
     assert.equal(sentMessages.length, 0);
     assert.equal(replacementMessages.length, 1);
+    assert.equal(replacementEntries.at(-1)?.[0], WORKFLOW_STATE_ENTRY_TYPE);
     assert.match(replacementMessages[0], /# Addy Finish/);
     assert.ok(
       replacementMessages[0].includes(
@@ -2746,6 +2758,7 @@ test('manual Addy workflow steps start in a new session when configured', async 
     );
     assert.match(notices.at(-1)?.[0] ?? '', /fresh session/);
 
+    oldPiIsStale = false;
     replacementMessages.length = 0;
     await commands
       .get('addy-define')
@@ -2760,6 +2773,76 @@ test('manual Addy workflow steps start in a new session when configured', async 
     if (previousEnv === undefined)
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
     else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test('auto fresh continuations use the replacement session API for all reasons', async () => {
+  for (const reason of [
+    'before-step',
+    'before-review',
+    'between-tasks',
+  ] as const) {
+    const { pi, commands, entries, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
+    const replacementEntries: Array<[string, unknown]> = [];
+    let oldPiIsStale = false;
+    pi.appendEntry = (type: string, data: unknown) => {
+      if (oldPiIsStale) throw new Error('old extension API is stale');
+      return entries.push([type, data]);
+    };
+    const ctx: any = {
+      id: `auto-fresh-${reason}`,
+      state: {
+        phases: {
+          define: 'complete',
+          plan: 'complete',
+          build: 'pending',
+          simplify: 'pending',
+          verify: 'pending',
+          review: 'pending',
+          finish: 'pending',
+        },
+        warnings: [],
+        autoMode: true,
+        activePlan: 'docs/plans/current.md',
+        autoFreshPrompt: '/addy-build docs/plans/current.md',
+        autoFreshReason: reason,
+        autoFreshDeliveryKey: `fresh-${reason}`,
+      },
+      sessionManager: { getSessionFile: () => `${reason}-old-session.jsonl` },
+      newSession: async (options: {
+        parentSession?: string;
+        withSession: (ctx: unknown) => Promise<void> | void;
+      }) => {
+        assert.equal(options.parentSession, `${reason}-old-session.jsonl`);
+        oldPiIsStale = true;
+        await options.withSession({
+          id: `auto-fresh-${reason}-replacement`,
+          sessionManager: {
+            appendCustomEntry: (type: string, data: unknown) =>
+              replacementEntries.push([type, data]),
+          },
+          ui: { setWidget() {}, notify() {} },
+          isIdle: () => true,
+          sendUserMessage: (message: string) =>
+            replacementMessages.push(message),
+        });
+        return { cancelled: false };
+      },
+      ui: { setWidget() {}, notify() {} },
+      isIdle: () => true,
+    };
+
+    await commands.get('addy-auto-continue')?.handler(`--fresh ${reason}`, ctx);
+
+    assert.equal(sentMessages.length, 0);
+    assert.equal(replacementEntries.at(-1)?.[0], WORKFLOW_STATE_ENTRY_TYPE);
+    assertSentWorkflowPrompt(
+      replacementMessages[0],
+      '/addy-build docs/plans/current.md',
+      'Addy Build',
+    );
   }
 });
 

@@ -98,6 +98,32 @@ function appendWorkflowEntry(pi: ExtensionAPI) {
   return (type: string, data: unknown) => pi.appendEntry?.(type, data);
 }
 
+function appendWorkflowEntryFromContext(ctx: unknown) {
+  return (type: string, data: unknown) =>
+    (
+      ctx as {
+        sessionManager?: {
+          appendCustomEntry?: (type: string, data: unknown) => void;
+        };
+      }
+    ).sessionManager?.appendCustomEntry?.(type, data);
+}
+
+function extensionApiFromContext(ctx: unknown): ExtensionAPI {
+  return {
+    appendEntry: appendWorkflowEntryFromContext(ctx),
+    sendUserMessage: (content: string, options?: UserMessageDeliveryOptions) =>
+      (
+        ctx as {
+          sendUserMessage?: (
+            content: string,
+            options?: UserMessageDeliveryOptions,
+          ) => void | Promise<void>;
+        }
+      ).sendUserMessage?.(content, options),
+  } as ExtensionAPI;
+}
+
 function parseCommandArgs(event: CommandEvent): string[] {
   if (typeof event === 'string') return event.split(/\s+/).filter(Boolean);
   return event.args ?? event.input?.split(/\s+/).filter(Boolean) ?? [];
@@ -1102,20 +1128,7 @@ async function runFreshContextContinuation(
     parentSession,
     withSession: async (newCtx: unknown) => {
       await showFreshContextNotice(newCtx, reason);
-      const replacementPi = {
-        sendUserMessage: (
-          content: string,
-          options?: UserMessageDeliveryOptions,
-        ) =>
-          (
-            newCtx as {
-              sendUserMessage?: (
-                content: string,
-                options?: UserMessageDeliveryOptions,
-              ) => void | Promise<void>;
-            }
-          ).sendUserMessage?.(content, options),
-      } as ExtensionAPI;
+      const replacementPi = extensionApiFromContext(newCtx);
       const replacementState = getContextWorkflowState(newCtx as never);
       if (
         replacementState.autoFreshPrompt &&
@@ -1142,14 +1155,13 @@ async function runFreshContextContinuation(
           replacementPi,
           newCtx,
           replacementState,
-          { freshContextBypassReason: deliveryReason, appendEntry: false },
+          { freshContextBypassReason: deliveryReason },
         )
       )
         return;
       if (replacementState.autoFreshConsumedKey) return;
       await dispatchNextAutoWorkflowPrompt(replacementPi, newCtx, false, {
         freshContextBypassReason: deliveryReason,
-        appendEntry: false,
       });
     },
   });
@@ -1263,7 +1275,7 @@ async function dispatchManualStepInFreshContext(
       setContextWorkflowState(
         newCtx as never,
         getContextWorkflowState(ctx as never),
-        appendWorkflowEntry(pi),
+        appendWorkflowEntryFromContext(newCtx),
       );
       (
         newCtx as {
