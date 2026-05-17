@@ -935,6 +935,15 @@ function freshContextCommand(reason: FreshContextReason): string {
   return `/addy-auto-continue --fresh ${reason}`;
 }
 
+function isStaleExtensionContextError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes(
+      'This extension ctx is stale after session replacement',
+    )
+  );
+}
+
 function freshContextNotice(reason: FreshContextReason): string {
   return reason === 'between-tasks'
     ? 'Addy auto is clearing context and starting a fresh session before the next task.'
@@ -1172,11 +1181,11 @@ async function runFreshContextContinuation(
     );
 }
 
-function sendFreshContextContinuation(
+async function sendFreshContextContinuation(
   pi: ExtensionAPI,
   ctx: unknown,
   reason: FreshContextReason,
-): void {
+): Promise<void> {
   const command = freshContextCommand(reason);
   const contextSender = (
     ctx as {
@@ -1195,8 +1204,9 @@ function sendFreshContextContinuation(
     }
   ).sendUserMessage;
   if (contextSender)
-    contextSender.call(ctx, command, followUpDeliveryOptions());
-  else if (piSender) piSender.call(pi, command, followUpDeliveryOptions());
+    await contextSender.call(ctx, command, followUpDeliveryOptions());
+  else if (piSender)
+    await piSender.call(pi, command, followUpDeliveryOptions());
   else {
     (
       ctx as {
@@ -1326,7 +1336,7 @@ async function dispatchAutoPromptFreshAware(
     stateWithPendingFreshPrompt(prompt, reason, state, updates),
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
-  sendFreshContextContinuation(pi, ctx, reason);
+  await sendFreshContextContinuation(pi, ctx, reason);
 }
 
 async function dispatchTaskCommitPrompt(
@@ -1596,7 +1606,7 @@ async function maybeContinueAfterTaskCommit(
       ),
       appendWorkflowEntry(pi),
     );
-    sendFreshContextContinuation(pi, ctx, 'between-tasks');
+    await sendFreshContextContinuation(pi, ctx, 'between-tasks');
     return true;
   }
   await dispatchNextAutoWorkflowPrompt(pi, ctx);
@@ -1784,7 +1794,7 @@ async function dispatchNextAutoWorkflowPromptAfterAgentEnd(
 }
 
 export default function addyWorkflowMonitor(pi: ExtensionAPI) {
-  pi.on('session_start', (_event: unknown, ctx: unknown) => {
+  pi.on('session_start', async (_event: unknown, ctx: unknown) => {
     ensureGlobalAddyWorkflowConfig(
       ctx as {
         cwd?: string;
@@ -1806,9 +1816,8 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
         { ...state, ...staleAutoFreshUpdates() },
         appendWorkflowEntry(pi),
       );
-    } else if (validPendingFreshContinuation(state)) {
-      sendFreshContextContinuation(pi, ctx, state.autoFreshReason);
-    }
+    } else if (validPendingFreshContinuation(state))
+      await sendFreshContextContinuation(pi, ctx, state.autoFreshReason);
   });
 
   pi.on('input', (event: InputEvent, ctx: unknown) => {
@@ -1854,35 +1863,46 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
   });
 
   pi.on('before_agent_start', (event: SubagentEvent, ctx: unknown) => {
-    handleWorkflowEvent(
-      ctx as never,
-      {
-        source: 'subagent-call',
-        agentName: event.agentName ?? event.agent,
-      },
-      appendWorkflowEntry(pi),
-    );
+    try {
+      handleWorkflowEvent(
+        ctx as never,
+        {
+          source: 'subagent-call',
+          agentName: event.agentName ?? event.agent,
+        },
+        appendWorkflowEntry(pi),
+      );
+    } catch (error) {
+      if (!isStaleExtensionContextError(error)) throw error;
+    }
   });
 
   pi.on('agent_end', async (event: AgentEndEvent, ctx: unknown) => {
-    const state = getContextWorkflowState(ctx as never);
-    const reviewAgent = event.agentName ?? event.agent;
-    const shouldRecordReviewIssues = Boolean(
-      state.reviewStatsKey &&
-      (!state.reviewStatsAgent || reviewAgent === state.reviewStatsAgent),
-    );
-    const reviewText = latestAssistantText(event);
-    const stateWithReviewIssues = shouldRecordReviewIssues
-      ? recordWorkflowReviewIssues(state, reviewIssueStatsFromText(reviewText))
-      : state;
-    if (stateWithReviewIssues !== state)
-      setContextWorkflowState(
-        ctx as never,
-        stateWithReviewIssues,
-        appendWorkflowEntry(pi),
+    try {
+      const state = getContextWorkflowState(ctx as never);
+      const reviewAgent = event.agentName ?? event.agent;
+      const shouldRecordReviewIssues = Boolean(
+        state.reviewStatsKey &&
+        (!state.reviewStatsAgent || reviewAgent === state.reviewStatsAgent),
       );
-    if (!stateWithReviewIssues.autoMode) return;
-    await dispatchNextAutoWorkflowPromptAfterAgentEnd(pi, ctx, event);
+      const reviewText = latestAssistantText(event);
+      const stateWithReviewIssues = shouldRecordReviewIssues
+        ? recordWorkflowReviewIssues(
+            state,
+            reviewIssueStatsFromText(reviewText),
+          )
+        : state;
+      if (stateWithReviewIssues !== state)
+        setContextWorkflowState(
+          ctx as never,
+          stateWithReviewIssues,
+          appendWorkflowEntry(pi),
+        );
+      if (!stateWithReviewIssues.autoMode) return;
+      await dispatchNextAutoWorkflowPromptAfterAgentEnd(pi, ctx, event);
+    } catch (error) {
+      if (!isStaleExtensionContextError(error)) throw error;
+    }
   });
 
   for (const command of FRESH_CONTEXT_STEP_COMMANDS) {
@@ -1947,7 +1967,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
             appendWorkflowEntry(pi),
           );
         } else if (validPendingFreshContinuation(pending)) {
-          sendFreshContextContinuation(pi, ctx, pending.autoFreshReason);
+          await sendFreshContextContinuation(pi, ctx, pending.autoFreshReason);
           return { action: 'continue' as const };
         }
       }

@@ -101,6 +101,43 @@ test('registers workflow commands and handlers', () => {
   assert.ok(commands.has('addy-workflow-next'));
 });
 
+test('subagent lifecycle ignores stale extension context events', async () => {
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const staleContextMessage =
+    'This extension ctx is stale after session replacement or reload.';
+  const ctx: any = { id: 'stale-subagent-context', cwd: stateDir };
+  Object.defineProperty(ctx, 'state', {
+    get() {
+      throw new Error(staleContextMessage);
+    },
+  });
+
+  assert.doesNotThrow(() =>
+    events.get('before_agent_start')?.({ agentName: 'addy-reviewer' }, ctx),
+  );
+  await assert.doesNotReject(async () => {
+    await events.get('agent_end')?.({ agentName: 'addy-reviewer' }, ctx);
+  });
+});
+
+test('subagent lifecycle rethrows non-stale context errors', async () => {
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = { id: 'broken-subagent-context', cwd: stateDir };
+  Object.defineProperty(ctx, 'state', {
+    get() {
+      throw new Error('unexpected state failure');
+    },
+  });
+
+  assert.throws(
+    () =>
+      events.get('before_agent_start')?.({ agentName: 'addy-reviewer' }, ctx),
+    /unexpected state failure/,
+  );
+});
+
 test('session start creates the global Addy workflow config with defaults', async () => {
   const previousHome = process.env.HOME;
   const home = join(stateDir, 'config-home');
