@@ -744,6 +744,23 @@ function pendingAutoFreshUpdates(
   };
 }
 
+function stateWithPendingFreshPrompt(
+  prompt: string,
+  reason: FreshContextReason,
+  state: ReturnType<typeof getContextWorkflowState>,
+  updates: Partial<ReturnType<typeof getContextWorkflowState>> = {},
+): ReturnType<typeof getContextWorkflowState> {
+  const pendingState = {
+    ...state,
+    ...pendingAutoFreshUpdates(prompt, reason, state, updates),
+  };
+  return transitionWorkflow(pendingState, {
+    source: 'user-input',
+    text: prompt,
+    manualAddyCommand: false,
+  });
+}
+
 function autoRetryKey(
   state: ReturnType<typeof getContextWorkflowState>,
   prompt: string,
@@ -1002,13 +1019,22 @@ async function deliverPendingFreshPrompt(
     ...consumeAutoFreshPromptUpdates({ ...state, autoFreshDeliveryKey: key }),
     autoFreshConsumedKey: key,
   });
-  await sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
-  consumedAutoFreshKeys.add(key);
   setContextWorkflowState(
     ctx as never,
     nextState,
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
+  try {
+    await sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
+  } catch (error) {
+    setContextWorkflowState(
+      ctx as never,
+      state,
+      options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
+    );
+    throw error;
+  }
+  consumedAutoFreshKeys.add(key);
   return true;
 }
 
@@ -1326,10 +1352,7 @@ async function dispatchAutoPromptFreshAware(
 
   setContextWorkflowState(
     ctx as never,
-    {
-      ...state,
-      ...pendingAutoFreshUpdates(prompt, reason, state, updates),
-    },
+    stateWithPendingFreshPrompt(prompt, reason, state, updates),
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
   sendFreshContextContinuation(pi, ctx, reason);
@@ -1595,14 +1618,11 @@ async function maybeContinueAfterTaskCommit(
     };
     setContextWorkflowState(
       ctx as never,
-      {
-        ...freshContinuationState,
-        ...pendingAutoFreshUpdates(
-          nextAction.prompt,
-          'between-tasks',
-          freshContinuationState,
-        ),
-      },
+      stateWithPendingFreshPrompt(
+        nextAction.prompt,
+        'between-tasks',
+        freshContinuationState,
+      ),
       appendWorkflowEntry(pi),
     );
     sendFreshContextContinuation(pi, ctx, 'between-tasks');

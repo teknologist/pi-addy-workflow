@@ -1881,6 +1881,7 @@ test('auto loop starts review in a new session when configured', async () => {
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
     let replacementCtx: any;
+    let currentPhaseAtReviewSend: unknown;
     const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
     const ctx: any = {
       cwd,
@@ -1932,8 +1933,10 @@ test('auto loop starts review in a new session when configured', async () => {
           id: 'review-replacement',
           ui: { setWidget() {}, notify() {} },
           isIdle: () => true,
-          sendUserMessage: (message: string) =>
-            replacementMessages.push(message),
+          sendUserMessage: (message: string) => {
+            currentPhaseAtReviewSend = replacementCtx.state?.current;
+            replacementMessages.push(message);
+          },
         };
         await options.withSession(replacementCtx);
         return { cancelled: false };
@@ -1957,6 +1960,8 @@ test('auto loop starts review in a new session when configured', async () => {
     assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 0);
     assert.equal(ctx.state.autoFreshPrompt, `/addy-review ${planPath}`);
     assert.equal(ctx.state.autoFreshReason, 'before-review');
+    assert.equal(ctx.state.current, 'review');
+    assert.equal(ctx.state.phases.review, 'active');
 
     await commands
       .get('addy-auto-continue')
@@ -1968,6 +1973,9 @@ test('auto loop starts review in a new session when configured', async () => {
       `/addy-review ${planPath}`,
       'Addy Review',
     );
+    assert.equal(currentPhaseAtReviewSend, 'review');
+    assert.equal(replacementCtx.state.current, 'review');
+    assert.equal(replacementCtx.state.phases.review, 'active');
     assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 2);
     assert.equal(
       replacementCtx.state.stats.active.tasks[statsKey].reviewRuns,
@@ -2000,6 +2008,7 @@ test('auto loop starts every workflow step in a new session when configured', as
     const { pi, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
+    let lastWidget: unknown;
     const ctx: any = {
       cwd,
       id: 'auto-loop-every-step-fresh',
@@ -2016,7 +2025,7 @@ test('auto loop starts every workflow step in a new session when configured', as
         });
         return { cancelled: false };
       },
-      ui: { setWidget() {} },
+      ui: { setWidget: (_key: string, value: unknown) => (lastWidget = value) },
       isIdle: () => true,
     };
 
@@ -2024,6 +2033,13 @@ test('auto loop starts every workflow step in a new session when configured', as
 
     assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh before-step']);
     assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
+    assert.equal(ctx.state.current, 'build');
+    assert.equal(ctx.state.phases.build, 'active');
+    const footer = (lastWidget as () => { render: () => string[] })()
+      .render()
+      .join('\n');
+    assert.match(footer, /\[build\]/);
+    assert.doesNotMatch(footer, /\[plan\]/);
 
     await commands
       .get('addy-auto-continue')
