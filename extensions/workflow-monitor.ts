@@ -89,6 +89,7 @@ const FRESH_CONTEXT_STEP_COMMANDS = new Set([
   '/addy-finish',
 ]);
 const consumedAutoFreshKeys = new Set<string>();
+const AUTO_SAME_PHASE_MAX_RETRIES = 12;
 
 function isWorkflowPhase(value: string | undefined): value is WorkflowPhase {
   return WORKFLOW_PHASES.includes(value as WorkflowPhase);
@@ -711,6 +712,8 @@ function autoFreshContinuationKey(
     state.currentTask ?? '',
     state.autoReviewTask ?? '',
     state.autoReviewTaskIndex ?? '',
+    state.autoRetryKey ?? '',
+    state.autoRetryCount ?? '',
   ].join('\u001f');
 }
 
@@ -756,6 +759,7 @@ function pendingAutoFreshUpdates(
   reason: FreshContextReason,
   state: ReturnType<typeof getContextWorkflowState>,
   updates: Partial<ReturnType<typeof getContextWorkflowState>> = {},
+  deliveryPrompt?: string,
 ): Partial<ReturnType<typeof getContextWorkflowState>> {
   const pendingState = { ...state, ...updates };
   return {
@@ -763,7 +767,8 @@ function pendingAutoFreshUpdates(
     autoRetryCount: undefined,
     ...updates,
     autoFreshPrompt: prompt,
-    autoFreshExpandedPrompt: expandPackagedPromptTemplate(prompt),
+    autoFreshExpandedPrompt:
+      deliveryPrompt ?? expandPackagedPromptTemplate(prompt),
     autoFreshReason: reason,
     autoFreshDeliveryKey: autoFreshContinuationKey(
       prompt,
@@ -779,10 +784,11 @@ function stateWithPendingFreshPrompt(
   reason: FreshContextReason,
   state: ReturnType<typeof getContextWorkflowState>,
   updates: Partial<ReturnType<typeof getContextWorkflowState>> = {},
+  deliveryPrompt?: string,
 ): ReturnType<typeof getContextWorkflowState> {
   const pendingState = {
     ...state,
-    ...pendingAutoFreshUpdates(prompt, reason, state, updates),
+    ...pendingAutoFreshUpdates(prompt, reason, state, updates, deliveryPrompt),
   };
   return transitionWorkflow(pendingState, {
     source: 'user-input',
@@ -917,6 +923,34 @@ function autoPauseWarning(
   return `Addy auto paused at ${prompt}; the current lifecycle step is still incomplete after retry.${task}${missingText} Re-run the step after fixing the work, or update the plan checkbox only if that phase is actually complete.`;
 }
 
+function autoRecoveryPrompt(
+  prompt: string,
+  action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
+  retryCount: number,
+): string {
+  const task = action?.taskTitle ?? 'the current task';
+  const missing = action?.missingStatuses?.join(', ') ?? 'the current phase';
+  return `${expandPackagedPromptTemplate(prompt)}
+
+## Addy Auto Same-Phase Recovery Pass
+
+This is autonomous retry #${retryCount + 1} for the same incomplete lifecycle phase. Do not stop after a preflight/status report. Grind until the phase is complete or you can prove a hard blocker needs user input.
+
+Target task: ${task}
+Missing lifecycle evidence: ${missing}
+
+Required loop:
+1. Re-read the plan and the current task acceptance criteria.
+2. Self-assess what is still missing for this exact phase.
+3. Diagnose the blocker using focused commands and existing tests.
+4. Make the smallest safe fix needed for this phase.
+5. Run focused verification proving the fix.
+6. Update only the lifecycle checkbox(es) backed by evidence from this turn.
+7. If verification fails, iterate again in this same turn instead of pausing.
+
+Pause only for a real hard blocker: missing credentials, destructive production risk, unresolved merge conflict, or explicit user decision required. If you pause, name the blocker and the exact command/evidence that proves it.`;
+}
+
 function stateWithCompletedLifecyclePhasesFromPlan(
   state: ReturnType<typeof getContextWorkflowState>,
   action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
@@ -937,10 +971,6 @@ function stateWithCompletedLifecyclePhasesFromPlan(
   }
 
   return { ...state, phases };
-}
-
-function freshContextCommand(reason: FreshContextReason): string {
-  return `/addy-auto-continue --fresh ${reason}`;
 }
 
 function isStaleExtensionContextError(error: unknown): boolean {
@@ -1055,6 +1085,7 @@ async function deliverPendingFreshPrompt(
 ): Promise<boolean> {
   if (!validPendingFreshContinuation(state)) return false;
   const prompt = state.autoFreshPrompt;
+  const deliveryPrompt = state.autoFreshExpandedPrompt ?? prompt;
   const key =
     state.autoFreshDeliveryKey ??
     autoFreshContinuationKey(prompt, state.autoFreshReason, state);
@@ -1068,7 +1099,9 @@ async function deliverPendingFreshPrompt(
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
   try {
-    await sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
+    await sendUserMessage(pi, ctx, deliveryPrompt, {
+      autoMode: state.autoMode,
+    });
   } catch (error) {
     setContextWorkflowState(
       ctx as never,
@@ -1194,43 +1227,7 @@ async function sendFreshContextContinuation(
   ctx: unknown,
   reason: FreshContextReason,
 ): Promise<void> {
-  const command = freshContextCommand(reason);
-  const contextSender = (
-    ctx as {
-      sendUserMessage?: (
-        content: string,
-        options?: UserMessageDeliveryOptions,
-      ) => void;
-    }
-  ).sendUserMessage;
-  const piSender = (
-    pi as ExtensionAPI & {
-      sendUserMessage?: (
-        content: string,
-        options?: UserMessageDeliveryOptions,
-      ) => void;
-    }
-  ).sendUserMessage;
-  if (contextSender)
-    await contextSender.call(ctx, command, followUpDeliveryOptions());
-  else if (piSender)
-    await piSender.call(pi, command, followUpDeliveryOptions());
-  else {
-    (
-      ctx as {
-        ui?: {
-          setEditorText?: (text: string) => void;
-          notify?: (msg: string, level?: string) => void;
-        };
-      }
-    ).ui?.setEditorText?.(command);
-    (
-      ctx as { ui?: { notify?: (msg: string, level?: string) => void } }
-    ).ui?.notify?.(
-      `Prefilled ${command}; submit it to continue Addy auto.`,
-      'info',
-    );
-  }
+  await runFreshContextContinuation(pi, ctx, reason);
 }
 
 function parseFreshContextReason(
@@ -1309,6 +1306,7 @@ function dispatchAutoPrompt(
   updates: Partial<ReturnType<typeof getContextWorkflowState>> = {},
   statsTarget?: WorkflowStatsTarget,
   options: DispatchOptions = {},
+  deliveryPrompt = prompt,
 ): void {
   const stateWithPromptPhase = stateAfterAutoPrompt(
     prompt,
@@ -1321,7 +1319,7 @@ function dispatchAutoPrompt(
     stateWithPromptPhase,
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
-  sendUserMessage(pi, ctx, prompt, { autoMode: state.autoMode });
+  sendUserMessage(pi, ctx, deliveryPrompt, { autoMode: state.autoMode });
 }
 
 async function dispatchAutoPromptFreshAware(
@@ -1332,16 +1330,26 @@ async function dispatchAutoPromptFreshAware(
   updates: Partial<ReturnType<typeof getContextWorkflowState>> = {},
   statsTarget?: WorkflowStatsTarget,
   options: DispatchOptions = {},
+  deliveryPrompt?: string,
 ): Promise<void> {
   const reason = freshContextReasonForPrompt(prompt, ctx, state, options);
   if (!reason) {
-    dispatchAutoPrompt(pi, ctx, prompt, state, updates, statsTarget, options);
+    dispatchAutoPrompt(
+      pi,
+      ctx,
+      prompt,
+      state,
+      updates,
+      statsTarget,
+      options,
+      deliveryPrompt,
+    );
     return;
   }
 
   setContextWorkflowState(
     ctx as never,
-    stateWithPendingFreshPrompt(prompt, reason, state, updates),
+    stateWithPendingFreshPrompt(prompt, reason, state, updates, deliveryPrompt),
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
   await sendFreshContextContinuation(pi, ctx, reason);
@@ -1721,12 +1729,21 @@ async function dispatchNextAutoWorkflowPrompt(
     lifecycleSyncedState.autoRetryKey === retryKey
       ? (lifecycleSyncedState.autoRetryCount ?? 0)
       : 0;
-  if (!allowSamePhase && isSameIncompletePhase && retryCount >= 1) {
+  if (
+    !allowSamePhase &&
+    isSameIncompletePhase &&
+    retryCount >= AUTO_SAME_PHASE_MAX_RETRIES
+  ) {
     (
       ctx as { ui?: { notify?: (message: string, level?: string) => void } }
     ).ui?.notify?.(autoPauseWarning(prompt, action), 'warning');
     return;
   }
+
+  const deliveryPrompt =
+    !allowSamePhase && isSameIncompletePhase && retryCount >= 1
+      ? autoRecoveryPrompt(prompt, action, retryCount)
+      : undefined;
 
   const reviewTask =
     phase === 'review'
@@ -1760,6 +1777,7 @@ async function dispatchNextAutoWorkflowPrompt(
         }
       : undefined,
     options,
+    deliveryPrompt,
   );
 }
 

@@ -671,7 +671,7 @@ test('registered workflow next command exits auto mode', async () => {
   assert.deepEqual(prefills, [`/addy-verify ${planPath}`]);
 });
 
-test('auto loop retries one incomplete same-phase step before pausing', async () => {
+test('auto loop self-unblocks repeated incomplete same-phase steps', async () => {
   const cwd = join(stateDir, 'auto-loop-pause-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -726,9 +726,15 @@ test('auto loop retries one incomplete same-phase step before pausing', async ()
   await events.get('input')?.({ input: sentMessages.at(-1) }, ctx);
   await events.get('agent_end')?.({}, ctx);
 
-  assert.equal(sentMessages.length, 1);
-  assert.match(notices.at(-1)?.[0] ?? '', /paused at \/addy-build/);
-  assert.equal(notices.at(-1)?.[1], 'warning');
+  assert.equal(sentMessages.length, 2);
+  assertSentWorkflowPrompt(
+    sentMessages[1],
+    `/addy-build ${planPath}`,
+    'Addy Build',
+  );
+  assert.match(sentMessages[1], /Addy Auto Same-Phase Recovery Pass/);
+  assert.match(sentMessages[1], /Grind until the phase is complete/);
+  assert.equal(notices.length, 0);
 });
 
 test('auto loop same-phase retry works for verify and review too', async () => {
@@ -797,13 +803,73 @@ test('auto loop same-phase retry works for verify and review too', async () => {
 
     await events.get('input')?.({ input: sentMessages.at(-1) }, ctx);
     await events.get('agent_end')?.({}, ctx);
-    assert.equal(sentMessages.length, 1);
-    assert.match(
-      notices.at(-1)?.[0] ?? '',
-      new RegExp(`paused at ${testCase.command}`),
+    assert.equal(sentMessages.length, 2);
+    assertSentWorkflowPrompt(
+      sentMessages[1],
+      `${testCase.command} ${planPath}`,
+      testCase.phase === 'verify' ? 'Addy Verify' : 'Addy Review',
     );
-    assert.equal(notices.at(-1)?.[1], 'warning');
+    assert.match(sentMessages[1], /Addy Auto Same-Phase Recovery Pass/);
+    assert.equal(notices.length, 0);
   }
+});
+
+test('auto loop pauses only after the same-phase retry safety cap', async () => {
+  const cwd = join(stateDir, 'auto-loop-retry-cap-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const retryPrompt = `/addy-build ${planPath}`;
+  const retryKey = [retryPrompt, planPath, 1, 'Current', 'none'].join('\u001f');
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-retry-cap',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      currentTask: 'Current',
+      nextTask: 'none',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      activePlan: planPath,
+      autoRetryKey: retryKey,
+      autoRetryCount: 12,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.({}, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? '', /paused at \/addy-build/);
+  assert.equal(notices.at(-1)?.[1], 'warning');
 });
 
 test('auto loop runs fix-all when review surfaces actionable findings', async () => {
@@ -1770,16 +1836,17 @@ test('auto loop starts next task in a new session after task commit', async () =
     ctx,
   );
 
-  assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh between-tasks']);
+  assert.deepEqual(sentMessages, []);
   assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
   assert.equal(ctx.state.autoFreshReason, 'between-tasks');
-  assert.equal(replacementMessages.length, 0);
-
-  await commands
-    .get('addy-auto-continue')
-    ?.handler('--fresh between-tasks', ctx);
 
   assert.equal(newSessionParent, 'old-session.jsonl');
+  assert.equal(replacementMessages.length, 1);
+  assertSentWorkflowPrompt(
+    replacementMessages[0],
+    `/addy-build ${planPath}`,
+    'Addy Build',
+  );
   assert.equal(replacementMessages.length, 1);
   assertSentWorkflowPrompt(
     replacementMessages[0],
@@ -1898,13 +1965,9 @@ test('auto loop starts next slice in a new session after no-op task commit', asy
     ctx,
   );
 
-  assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh between-tasks']);
+  assert.deepEqual(sentMessages, []);
   assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${secondPlan}`);
   assert.equal(ctx.state.autoFreshReason, 'between-tasks');
-
-  await commands
-    .get('addy-auto-continue')
-    ?.handler('--fresh between-tasks', ctx);
 
   assert.equal(replacementMessages.length, 1);
   assertSentWorkflowPrompt(
@@ -2006,7 +2069,7 @@ test('auto loop starts review in a new session when configured', async () => {
   const previousEnv = process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
   process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW = 'true';
   try {
-    const { pi, events, commands, sentMessages } = createPiMock();
+    const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
     let replacementCtx: any;
@@ -2083,18 +2146,12 @@ test('auto loop starts review in a new session when configured', async () => {
       ctx,
     );
 
-    assert.deepEqual(sentMessages, [
-      '/addy-auto-continue --fresh before-review',
-    ]);
+    assert.deepEqual(sentMessages, []);
     assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 0);
     assert.equal(ctx.state.autoFreshPrompt, `/addy-review ${planPath}`);
     assert.equal(ctx.state.autoFreshReason, 'before-review');
     assert.equal(ctx.state.current, 'review');
     assert.equal(ctx.state.phases.review, 'active');
-
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
 
     assert.equal(replacementMessages.length, 1);
     assertSentWorkflowPrompt(
@@ -2160,7 +2217,7 @@ test('auto loop starts every workflow step in a new session when configured', as
 
     await commands.get('addy-auto')?.handler(planPath, ctx);
 
-    assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh before-step']);
+    assert.deepEqual(sentMessages, []);
     assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
     assert.equal(ctx.state.current, 'build');
     assert.equal(ctx.state.phases.build, 'active');
@@ -2169,10 +2226,6 @@ test('auto loop starts every workflow step in a new session when configured', as
       .join('\n');
     assert.match(footer, /\[build\]/);
     assert.doesNotMatch(footer, /\[plan\]/);
-
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
 
     assertSentWorkflowPrompt(
       replacementMessages[0],
@@ -2186,7 +2239,7 @@ test('auto loop starts every workflow step in a new session when configured', as
   }
 });
 
-test('fresh-context same-phase retry pauses after one retry', async () => {
+test('fresh-context same-phase retry self-unblocks instead of pausing', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
@@ -2203,10 +2256,9 @@ test('fresh-context same-phase retry pauses after one retry', async () => {
       ].join('\n'),
     );
 
-    const { pi, events, commands, sentMessages } = createPiMock();
+    const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
-    const replacementNotices: Array<[string, string | undefined]> = [];
     let replacementCtx: any;
     const ctx: any = {
       cwd,
@@ -2234,8 +2286,7 @@ test('fresh-context same-phase retry pauses after one retry', async () => {
           id: 'auto-loop-fresh-retry-replacement',
           ui: {
             setWidget() {},
-            notify: (message: string, level?: string) =>
-              replacementNotices.push([message, level]),
+            notify() {},
           },
           isIdle: () => true,
           sendUserMessage: (message: string) =>
@@ -2250,12 +2301,8 @@ test('fresh-context same-phase retry pauses after one retry', async () => {
 
     await events.get('agent_end')?.({}, ctx);
 
-    assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh before-step']);
+    assert.deepEqual(sentMessages, []);
     assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
-
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
 
     assertSentWorkflowPrompt(
       replacementMessages[0],
@@ -2271,12 +2318,13 @@ test('fresh-context same-phase retry pauses after one retry', async () => {
 
     await events.get('agent_end')?.({}, replacementCtx);
 
-    assert.equal(replacementMessages.length, 1);
-    assert.match(
-      replacementNotices.at(-1)?.[0] ?? '',
-      /paused at \/addy-build/,
+    assert.equal(replacementMessages.length, 2);
+    assertSentWorkflowPrompt(
+      replacementMessages[1],
+      `/addy-build ${planPath}`,
+      'Addy Build',
     );
-    assert.equal(replacementNotices.at(-1)?.[1], 'warning');
+    assert.match(replacementMessages[1], /Addy Auto Same-Phase Recovery Pass/);
   } finally {
     if (previousEnv === undefined)
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -2301,7 +2349,7 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       ].join('\n'),
     );
 
-    const { pi, events, commands, sentMessages } = createPiMock();
+    const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const replacementMessages: string[] = [];
     const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
@@ -2384,12 +2432,7 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       },
       ctx,
     );
-    assert.deepEqual(sentMessages.splice(0), [
-      '/addy-auto-continue --fresh before-step',
-    ]);
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
+    assert.deepEqual(sentMessages.splice(0), []);
     assertSentWorkflowPrompt(
       replacementMessages.at(-1),
       `/addy-fix-all ${planPath}`,
@@ -2405,12 +2448,7 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       },
       ctx,
     );
-    assert.deepEqual(sentMessages.splice(0), [
-      '/addy-auto-continue --fresh before-step',
-    ]);
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
+    assert.deepEqual(sentMessages.splice(0), []);
     assertSentWorkflowPrompt(
       replacementMessages.at(-1),
       `/addy-verify ${planPath}`,
@@ -2430,12 +2468,7 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       },
       ctx,
     );
-    assert.deepEqual(sentMessages.splice(0), [
-      '/addy-auto-continue --fresh before-step',
-    ]);
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
+    assert.deepEqual(sentMessages.splice(0), []);
     assertSentWorkflowPrompt(
       replacementMessages.at(-1),
       `/addy-review ${planPath}`,
@@ -2502,11 +2535,7 @@ test('fresh context emits visible clearing-context messages', async () => {
 
     await commands.get('addy-auto')?.handler(planPath, ctx);
 
-    assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh before-step']);
-
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
+    assert.deepEqual(sentMessages, []);
 
     assert.ok(notices.some(([message]) => /clearing context/.test(message)));
     assert.ok(
@@ -2760,7 +2789,7 @@ test('fresh context fallback dispatches pending review-fix prompt when newSessio
       ].join('\n'),
     );
 
-    const { pi, events, commands, sentMessages } = createPiMock();
+    const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
     const ctx: any = {
       cwd,
@@ -2804,13 +2833,6 @@ test('fresh context fallback dispatches pending review-fix prompt when newSessio
       ctx,
     );
 
-    assert.equal(
-      sentMessages.at(-1),
-      '/addy-auto-continue --fresh before-step',
-    );
-    await commands
-      .get('addy-auto-continue')
-      ?.handler('--fresh before-step', ctx);
     assertSentWorkflowPrompt(
       sentMessages.at(-1),
       `/addy-fix-all ${planPath}`,
@@ -3543,7 +3565,6 @@ test('auto retry state restored from session entries pauses duplicate dispatch',
   const retryKey = [retryPrompt, planPath, 1, 'Current', 'none'].join('\u001f');
   const { pi, events, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
-  const notices: Array<[string, string | undefined]> = [];
   const restoredState = {
     phases: {
       define: 'complete',
@@ -3574,16 +3595,20 @@ test('auto retry state restored from session entries pauses duplicate dispatch',
     },
     ui: {
       setWidget() {},
-      notify: (message: string, level?: string) =>
-        notices.push([message, level]),
+      notify() {},
     },
     isIdle: () => true,
   };
 
   await events.get('agent_end')?.({}, ctx);
 
-  assert.deepEqual(sentMessages, []);
-  assert.match(notices.at(-1)?.[0] ?? '', /paused at \/addy-build/);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-build ${planPath}`,
+    'Addy Build',
+  );
+  assert.match(sentMessages[0], /Addy Auto Same-Phase Recovery Pass/);
 });
 
 test('malformed persisted auto retry state is ignored', () => {
@@ -3744,12 +3769,13 @@ test('project restore preserves pending fresh auto continuation but clears stale
   assert.equal(state.reviewStatsKey, undefined);
 });
 
-test('agent_end fresh handoff never calls ctx.newSession directly', async () => {
+test('agent_end fresh handoff starts a replacement session directly', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
     const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
+    const replacementMessages: string[] = [];
     const ctx: any = {
       id: 'agent-end-trampoline-only',
       state: {
@@ -3767,22 +3793,35 @@ test('agent_end fresh handoff never calls ctx.newSession directly', async () => 
         autoMode: true,
         activePlan: 'docs/plans/current.md',
       },
-      newSession: async () =>
-        assert.fail(
-          'agent_end must enqueue the trampoline instead of starting a session',
-        ),
+      newSession: async (options: {
+        withSession: (ctx: unknown) => Promise<void> | void;
+      }) => {
+        await options.withSession({
+          id: 'agent-end-trampoline-only-replacement',
+          ui: { setWidget() {}, notify() {} },
+          isIdle: () => true,
+          sendUserMessage: (message: string) =>
+            replacementMessages.push(message),
+        });
+        return { cancelled: false };
+      },
       ui: { setWidget() {} },
       isIdle: () => true,
     };
 
     await events.get('agent_end')?.({}, ctx);
 
-    assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh before-step']);
+    assert.deepEqual(sentMessages, []);
     assert.equal(
       ctx.state.autoFreshPrompt,
       '/addy-build docs/plans/current.md',
     );
     assert.equal(ctx.state.autoFreshReason, 'before-step');
+    assertSentWorkflowPrompt(
+      replacementMessages[0],
+      '/addy-build docs/plans/current.md',
+      'Addy Build',
+    );
   } finally {
     if (previousEnv === undefined)
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -3822,7 +3861,12 @@ test('session start auto-resumes valid pending fresh continuation', async () => 
     { cwd, id: 'startup-auto-resume-next', ui: { setWidget() {} } },
   );
 
-  assert.deepEqual(sentMessages, ['/addy-auto-continue --fresh before-step']);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    '/addy-build docs/plans/fresh.md',
+    'Addy Build',
+  );
 });
 
 test('session start ignores reasonless pending fresh state', async () => {
@@ -3977,7 +4021,7 @@ test('consumed fresh continuation wins over stale branch pending state', async (
   assert.equal(replacementMessages.length, 0);
 });
 
-test('fresh continuation uses SDK streaming behavior while queued', async () => {
+test('fresh continuation uses SDK streaming behavior for delivered prompt', async () => {
   const cwd = join(stateDir, 'fresh-continuation-streaming-options-project');
   const sent: Array<{
     message: string;
@@ -4014,7 +4058,11 @@ test('fresh continuation uses SDK streaming behavior while queued', async () => 
 
   await events.get('session_start')?.({}, ctx);
 
-  assert.equal(sent[0].message, '/addy-auto-continue --fresh before-step');
+  assertSentWorkflowPrompt(
+    sent[0].message,
+    '/addy-build docs/plans/current.md',
+    'Addy Build',
+  );
   assert.deepEqual(sent[0].options, {
     deliverAs: 'followUp',
     streamingBehavior: 'followUp',
