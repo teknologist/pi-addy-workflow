@@ -884,7 +884,11 @@ function latestCompletedActiveStatsTarget(
     )
       continue;
     const target = statsTargetFromTask(task);
-    if (planTaskIsComplete(target.plan ?? state.activePlan, baseCwd, target))
+    if (
+      task.verifyRuns > 0 &&
+      task.reviewRuns > 0 &&
+      planTaskIsComplete(target.plan ?? state.activePlan, baseCwd, target)
+    )
       return target;
   }
   return undefined;

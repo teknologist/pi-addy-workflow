@@ -30,7 +30,7 @@ When asking for a plan, include the active plan as the recommended option unless
 
 Before changing code, read the active/supplied plan to identify the current task, but do not update the plan yet. Status checkbox updates happen only after the task phase finishes successfully.
 
-For heading/status slice plans, `/addy-build` may mark only the current task's `[x] Implemented` checkbox after the implementation exists and checks pass. Do not mark, unmark, or otherwise edit `[ ] Verified` or `[ ] Reviewed` during build, even if you believe verification or review evidence exists. Those checkboxes belong exclusively to `/addy-verify` and `/addy-review`. Do not treat a task as complete just because it is implemented. The same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked. Legacy checklist-only plans remain supported: each top-level task checkbox represents the whole task completion state.
+For heading/status slice plans, `/addy-build` may mark only the current task's `[x] Implemented` checkbox after the implementation exists and checks pass. Do not mark, unmark, or otherwise edit `[ ] Verified` or `[ ] Reviewed` during build, even if you ran tests, inspected the diff, or believe verification/review evidence exists. Those checkboxes belong exclusively to `/addy-verify` and `/addy-review`; a manual self-review inside build is not an Addy REVIEW step. Do not treat a task as complete just because it is implemented. The same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked by their owning phases. Legacy checklist-only plans remain supported: each top-level task checkbox represents the whole task completion state.
 
 Pick the next pending task from the plan. For each task:
 

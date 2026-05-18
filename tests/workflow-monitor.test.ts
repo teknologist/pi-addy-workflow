@@ -1091,6 +1091,98 @@ test('auto loop commits a completed reviewed task before moving to the next task
   assert.match(sentMessages[0], /Do not call ask_user_question/);
 });
 
+test('auto loop does not accept reviewed checkbox written by build without review evidence', async () => {
+  const cwd = join(stateDir, 'auto-loop-build-illegal-reviewed-project');
+  const planPath = join('docs', 'plans', 'auto-loop-build-illegal-reviewed.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const statsKey = `${planPath}\u001f\u001f1\u001fCurrent`;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-build-illegal-reviewed',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      activePlan: planPath,
+      stats: {
+        active: {
+          tasks: {
+            [statsKey]: {
+              plan: planPath,
+              taskIndex: 1,
+              taskTitle: 'Current',
+              turns: 1,
+              verifyRuns: 0,
+              reviewRuns: 0,
+              issues: {
+                critical: 0,
+                important: 0,
+                suggestion: 0,
+                unknown: 0,
+                total: 0,
+              },
+            },
+          },
+        },
+        history: [],
+      },
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Built, tested, and self-reviewed.' },
+          ],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
+  assert.doesNotMatch(sentMessages[0], /^# Addy Auto Commit/);
+});
+
 test('auto loop extracts cross-repo scope from slice index metadata', async () => {
   const cwd = join(stateDir, 'invoicehub-files-to-api');
   const planPath = join('docs', 'plans', 'slice-01.md');
@@ -2434,7 +2526,7 @@ test('fresh context emits visible clearing-context messages', async () => {
   }
 });
 
-test('auto loop commits completed review-fix target before advancing to the next task', async () => {
+test('auto loop re-reviews review-fix target before committing without review evidence', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'false';
   try {
@@ -2502,12 +2594,10 @@ test('auto loop commits completed review-fix target before advancing to the next
       ctx,
     );
 
-    assert.match(sentMessages[0], /^# Addy Auto Commit/);
-    assert.match(sentMessages[0], /Completed task: Done/);
-    assert.doesNotMatch(sentMessages[0], /Completed task: Next/);
-    assert.match(
+    assertSentWorkflowPrompt(
       sentMessages[0],
-      /Do not try to invoke, search for, or print a `\/commit` slash command/,
+      `/addy-review ${planPath}`,
+      'Addy Review',
     );
   } finally {
     if (previousEnv === undefined)
@@ -4852,6 +4942,7 @@ test('auto finish archives active stats and reports totals', async () => {
               taskIndex: 1,
               taskTitle: 'Current',
               turns: 2,
+              verifyRuns: 1,
               reviewRuns: 1,
               issues: {
                 critical: 0,

@@ -22,6 +22,12 @@ Rules:
 
 - `/addy-code-simplify` maps to optional SIMPLIFY; preserve behavior.
 - Keep active plan task checkboxes synchronized with reality: `[x] Implemented`, `[x] Verified`, and `[x] Reviewed` only when each step actually happened.
+- Enforce checkbox ownership strictly:
+  - `/addy-build` may only check `Implemented`.
+  - `/addy-verify` may only check `Verified`.
+  - `/addy-review` may only check `Reviewed`.
+  - `/addy-auto` may not directly check lifecycle boxes; it dispatches the next owned phase.
+- Treat checked lifecycle boxes as valid only when the owning phase actually ran for that task/slice. In particular, `[x] Reviewed` is not complete unless `/addy-review` ran for that task/slice.
 - Ask before implementing a plan unless the user already ordered implementation.
 - Use `todo` for multi-step tracking when available.
 - Use `subagent` for review/ship fan-out when available.

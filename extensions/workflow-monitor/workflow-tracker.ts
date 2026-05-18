@@ -252,6 +252,126 @@ function taskMissingStatuses(statuses: PlanTaskStatus[]): PlanTaskStatus[] {
   return REQUIRED_TASK_STATUSES.filter((label) => !statuses.includes(label));
 }
 
+function commandFromPrompt(prompt?: string): string | undefined {
+  if (!prompt) return undefined;
+  const invocation = prompt.match(/Invocation:\s*`([^`]+)`/i)?.[1];
+  const text = invocation ?? prompt;
+  return text.trim().split(/\s+/)[0];
+}
+
+function taskMatchesPlanTask(
+  task: PlanTask,
+  index: number,
+  candidate: { taskIndex?: number; taskTitle?: string },
+): boolean {
+  if (candidate.taskIndex !== undefined && candidate.taskIndex !== index + 1)
+    return false;
+  if (candidate.taskTitle && candidate.taskTitle !== task.title) return false;
+  return candidate.taskIndex !== undefined || Boolean(candidate.taskTitle);
+}
+
+function stateTargetsPlanTask(
+  state: WorkflowState,
+  task: PlanTask,
+  index: number,
+): boolean {
+  return (
+    taskMatchesPlanTask(task, index, {
+      taskIndex: state.currentTaskIndex,
+      taskTitle: state.currentTask,
+    }) ||
+    taskMatchesPlanTask(task, index, {
+      taskIndex: state.autoReviewTaskIndex,
+      taskTitle: state.autoReviewTask,
+    })
+  );
+}
+
+function statsForPlanTask(
+  state: WorkflowState,
+  planPath: string,
+  task: PlanTask,
+  index: number,
+): WorkflowTaskStats | undefined {
+  const sessions = state.stats
+    ? [state.stats.active, ...state.stats.history]
+    : [];
+  const tasks = sessions
+    .flatMap((session) => Object.values(session.tasks))
+    .filter(
+      (candidate) =>
+        (!candidate.plan || candidate.plan === planPath) &&
+        taskMatchesPlanTask(task, index, candidate),
+    );
+  if (tasks.length === 0) return undefined;
+  return tasks.reduce(
+    (total, candidate) => ({
+      ...candidate,
+      turns: total.turns + candidate.turns,
+      verifyRuns: total.verifyRuns + candidate.verifyRuns,
+      reviewRuns: total.reviewRuns + candidate.reviewRuns,
+      issues: addIssueStats(total.issues, candidate.issues),
+    }),
+    {
+      turns: 0,
+      verifyRuns: 0,
+      reviewRuns: 0,
+      issues: emptyIssueStats(),
+    } as WorkflowTaskStats,
+  );
+}
+
+function lifecycleEvidenceMissingStatuses(
+  state: WorkflowState,
+  planPath: string,
+  task: PlanTask,
+  index: number,
+): PlanTaskStatus[] {
+  if (!task.missingStatuses) return [];
+
+  const stats = statsForPlanTask(state, planPath, task, index);
+  const taskIsCurrentTarget = stateTargetsPlanTask(state, task, index);
+  if (!taskIsCurrentTarget && !stats) return [];
+
+  const command = commandFromPrompt(state.autoLastPrompt);
+  const missing = new Set<PlanTaskStatus>();
+
+  if (
+    !task.missingStatuses.includes('Verified') &&
+    (stats?.verifyRuns ?? 0) === 0 &&
+    (stats || command === '/addy-build') &&
+    command !== '/addy-verify' &&
+    command !== '/addy-review'
+  ) {
+    missing.add('Verified');
+  }
+
+  if (
+    !task.missingStatuses.includes('Reviewed') &&
+    (stats?.reviewRuns ?? 0) === 0 &&
+    !(taskIsCurrentTarget && command === '/addy-review')
+  ) {
+    missing.add('Reviewed');
+  }
+
+  return [...missing];
+}
+
+function effectiveTaskMissingStatuses(
+  state: WorkflowState,
+  planPath: string,
+  task: PlanTask,
+  index: number,
+): PlanTaskStatus[] | undefined {
+  if (!task.missingStatuses) return undefined;
+  return [
+    ...task.missingStatuses,
+    ...lifecycleEvidenceMissingStatuses(state, planPath, task, index),
+  ].filter(
+    (status, statusIndex, statuses) => statuses.indexOf(status) === statusIndex,
+  );
+}
+
 function resolvePlanPath(planPath: string, baseCwd?: string): string {
   const filesystemPath = planPath.startsWith('@')
     ? planPath.slice(1)
@@ -665,7 +785,13 @@ export function refreshWorkflowTasksFromPlan(
     };
   }
 
-  const currentIndex = tasks.findIndex((task) => !task.complete);
+  const taskIsComplete = (task: PlanTask, index: number) =>
+    task.complete &&
+    (effectiveTaskMissingStatuses(state, state.activePlan!, task, index)
+      ?.length ?? 0) === 0;
+  const currentIndex = tasks.findIndex(
+    (task, index) => !taskIsComplete(task, index),
+  );
   if (currentIndex === -1) {
     const currentTask = 'all tasks complete';
     const nextTask = 'none';
@@ -687,7 +813,9 @@ export function refreshWorkflowTasksFromPlan(
   }
 
   const current = tasks[currentIndex];
-  const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
+  const next = tasks
+    .slice(currentIndex + 1)
+    .find((task, offset) => !taskIsComplete(task, currentIndex + 1 + offset));
   const currentTask = current.title;
   const nextTask = next?.title ?? 'none';
   return {
@@ -951,7 +1079,21 @@ export function nextWorkflowActionForActivePlanLifecycle(
       );
   }
 
-  const task = tasks.find((candidate) => !candidate.complete);
+  const task = tasks
+    .map((candidate, index) => ({
+      ...candidate,
+      missingStatuses:
+        effectiveTaskMissingStatuses(
+          state,
+          state.activePlan!,
+          candidate,
+          index,
+        ) ?? candidate.missingStatuses,
+    }))
+    .find(
+      (candidate) =>
+        !candidate.complete || (candidate.missingStatuses?.length ?? 0) > 0,
+    );
   if (!task)
     return {
       prompt:

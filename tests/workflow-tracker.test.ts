@@ -11,6 +11,7 @@ import {
 } from '../extensions/workflow-monitor/workflow-transitions.ts';
 import {
   nextPromptForActivePlanLifecycle,
+  nextWorkflowActionForActivePlanLifecycle,
   nextPromptForPhase,
   parseWorkflowState,
   planTasksFromMarkdown,
@@ -1177,6 +1178,164 @@ test('unfinished lifecycle step helper reports missing finish prerequisites', ()
       },
       { title: 'Verified but not reviewed', missingStatuses: ['Reviewed'] },
     ],
+  );
+});
+
+test('active plan lifecycle ignores verified and reviewed checkboxes without phase-run evidence for the current task', () => {
+  const cwd = join(taskFooterDir, 'phase-evidence-project');
+  const planPath = join('docs', 'plans', 'phase-evidence.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Build illegally checked everything',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '',
+      '## Task 2: Later task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    nextWorkflowActionForActivePlanLifecycle(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        currentTask: 'Build illegally checked everything',
+        currentTaskIndex: 1,
+        autoLastPrompt: `/addy-build ${planPath}`,
+      },
+      cwd,
+    ),
+    {
+      prompt: `/addy-verify ${planPath}`,
+      taskTitle: 'Build illegally checked everything',
+      missingStatuses: ['Verified', 'Reviewed'],
+    },
+  );
+});
+
+test('active plan lifecycle ignores verified checkbox without phase-run evidence after resume', () => {
+  const cwd = join(taskFooterDir, 'phase-evidence-resume-project');
+  const planPath = join('docs', 'plans', 'phase-evidence-resume.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Resumed illegal checkbox state',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+      '',
+      '## Task 2: Later task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    nextWorkflowActionForActivePlanLifecycle(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        currentTask: 'Resumed illegal checkbox state',
+        currentTaskIndex: 1,
+        stats: {
+          active: {
+            tasks: {
+              [`${planPath}\u001f\u001f1\u001fResumed illegal checkbox state`]:
+                {
+                  plan: planPath,
+                  taskIndex: 1,
+                  taskTitle: 'Resumed illegal checkbox state',
+                  turns: 1,
+                  verifyRuns: 0,
+                  reviewRuns: 0,
+                  issues: {
+                    critical: 0,
+                    important: 0,
+                    suggestion: 0,
+                    unknown: 0,
+                    total: 0,
+                  },
+                },
+            },
+          },
+          history: [],
+        },
+      },
+      cwd,
+    ),
+    {
+      prompt: `/addy-verify ${planPath}`,
+      taskTitle: 'Resumed illegal checkbox state',
+      missingStatuses: ['Reviewed', 'Verified'],
+    },
+  );
+});
+
+test('active plan lifecycle accepts reviewed checkbox after review phase evidence exists', () => {
+  const cwd = join(taskFooterDir, 'phase-evidence-reviewed-project');
+  const planPath = join('docs', 'plans', 'phase-evidence-reviewed.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Reviewed by Addy',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '',
+      '## Task 2: Later task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    nextWorkflowActionForActivePlanLifecycle(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        currentTask: 'Reviewed by Addy',
+        currentTaskIndex: 1,
+        autoLastPrompt: `/addy-review ${planPath}`,
+        stats: {
+          active: {
+            tasks: {
+              [`${planPath}\u001f\u001f1\u001fReviewed by Addy`]: {
+                plan: planPath,
+                taskIndex: 1,
+                taskTitle: 'Reviewed by Addy',
+                turns: 3,
+                verifyRuns: 1,
+                reviewRuns: 1,
+                issues: {
+                  critical: 0,
+                  important: 0,
+                  suggestion: 0,
+                  unknown: 0,
+                  total: 0,
+                },
+              },
+            },
+          },
+          history: [],
+        },
+      },
+      cwd,
+    ),
+    {
+      prompt: `/addy-build ${planPath}`,
+      taskTitle: 'Later task',
+      missingStatuses: ['Implemented', 'Verified', 'Reviewed'],
+    },
   );
 });
 

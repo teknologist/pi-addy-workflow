@@ -39,7 +39,7 @@ Autonomous task loop:
    - Run the Addy Verify workflow after build passes, then re-read the active/supplied plan after every phase.
    - Run the Addy Review workflow after verification passes, then re-read the active/supplied plan after every phase.
    - Commit only after build, verify, and review all pass and the plan checkboxes are synchronized.
-3. Keep lifecycle checkbox ownership intact: build owns `Implemented`, verify owns `Verified`, and review owns `Reviewed`.
+3. Keep lifecycle checkbox ownership intact: build owns `Implemented`, verify owns `Verified`, and review owns `Reviewed`. `/addy-auto` itself must not mark lifecycle checkboxes; it only dispatches the next owned phase.
 4. When the current slice is fully complete, advance only to an unambiguous next slice from a forward-reference link, same-directory index, or ordered slice filename.
 5. Try safe autonomous recovery before stopping for failed tests, typecheck failures, review blockers, expected git state issues, and ambiguous-but-inferable next slices.
 6. Ask the user only for unsafe, destructive, external, or genuinely undecidable choices.
@@ -50,7 +50,7 @@ Unblock policy:
 - `addy-auto-unblock` must apply `debugging-and-error-recovery` to reproduce, classify, and fix safe scoped blockers.
 - Missing tests, fixtures, commands, generated artifacts, or local setup are not automatic user blockers; repair or create them when that is the correct way to satisfy the current acceptance criteria.
 - Do not use unblock recovery to skip, weaken, or silently reinterpret acceptance criteria, verification, or review. Correctness remains higher priority than autonomous progress.
-- Mark `[x] Verified` or `[x] Reviewed` only when that exact step has real evidence from this run.
+- Mark `[x] Verified` or `[x] Reviewed` only when that exact owning step has real evidence from this run. A task is not reviewed unless a real `/addy-review` step ran for that task/slice; do not accept or create `[x] Reviewed` from build, verify, finish, or manual self-review text.
 
 Review fix loop guardrails:
 
