@@ -988,6 +988,24 @@ function renderTaskStatsLine(
   return `${current ? 'Current' : 'Completed'} ${slice}${taskLabel}${title} — ${task.turns} turns, verify ${task.verifyRuns}, review ${task.reviewRuns}, issues ${task.issues.total}`;
 }
 
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
+function renderTaskStatsMarkdownRow(
+  task: WorkflowTaskStats,
+  current: boolean,
+): string {
+  const scope = task.sliceIndex ? `Slice ${task.sliceIndex}` : '—';
+  const taskLabel = [
+    task.taskIndex ? `Task ${task.taskIndex}` : 'Task',
+    task.taskTitle,
+  ]
+    .filter(Boolean)
+    .join(': ');
+  return `| ${current ? 'Current' : 'Completed'} | ${escapeMarkdownTableCell(scope)} | ${escapeMarkdownTableCell(taskLabel)} | ${task.turns} | ${task.verifyRuns} | ${task.reviewRuns} | ${task.issues.total} |`;
+}
+
 export function renderWorkflowStatsText(
   state: WorkflowState,
   planPath?: string,
@@ -1017,6 +1035,45 @@ export function renderWorkflowStatsText(
   }
 
   return lines.join('\n');
+}
+
+export function renderWorkflowStatsMarkdown(
+  state: WorkflowState,
+  planPath?: string,
+): string {
+  const stats = normalizeWorkflowStats(state.stats);
+  const activeTasks = totalStatsTasks(stats.active, planPath);
+  const historyTasks = stats.history.flatMap((session) =>
+    totalStatsTasks(session, planPath),
+  );
+  const allTasks = [...activeTasks, ...historyTasks];
+  if (allTasks.length === 0)
+    return '## Addy stats\n\nNo Addy stats recorded yet';
+
+  const totals = sumTaskStats(allTasks);
+  const activeKeys = new Set(activeTasks.map(statsTaskIdentity));
+  const taskRows = mergeTaskStats(allTasks).map((task) =>
+    renderTaskStatsMarkdownRow(task, activeKeys.has(statsTaskIdentity(task))),
+  );
+
+  return [
+    '## Addy stats',
+    '',
+    '| Metric | Count |',
+    '|---|---:|',
+    `| Turns | ${totals.turns} |`,
+    `| Verify runs | ${totals.verifyRuns} |`,
+    `| Review runs | ${totals.reviewRuns} |`,
+    `| Issues | ${totals.issues.total} |`,
+    `| Critical | ${totals.issues.critical} |`,
+    `| Important | ${totals.issues.important} |`,
+    `| Suggestions | ${totals.issues.suggestion} |`,
+    `| Unknown | ${totals.issues.unknown} |`,
+    '',
+    '| Status | Scope | Task | Turns | Verify | Review | Issues |',
+    '|---|---|---|---:|---:|---:|---:|',
+    ...taskRows,
+  ].join('\n');
 }
 
 export function nextPromptForPhase(

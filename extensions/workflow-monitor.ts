@@ -1,4 +1,8 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  getMarkdownTheme,
+  type ExtensionAPI,
+} from '@earendil-works/pi-coding-agent';
+import { Markdown } from '@earendil-works/pi-tui';
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -31,6 +35,7 @@ import {
   nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
   planTasksFromMarkdown,
+  renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
 } from './workflow-monitor/workflow-tracker.ts';
 
@@ -77,6 +82,7 @@ const PROMPT_TEMPLATE_BY_COMMAND: Record<string, string> = {
   '/addy-finish': 'addy-finish.md',
 };
 const AUTO_REVIEW_FIX_MAX = 5;
+const ADDY_STATS_MESSAGE_TYPE = 'pi-addy-workflow-stats';
 const AUTO_TASK_COMMIT_PROMPT = '__addy-auto-task-commit__';
 const FRESH_CONTEXT_STEP_COMMANDS = new Set([
   '/addy-define',
@@ -1018,6 +1024,41 @@ async function showFreshContextNotice(
   );
 }
 
+function addStatsHeading(markdown: string, heading?: string): string {
+  if (!heading) return markdown;
+  return [`## ${heading}`, '', markdown.replace(/^## /, '### ')].join('\n');
+}
+
+function showWorkflowStats(
+  pi: ExtensionAPI,
+  ctx: unknown,
+  state: ReturnType<typeof getContextWorkflowState>,
+  options: { heading?: string; planPath?: string } = {},
+): void {
+  const statsText = renderWorkflowStatsText(state, options.planPath);
+  const fallbackText = options.heading
+    ? `${options.heading}\n${statsText}`
+    : statsText;
+  const markdown = addStatsHeading(
+    renderWorkflowStatsMarkdown(state, options.planPath),
+    options.heading,
+  );
+
+  if (pi.sendMessage) {
+    pi.sendMessage({
+      customType: ADDY_STATS_MESSAGE_TYPE,
+      content: fallbackText,
+      display: true,
+      details: { markdown },
+    });
+    return;
+  }
+
+  (
+    ctx as { ui?: { notify?: (message: string, level?: string) => void } }
+  ).ui?.notify?.(fallbackText, 'info');
+}
+
 function consumeAutoFreshPromptUpdates(
   state: ReturnType<typeof getContextWorkflowState>,
 ): Partial<ReturnType<typeof getContextWorkflowState>> {
@@ -1663,12 +1704,7 @@ function maybeCompleteAutoFinish(
     completedState,
     appendWorkflowEntry(pi),
   );
-  (
-    ctx as { ui?: { notify?: (message: string, level?: string) => void } }
-  ).ui?.notify?.(
-    `Finished!\n${renderWorkflowStatsText(completedState)}`,
-    'info',
-  );
+  showWorkflowStats(pi, ctx, completedState, { heading: 'Finished!' });
   return true;
 }
 
@@ -1806,6 +1842,17 @@ async function dispatchNextAutoWorkflowPromptAfterAgentEnd(
 }
 
 export default function addyWorkflowMonitor(pi: ExtensionAPI) {
+  pi.registerMessageRenderer?.(ADDY_STATS_MESSAGE_TYPE, (message) => {
+    const details = message.details as { markdown?: unknown } | undefined;
+    const markdown =
+      typeof details?.markdown === 'string'
+        ? details.markdown
+        : typeof message.content === 'string'
+          ? message.content
+          : '';
+    return new Markdown(markdown, 0, 0, getMarkdownTheme());
+  });
+
   pi.on('session_start', async (_event: unknown, ctx: unknown) => {
     ensureGlobalAddyWorkflowConfig(
       ctx as {
@@ -2003,13 +2050,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
         await dispatchNextAutoWorkflowPrompt(pi, ctx, true);
       else {
         const state = getContextWorkflowState(ctx as never);
-        (
-          ctx as { ui?: { notify?: (message: string, level?: string) => void } }
-        ).ui?.notify?.(
-          `Addy auto stopped.
-${renderWorkflowStatsText(state)}`,
-          'info',
-        );
+        showWorkflowStats(pi, ctx, state, { heading: 'Addy auto stopped.' });
       }
       return { action: 'continue' as const };
     },
@@ -2019,13 +2060,9 @@ ${renderWorkflowStatsText(state)}`,
     description: 'Show Addy workflow stats for the active or supplied plan.',
     handler: (event: CommandEvent, ctx: unknown) => {
       const args = parseCommandArgs(event);
-      const text = renderWorkflowStatsText(
-        getContextWorkflowState(ctx as never),
-        args.join(' ') || undefined,
-      );
-      (
-        ctx as { ui?: { notify?: (message: string, level?: string) => void } }
-      ).ui?.notify?.(text, 'info');
+      showWorkflowStats(pi, ctx, getContextWorkflowState(ctx as never), {
+        planPath: args.join(' ') || undefined,
+      });
       return { action: 'continue' as const };
     },
   });

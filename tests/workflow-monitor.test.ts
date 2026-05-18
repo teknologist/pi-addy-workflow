@@ -21,6 +21,7 @@ import {
 } from '../extensions/workflow-monitor/workflow-handler.ts';
 import {
   WORKFLOW_STATE_ENTRY_TYPE,
+  renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
 } from '../extensions/workflow-monitor/workflow-tracker.ts';
 
@@ -50,16 +51,19 @@ test.after(() => {
 function createPiMock() {
   const events = new Map<string, Handler>();
   const commands = new Map<string, CommandConfig>();
+  const messageRenderers = new Map<string, unknown>();
   const entries: Array<[string, unknown]> = [];
   const sentMessages: string[] = [];
   const pi = {
     on: (name: string, handler: Handler) => events.set(name, handler),
     registerCommand: (name: string, config: CommandConfig) =>
       commands.set(name, config),
+    registerMessageRenderer: (name: string, renderer: unknown) =>
+      messageRenderers.set(name, renderer),
     appendEntry: (type: string, data: unknown) => entries.push([type, data]),
     sendUserMessage: (message: string) => sentMessages.push(message),
   };
-  return { pi, events, commands, entries, sentMessages };
+  return { pi, events, commands, messageRenderers, entries, sentMessages };
 }
 
 function assertSentWorkflowPrompt(
@@ -83,7 +87,7 @@ function reviewFingerprintForTest(lines: string[]): string {
 }
 
 test('registers workflow commands and handlers', () => {
-  const { pi, events, commands } = createPiMock();
+  const { pi, events, commands, messageRenderers } = createPiMock();
 
   addyWorkflowMonitor(pi as never);
 
@@ -99,6 +103,7 @@ test('registers workflow commands and handlers', () => {
   assert.ok(commands.has('addy-stats'));
   assert.ok(commands.has('addy-workflow-reset'));
   assert.ok(commands.has('addy-workflow-next'));
+  assert.ok(messageRenderers.has('pi-addy-workflow-stats'));
 });
 
 test('subagent lifecycle ignores stale extension context events', async () => {
@@ -5159,6 +5164,7 @@ test('workflow stats render aggregated history details for each task', () => {
   };
 
   const stats = renderWorkflowStatsText(state);
+  const markdown = renderWorkflowStatsMarkdown(state);
 
   assert.match(stats, /Turns: 8/);
   assert.match(stats, /Verify runs: 3/);
@@ -5170,6 +5176,78 @@ test('workflow stats render aggregated history details for each task', () => {
   assert.match(
     stats,
     /Completed slice 2, task 1: Second task — 5 turns, verify 2, review 2, issues 1/,
+  );
+  assert.match(markdown, /\| Metric \| Count \|/);
+  assert.match(markdown, /\| Turns \| 8 \|/);
+  assert.match(
+    markdown,
+    /\| Completed \| Slice 1 \| Task 1: First task \| 3 \| 1 \| 1 \| 1 \|/,
+  );
+  assert.match(
+    markdown,
+    /\| Completed \| Slice 2 \| Task 1: Second task \| 5 \| 2 \| 2 \| 1 \|/,
+  );
+});
+
+test('addy-stats sends markdown table when custom messages are available', async () => {
+  const commands = new Map<string, CommandConfig>();
+  const messages: Array<{ message: unknown; options: unknown }> = [];
+  const pi = {
+    on() {},
+    registerCommand: (name: string, config: CommandConfig) =>
+      commands.set(name, config),
+    registerMessageRenderer() {},
+    appendEntry() {},
+    sendMessage: (message: unknown, options: unknown) =>
+      messages.push({ message, options }),
+    sendUserMessage() {},
+  };
+  addyWorkflowMonitor(pi as never);
+
+  const ctx: any = {
+    id: 'custom-message-stats',
+    state: {
+      phases: {},
+      warnings: [],
+      stats: {
+        active: {
+          tasks: {
+            task: {
+              sliceIndex: 1,
+              taskIndex: 2,
+              taskTitle: 'Render stats',
+              turns: 4,
+              verifyRuns: 1,
+              reviewRuns: 1,
+              issues: {
+                critical: 0,
+                important: 1,
+                suggestion: 0,
+                unknown: 0,
+                total: 1,
+              },
+            },
+          },
+        },
+        history: [],
+      },
+    },
+    ui: { notify: () => assert.fail('expected markdown message, not notify') },
+  };
+
+  await commands.get('addy-stats')?.handler({}, ctx);
+
+  const sent = messages.at(-1);
+  assert.equal(sent?.options, undefined);
+  const message = sent?.message as {
+    customType?: string;
+    details?: { markdown?: string };
+  };
+  assert.equal(message.customType, 'pi-addy-workflow-stats');
+  assert.match(message.details?.markdown ?? '', /\| Metric \| Count \|/);
+  assert.match(
+    message.details?.markdown ?? '',
+    /\| Current \| Slice 1 \| Task 2: Render stats \| 4 \| 1 \| 1 \| 1 \|/,
   );
 });
 
