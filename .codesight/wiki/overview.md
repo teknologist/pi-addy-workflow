@@ -6,7 +6,7 @@
 
 ## Scale
 
-7 library files · 5 environment variables
+7 library files · 6 environment variables
 
 ## High-Impact Files
 
@@ -26,6 +26,7 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` — `tests/workflow-monitor.test.ts`
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` — `tests/workflow-monitor.test.ts`
 - `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-handler.ts`
+- `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor.ts`
 
 ---
 _Back to [index.md](./index.md) · Generated 2026-05-18_

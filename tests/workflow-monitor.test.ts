@@ -4021,6 +4021,52 @@ test('fresh continuation uses SDK streaming behavior while queued', async () => 
   });
 });
 
+test('fresh continuation is not auto-dispatched inside subagent children', async () => {
+  const previous = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = '1';
+  try {
+    const cwd = join(stateDir, 'fresh-continuation-subagent-child-project');
+    const sent: string[] = [];
+    const { pi, events } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const ctx: any = {
+      cwd,
+      id: 'fresh-continuation-subagent-child',
+      sendUserMessage: (message: string) => sent.push(message),
+      ui: { setWidget() {}, notify() {} },
+      state: {
+        phases: {
+          define: 'complete',
+          plan: 'complete',
+          build: 'active',
+          simplify: 'pending',
+          verify: 'pending',
+          review: 'pending',
+          finish: 'pending',
+        },
+        warnings: [],
+        current: 'build',
+        autoMode: true,
+        autoFreshPrompt: '/addy-build docs/plans/current.md',
+        autoFreshReason: 'before-step',
+        stats: { active: { tasks: {} }, history: [] },
+      },
+    };
+
+    await events.get('session_start')?.({}, ctx);
+
+    assert.deepEqual(sent, []);
+    assert.equal(
+      ctx.state.autoFreshPrompt,
+      '/addy-build docs/plans/current.md',
+    );
+    assert.equal(ctx.state.autoFreshReason, 'before-step');
+  } finally {
+    if (previous === undefined) delete process.env.PI_SUBAGENT_CHILD;
+    else process.env.PI_SUBAGENT_CHILD = previous;
+  }
+});
+
 test('auto fresh send failure preserves pending prompt for retry', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);

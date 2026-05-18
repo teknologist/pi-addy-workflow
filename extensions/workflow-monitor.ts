@@ -723,6 +723,10 @@ function validPendingFreshContinuation(
   return Boolean(state.autoFreshPrompt && state.autoFreshReason);
 }
 
+function isSubagentChildSession(): boolean {
+  return process.env.PI_SUBAGENT_CHILD === '1';
+}
+
 function clearAutoFreshUpdates(
   state?: ReturnType<typeof getContextWorkflowState>,
 ): Partial<ReturnType<typeof getContextWorkflowState>> {
@@ -1820,7 +1824,10 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
         { ...state, ...staleAutoFreshUpdates() },
         appendWorkflowEntry(pi),
       );
-    } else if (validPendingFreshContinuation(state))
+    } else if (
+      validPendingFreshContinuation(state) &&
+      !isSubagentChildSession()
+    )
       await sendFreshContextContinuation(pi, ctx, state.autoFreshReason);
   });
 

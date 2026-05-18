@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 0 routes | 0 models | 0 components | 7 lib files | 5 env vars | 0 middleware | 0% test coverage
-> **Token savings:** this file is ~1,300 tokens. Without it, AI exploration would cost ~9,000 tokens. **Saves ~7,800 tokens per conversation.**
-> **Last scanned:** 2026-05-18 06:57 — re-run after significant changes
+> 0 routes | 0 models | 0 components | 7 lib files | 6 env vars | 0 middleware | 0% test coverage
+> **Token savings:** this file is ~1,300 tokens. Without it, AI exploration would cost ~9,200 tokens. **Saves ~7,900 tokens per conversation.**
+> **Last scanned:** 2026-05-18 10:00 — re-run after significant changes
 
 ---
 
@@ -68,6 +68,7 @@
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/workflow-monitor.test.ts
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/workflow-monitor.test.ts
 - `PI_ADDY_WORKFLOW_STATE_DIR` **required** — extensions/workflow-monitor/workflow-handler.ts
+- `PI_SUBAGENT_CHILD` **required** — extensions/workflow-monitor.ts
 
 ## Config Files
 
