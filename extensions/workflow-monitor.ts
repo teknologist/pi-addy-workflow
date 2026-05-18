@@ -1408,20 +1408,6 @@ async function maybeDispatchReviewFixLoop(
           ? state.autoReviewTask
           : state.currentTask,
     };
-    const targetMovedBehindCurrent = Boolean(
-      target.taskTitle &&
-      target.taskTitle !== 'none' &&
-      (state.currentTask !== target.taskTitle ||
-        state.currentTaskIndex !== target.taskIndex),
-    );
-    if (
-      targetMovedBehindCurrent &&
-      planTaskIsComplete(target.plan, (ctx as { cwd?: string }).cwd, target)
-    ) {
-      await dispatchTaskCommitPrompt(pi, ctx, state, target);
-      return true;
-    }
-
     const reviewPrompt = activePlanPromptForTarget(
       '/addy-review',
       state,

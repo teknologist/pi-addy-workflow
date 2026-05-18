@@ -785,13 +785,7 @@ export function refreshWorkflowTasksFromPlan(
     };
   }
 
-  const taskIsComplete = (task: PlanTask, index: number) =>
-    task.complete &&
-    (effectiveTaskMissingStatuses(state, state.activePlan!, task, index)
-      ?.length ?? 0) === 0;
-  const currentIndex = tasks.findIndex(
-    (task, index) => !taskIsComplete(task, index),
-  );
+  const currentIndex = tasks.findIndex((task) => !task.complete);
   if (currentIndex === -1) {
     const currentTask = 'all tasks complete';
     const nextTask = 'none';
@@ -813,9 +807,7 @@ export function refreshWorkflowTasksFromPlan(
   }
 
   const current = tasks[currentIndex];
-  const next = tasks
-    .slice(currentIndex + 1)
-    .find((task, offset) => !taskIsComplete(task, currentIndex + 1 + offset));
+  const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
   const currentTask = current.title;
   const nextTask = next?.title ?? 'none';
   return {

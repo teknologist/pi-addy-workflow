@@ -1050,6 +1050,45 @@ test('refreshing workflow tasks clears stale summaries when task changes', () =>
   assert.equal(state.currentTaskSummary, undefined);
 });
 
+test('refreshing workflow tasks does not reopen fully checked task from stale review target', () => {
+  const planPath = join(taskFooterDir, 'stale-review-target.md');
+  writeFileSync(
+    planPath,
+    [
+      '## Task 1: Already reviewed task',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '',
+      '## Task 2: Next unfinished task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const state = refreshWorkflowTasksFromPlan({
+    ...createInitialWorkflowState(),
+    current: 'review',
+    activePlan: planPath,
+    currentTask: 'Already reviewed task',
+    nextTask: 'Next unfinished task',
+    currentTaskIndex: 1,
+    taskCount: 2,
+    currentTaskSummary: 'Reviewed summary',
+    nextTaskSummary: 'Next summary',
+    autoReviewTask: 'Already reviewed task',
+    autoReviewTaskIndex: 1,
+  });
+
+  assert.equal(state.currentTask, 'Next unfinished task');
+  assert.equal(state.nextTask, 'none');
+  assert.equal(state.currentTaskIndex, 2);
+  assert.equal(state.taskCount, 2);
+  assert.equal(state.currentTaskSummary, undefined);
+  assert.equal(state.nextTaskSummary, undefined);
+});
+
 test('refreshing workflow keeps completed direct slice on finish boundary', () => {
   const cwd = join(taskFooterDir, 'repair-stale-complete-plan-project');
   const plansDir = join(cwd, 'docs', 'plans');
