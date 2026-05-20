@@ -4323,6 +4323,148 @@ test('addy-auto retry consumes pending fresh prompt in current session', async (
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
+test('agent_end consumes pending fresh prompt before recomputing next action', async () => {
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: string[] = [];
+  let newSessionCalls = 0;
+  const ctx: any = {
+    cwd: join(stateDir, 'agent-end-pending-current-project'),
+    id: 'agent-end-pending-current',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-verify docs/plans/current.md',
+      autoFreshReason: 'before-step',
+      autoFreshDeliveryKey: 'agent-end-pending-key',
+    },
+    newSession: async () => {
+      newSessionCalls += 1;
+      return { cancelled: false };
+    },
+    sendUserMessage: (message: string) => sent.push(message),
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await events.get('agent_end')?.({}, ctx);
+
+  assert.equal(newSessionCalls, 0);
+  assertSentWorkflowPrompt(
+    sent[0],
+    '/addy-verify docs/plans/current.md',
+    'Addy Verify',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
+test('pending fresh prompt is preserved when no sender can auto-dispatch', async () => {
+  const { pi, commands, events } = createPiMock();
+  pi.sendUserMessage = undefined as never;
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const editorText: string[] = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'pending-no-sender-project'),
+    id: 'pending-no-sender',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-verify docs/plans/current.md',
+      autoFreshReason: 'before-step',
+      autoFreshDeliveryKey: 'no-sender-key',
+    },
+    ui: {
+      setWidget() {},
+      setEditorText: (text: string) => editorText.push(text),
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands.get('addy-auto')?.handler('', ctx);
+
+  assertSentWorkflowPrompt(
+    editorText[0],
+    '/addy-verify docs/plans/current.md',
+    'Addy Verify',
+  );
+  assert.match(notices.at(-1)?.[0] ?? '', /Prefilled/);
+  assert.equal(
+    getContextWorkflowState(ctx).autoFreshPrompt,
+    '/addy-verify docs/plans/current.md',
+  );
+
+  await events.get('input')?.({ input: editorText[0] }, ctx);
+
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+  assert.equal(
+    getContextWorkflowState(ctx).autoLastPrompt,
+    '/addy-verify docs/plans/current.md',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoMode, true);
+});
+
+test('raw manual command matching pending fresh prompt exits auto mode', async () => {
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd: join(stateDir, 'pending-raw-manual-project'),
+    id: 'pending-raw-manual',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-verify docs/plans/current.md',
+      autoFreshReason: 'before-step',
+      autoFreshDeliveryKey: 'raw-manual-key',
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await events.get('input')?.(
+    { input: '/addy-verify docs/plans/current.md' },
+    ctx,
+  );
+
+  assert.equal(getContextWorkflowState(ctx).autoMode, false);
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
 test('manual Addy turns record active task stats and addy-stats is read-only', async () => {
   const cwd = join(stateDir, 'manual-stats-project');
   const planPath = join('docs', 'plans', 'manual-stats.md');

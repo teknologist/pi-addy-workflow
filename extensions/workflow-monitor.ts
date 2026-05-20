@@ -704,6 +704,13 @@ function sendUserMessage(
   return sender(deliveredMessage, followUpDeliveryOptions());
 }
 
+function canSendUserMessage(pi: ExtensionAPI, ctx: unknown): boolean {
+  return Boolean(
+    (ctx as { sendUserMessage?: unknown }).sendUserMessage ||
+    (pi as ExtensionAPI & { sendUserMessage?: unknown }).sendUserMessage,
+  );
+}
+
 function autoFreshContinuationKey(
   prompt: string,
   reason: FreshContextReason,
@@ -1069,6 +1076,35 @@ function consumeAutoFreshPromptUpdates(
   };
 }
 
+function consumedPendingFreshPromptState(
+  state: ReturnType<typeof getContextWorkflowState>,
+): ReturnType<typeof getContextWorkflowState> | undefined {
+  if (!validPendingFreshContinuation(state)) return undefined;
+  const key =
+    state.autoFreshDeliveryKey ??
+    autoFreshContinuationKey(
+      state.autoFreshPrompt,
+      state.autoFreshReason,
+      state,
+    );
+  return stateAfterAutoPrompt(state.autoFreshPrompt, state, {
+    ...consumeAutoFreshPromptUpdates({ ...state, autoFreshDeliveryKey: key }),
+    autoFreshConsumedKey: key,
+  });
+}
+
+function pendingFreshInputMatches(
+  input: string,
+  state: ReturnType<typeof getContextWorkflowState>,
+): boolean {
+  if (!validPendingFreshContinuation(state)) return false;
+  const invocation = input.match(/^Invocation:\s+`([^`]+)`\s*$/m)?.[1];
+  return (
+    invocation === state.autoFreshPrompt ||
+    input === state.autoFreshExpandedPrompt
+  );
+}
+
 function stateAfterAutoPrompt(
   prompt: string,
   state: ReturnType<typeof getContextWorkflowState>,
@@ -1127,13 +1163,18 @@ async function deliverPendingFreshPrompt(
   if (!validPendingFreshContinuation(state)) return false;
   const prompt = state.autoFreshPrompt;
   const deliveryPrompt = state.autoFreshExpandedPrompt ?? prompt;
+  if (!canSendUserMessage(pi, ctx)) {
+    sendUserMessage(pi, ctx, deliveryPrompt, { autoMode: state.autoMode });
+    return true;
+  }
   const key =
     state.autoFreshDeliveryKey ??
     autoFreshContinuationKey(prompt, state.autoFreshReason, state);
-  const nextState = stateAfterAutoPrompt(prompt, state, {
-    ...consumeAutoFreshPromptUpdates({ ...state, autoFreshDeliveryKey: key }),
-    autoFreshConsumedKey: key,
+  const nextState = consumedPendingFreshPromptState({
+    ...state,
+    autoFreshDeliveryKey: key,
   });
+  if (!nextState) return false;
   setContextWorkflowState(
     ctx as never,
     nextState,
@@ -1900,12 +1941,25 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
 
   pi.on('input', (event: InputEvent, ctx: unknown) => {
     const input = event.input ?? event.text ?? '';
+    const workflowText = workflowTextFromInput(input);
+    const state = getContextWorkflowState(ctx as never);
+    const consumedState = pendingFreshInputMatches(input, state)
+      ? consumedPendingFreshPromptState(state)
+      : undefined;
+    if (consumedState) {
+      setContextWorkflowState(
+        ctx as never,
+        consumedState,
+        appendWorkflowEntry(pi),
+      );
+      return { action: 'continue' as const };
+    }
     const manualAddyCommand = isManualAddyWorkflowCommand(input);
     handleWorkflowEvent(
       ctx as never,
       {
         source: 'user-input',
-        text: workflowTextFromInput(input),
+        text: workflowText,
         manualAddyCommand,
       },
       appendWorkflowEntry(pi),
@@ -1977,6 +2031,23 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
           appendWorkflowEntry(pi),
         );
       if (!stateWithReviewIssues.autoMode) return;
+      if (
+        stateWithReviewIssues.autoFreshPrompt &&
+        !stateWithReviewIssues.autoFreshReason
+      ) {
+        setContextWorkflowState(
+          ctx as never,
+          { ...stateWithReviewIssues, ...staleAutoFreshUpdates() },
+          appendWorkflowEntry(pi),
+        );
+      } else if (
+        validPendingFreshContinuation(stateWithReviewIssues) &&
+        !isSubagentChildSession() &&
+        (await deliverPendingFreshPrompt(pi, ctx, stateWithReviewIssues, {
+          freshContextBypassReason: stateWithReviewIssues.autoFreshReason,
+        }))
+      )
+        return;
       await dispatchNextAutoWorkflowPromptAfterAgentEnd(pi, ctx, event);
     } catch (error) {
       if (!isStaleExtensionContextError(error)) throw error;
