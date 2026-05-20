@@ -379,6 +379,11 @@ test('review may update plan checkboxes without editing source files', async () 
   const content = await readFile(join('prompts', 'addy-review.md'), 'utf8');
 
   assert.match(content, /would skip `\/addy-verify`/);
+  assert.match(
+    content,
+    /If Addy Auto Mode is active, do not call `ask_user_question`/,
+  );
+  assert.match(content, /Run `\/addy-verify <plan-path>` automatically/);
   assert.match(content, /ask_user_question/);
   assert.match(content, /--skip-verify-confirmed/);
   assert.match(content, /Never silently skip verify between build and review/);

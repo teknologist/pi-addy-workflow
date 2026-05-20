@@ -18,7 +18,11 @@ Use the supplied plan path when present and update the Addy workflow state's act
 
 If no path is supplied and the active plan is already fully complete while the current turn, recent context, or same-directory slice index clearly identifies the next unfinished slice, review against that next slice path and make it the active plan. A bare `/addy-review` must not keep using a completed stale slice when the work has moved to the next slice.
 
-Before reviewing, check whether this would skip required workflow steps after build. If the active/supplied plan or Addy workflow state shows implemented work that has not been verified, warn the user that `/addy-review` would skip `/addy-verify`. Then call `ask_user_question` with one single-select question asking whether to run verification first or intentionally skip it. Options:
+Before reviewing, check whether this would skip required workflow steps after build. If the active/supplied plan or Addy workflow state shows implemented work that has not been verified, warn the user that `/addy-review` would skip `/addy-verify`.
+
+If Addy Auto Mode is active, do not call `ask_user_question`; `/addy-auto` is explicit permission to continue the required lifecycle autonomously. Run `/addy-verify <plan-path>` automatically, re-read the plan, and continue review only after fresh verification evidence exists. Stop only if verification is truly blocked, unsafe, or ambiguous in a way that cannot be resolved autonomously.
+
+If Addy Auto Mode is not active, call `ask_user_question` with one single-select question asking whether to run verification first or intentionally skip it. Options:
 
 - `run verify` — run `/addy-verify <plan-path>` before reviewing.
 - `skip verify` — intentionally continue to review without verified status.
