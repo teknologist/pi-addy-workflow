@@ -3067,7 +3067,12 @@ test('auto continuation cancellation does not use stale context after session re
     .get('addy-auto-continue')
     ?.handler('--fresh before-review', ctx);
 
-  assert.equal(sentMessages.length, 0);
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    '/addy-build docs/plans/missing.md',
+    'Addy Build',
+  );
   assert.ok(
     notices.some(
       ([message, level]) =>
@@ -4172,6 +4177,57 @@ test('auto fresh send failure preserves pending prompt for retry', async () => {
     '/addy-build docs/plans/current.md',
   );
   assert.equal(getContextWorkflowState(ctx).autoFreshReason, 'before-step');
+});
+
+test('cancelled fresh continuation falls back to current session dispatch', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: string[] = [];
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-continue-cancel-fallback-project'),
+    id: 'auto-continue-cancel-fallback',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-verify docs/plans/current.md',
+      autoFreshReason: 'before-step',
+      autoFreshDeliveryKey: 'cancel-fallback-key',
+    },
+    newSession: async () => ({ cancelled: true }),
+    sendUserMessage: (message: string) => sent.push(message),
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands.get('addy-auto-continue')?.handler('--fresh before-step', ctx);
+
+  assert.match(notices.at(-1)?.[0] ?? '', /continuing in the current session/);
+  assertSentWorkflowPrompt(
+    sent[0],
+    '/addy-verify docs/plans/current.md',
+    'Addy Verify',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+  assert.equal(
+    getContextWorkflowState(ctx).autoLastPrompt,
+    '/addy-verify docs/plans/current.md',
+  );
 });
 
 test('manual Addy turns record active task stats and addy-stats is read-only', async () => {

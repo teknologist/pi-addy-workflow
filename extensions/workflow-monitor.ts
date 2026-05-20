@@ -1256,11 +1256,22 @@ async function runFreshContextContinuation(
       });
     },
   });
-  if (result?.cancelled)
+  if (result?.cancelled) {
     notify(
-      'Addy auto fresh continuation was cancelled; pending prompt is preserved for retry.',
+      'Addy auto fresh continuation was cancelled; continuing in the current session instead.',
       'warning',
     );
+    const latestState = getContextWorkflowState(ctx as never);
+    if (
+      await deliverPendingFreshPrompt(pi, ctx, latestState, {
+        freshContextBypassReason: reason,
+      })
+    )
+      return;
+    await dispatchNextAutoWorkflowPrompt(pi, ctx, false, {
+      freshContextBypassReason: reason,
+    });
+  }
 }
 
 async function sendFreshContextContinuation(
