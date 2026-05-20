@@ -3879,6 +3879,53 @@ test('session start auto-resumes valid pending fresh continuation', async () => 
   );
 });
 
+test('session start consumes pending fresh continuation without spawning another session', async () => {
+  const cwd = join(stateDir, 'startup-no-recursive-fresh-project');
+  setContextWorkflowState(
+    { cwd, id: 'startup-no-recursive-fresh-first', ui: { setWidget() {} } },
+    {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'pending',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      autoMode: true,
+      activePlan: 'docs/plans/fresh.md',
+      autoFreshPrompt: '/addy-build docs/plans/fresh.md',
+      autoFreshReason: 'before-step',
+      autoFreshDeliveryKey: 'startup-no-recursive-key',
+    },
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let newSessionCalls = 0;
+  const ctx: any = {
+    cwd,
+    id: 'startup-no-recursive-fresh-next',
+    ui: { setWidget() {} },
+    newSession: async () => {
+      newSessionCalls += 1;
+      return { cancelled: false };
+    },
+  };
+
+  await events.get('session_start')?.({}, ctx);
+
+  assert.equal(newSessionCalls, 0);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    '/addy-build docs/plans/fresh.md',
+    'Addy Build',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
 test('session start ignores reasonless pending fresh state', async () => {
   const cwd = join(stateDir, 'startup-auto-reasonless-fresh-project');
   const firstCtx: any = {
@@ -4228,6 +4275,52 @@ test('cancelled fresh continuation falls back to current session dispatch', asyn
     getContextWorkflowState(ctx).autoLastPrompt,
     '/addy-verify docs/plans/current.md',
   );
+});
+
+test('addy-auto retry consumes pending fresh prompt in current session', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: string[] = [];
+  let newSessionCalls = 0;
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-retry-pending-current-project'),
+    id: 'auto-retry-pending-current',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-verify docs/plans/current.md',
+      autoFreshReason: 'before-step',
+      autoFreshDeliveryKey: 'manual-retry-key',
+    },
+    newSession: async () => {
+      newSessionCalls += 1;
+      return { cancelled: false };
+    },
+    sendUserMessage: (message: string) => sent.push(message),
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands.get('addy-auto')?.handler('', ctx);
+
+  assert.equal(newSessionCalls, 0);
+  assertSentWorkflowPrompt(
+    sent[0],
+    '/addy-verify docs/plans/current.md',
+    'Addy Verify',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
 test('manual Addy turns record active task stats and addy-stats is read-only', async () => {

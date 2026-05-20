@@ -1218,6 +1218,9 @@ async function runFreshContextContinuation(
   const result = await newSession.call(ctx, {
     parentSession,
     withSession: async (newCtx: unknown) => {
+      const parentCwd = (ctx as { cwd?: string }).cwd;
+      if (parentCwd && !(newCtx as { cwd?: string }).cwd)
+        (newCtx as { cwd?: string }).cwd = parentCwd;
       await showFreshContextNotice(newCtx, reason);
       const replacementPi = extensionApiFromContext(newCtx);
       const replacementState = getContextWorkflowState(newCtx as never);
@@ -1890,7 +1893,9 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       validPendingFreshContinuation(state) &&
       !isSubagentChildSession()
     )
-      await sendFreshContextContinuation(pi, ctx, state.autoFreshReason);
+      await deliverPendingFreshPrompt(pi, ctx, state, {
+        freshContextBypassReason: state.autoFreshReason,
+      });
   });
 
   pi.on('input', (event: InputEvent, ctx: unknown) => {
@@ -2040,7 +2045,9 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
             appendWorkflowEntry(pi),
           );
         } else if (validPendingFreshContinuation(pending)) {
-          await sendFreshContextContinuation(pi, ctx, pending.autoFreshReason);
+          await deliverPendingFreshPrompt(pi, ctx, pending, {
+            freshContextBypassReason: pending.autoFreshReason,
+          });
           return { action: 'continue' as const };
         }
       }
