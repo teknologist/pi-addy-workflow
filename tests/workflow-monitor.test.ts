@@ -4639,12 +4639,12 @@ test('agent_end-created current-session fallback waits for idle before default d
   }
 });
 
-test('addy-auto retry consumes pending fresh prompt in a new session', async () => {
+test('addy-auto retry consumes pending fresh prompt without replacing the session', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const sent: string[] = [];
   let newSessionCalls = 0;
-  let replacementCtx: any;
+  let compactCalls = 0;
   const ctx: any = {
     cwd: join(stateDir, 'auto-retry-pending-current-project'),
     id: 'auto-retry-pending-current',
@@ -4670,13 +4670,11 @@ test('addy-auto retry consumes pending fresh prompt in a new session', async () 
       withSession: (ctx: unknown) => Promise<void> | void;
     }) => {
       newSessionCalls += 1;
-      replacementCtx = {
-        ...ctx,
-        id: 'auto-retry-pending-replacement',
-        sendUserMessage: (message: string) => sent.push(message),
-      };
-      await options.withSession(replacementCtx);
       return { cancelled: false };
+    },
+    compact: (options: { onComplete?: () => void }) => {
+      compactCalls += 1;
+      options.onComplete?.();
     },
     sendUserMessage: (message: string) => sent.push(message),
     ui: { setWidget() {}, notify() {} },
@@ -4685,16 +4683,14 @@ test('addy-auto retry consumes pending fresh prompt in a new session', async () 
 
   await commands.get('addy-auto')?.handler('', ctx);
 
-  assert.equal(newSessionCalls, 1);
+  assert.equal(newSessionCalls, 0);
+  assert.equal(compactCalls, 1);
   assertSentWorkflowPrompt(
     sent[0],
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
-  assert.equal(
-    getContextWorkflowState(replacementCtx).autoFreshPrompt,
-    undefined,
-  );
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
 test('agent_end consumes pending fresh prompt before recomputing next action', async () => {

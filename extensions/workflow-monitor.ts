@@ -2600,7 +2600,10 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
             appendWorkflowEntry(pi),
           );
         } else if (validPendingFreshContinuation(pending)) {
-          await runFreshContextContinuation(pi, ctx, pending.autoFreshReason);
+          schedulePendingFreshPromptAfterCompaction(pi, ctx, pending, {
+            freshContextBypassReason: pending.autoFreshReason,
+            useDefaultDelivery: true,
+          });
           return { action: 'continue' as const };
         }
       }
