@@ -59,7 +59,12 @@ type AgentEndEvent = {
   messages?: AgentMessage[];
   message?: AgentMessage;
 };
-type AgentMessage = { role?: string; content?: unknown };
+type AgentMessage = {
+  role?: string;
+  content?: unknown;
+  stopReason?: string;
+  diagnostics?: Array<{ type?: string }>;
+};
 type FreshContextReason = 'between-tasks' | 'before-step' | 'before-review';
 type DispatchOptions = {
   freshContextBypassReason?: FreshContextReason;
@@ -315,6 +320,26 @@ function latestAssistantText(event: AgentEndEvent): string {
   return textFromMessage(
     [...messages].reverse().find((message) => message.role === 'assistant') ??
       messages.at(-1),
+  );
+}
+
+function latestAssistantMessage(
+  event: AgentEndEvent,
+): AgentMessage | undefined {
+  const messages = event.messages ?? (event.message ? [event.message] : []);
+  return (
+    [...messages].reverse().find((message) => message.role === 'assistant') ??
+    messages.at(-1)
+  );
+}
+
+function agentEndedWithProviderTransportFailure(event: AgentEndEvent): boolean {
+  const message = latestAssistantMessage(event);
+  return Boolean(
+    message?.stopReason === 'error' &&
+    message.diagnostics?.some(
+      (diagnostic) => diagnostic.type === 'provider_transport_failure',
+    ),
   );
 }
 
@@ -2049,6 +2074,32 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
           appendWorkflowEntry(pi),
         );
       if (!stateWithReviewIssues.autoMode) return;
+      if (agentEndedWithProviderTransportFailure(event)) {
+        const retryPrompt = stateWithReviewIssues.autoLastPrompt;
+        if (
+          retryPrompt &&
+          commandFromPrompt(retryPrompt)?.startsWith('/addy-')
+        ) {
+          setContextWorkflowState(
+            ctx as never,
+            stateWithPendingFreshPrompt(
+              retryPrompt,
+              'before-step',
+              stateWithReviewIssues,
+            ),
+            appendWorkflowEntry(pi),
+          );
+          (
+            ctx as {
+              ui?: { notify?: (message: string, level?: string) => void };
+            }
+          ).ui?.notify?.(
+            'Addy auto preserved the workflow prompt after a provider transport failure. Restart Pi to retry it in a fresh session.',
+            'warning',
+          );
+          return;
+        }
+      }
       if (
         stateWithReviewIssues.autoFreshPrompt &&
         !stateWithReviewIssues.autoFreshReason

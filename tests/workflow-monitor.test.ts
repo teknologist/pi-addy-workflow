@@ -4395,6 +4395,54 @@ test('agent_end consumes pending fresh prompt before recomputing next action', a
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
+test('provider transport failure preserves auto prompt for fresh retry', async () => {
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd: join(stateDir, 'provider-transport-failure-project'),
+    id: 'provider-transport-failure',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'active',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoLastPrompt: '/addy-verify docs/plans/current.md',
+      stats: { active: { tasks: {} }, history: [] },
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+          diagnostics: [{ type: 'provider_transport_failure' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  const state = getContextWorkflowState(ctx);
+  assert.deepEqual(sentMessages, []);
+  assert.equal(state.autoFreshPrompt, '/addy-verify docs/plans/current.md');
+  assert.equal(state.autoFreshReason, 'before-step');
+  assert.equal(state.autoFreshConsumedKey, undefined);
+});
+
 test('pending fresh prompt is preserved when no sender can auto-dispatch', async () => {
   const { pi, commands, events } = createPiMock();
   pi.sendUserMessage = undefined as never;
