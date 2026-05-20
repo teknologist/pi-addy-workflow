@@ -1778,7 +1778,7 @@ test('auto loop runs fix-all when clean review leaves reviewed unchecked', async
   assert.equal(ctx.state.autoReviewFixCount, 1);
 });
 
-test('auto loop starts next task in a new session after task commit', async () => {
+test('agent_end auto loop continues next task in current session after task commit', async () => {
   const cwd = join(stateDir, 'auto-loop-task-commit-continue-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -1856,32 +1856,21 @@ test('auto loop starts next task in a new session after task commit', async () =
     ctx,
   );
 
-  assert.deepEqual(sentMessages, []);
-  assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
-  assert.equal(ctx.state.autoFreshReason, 'between-tasks');
-
-  assert.equal(newSessionParent, 'old-session.jsonl');
-  assert.equal(replacementMessages.length, 1);
+  assert.equal(newSessionParent, undefined);
+  assert.equal(replacementMessages.length, 0);
+  assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(
-    replacementMessages[0],
+    sentMessages[0],
     `/addy-build ${planPath}`,
     'Addy Build',
   );
-  assert.equal(replacementMessages.length, 1);
-  assertSentWorkflowPrompt(
-    replacementMessages[0],
-    `/addy-build ${planPath}`,
-    'Addy Build',
-  );
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
   const nextStatsKey = `${planPath}2Next`;
-  assert.equal(replacementCtx.state.stats.active.tasks[nextStatsKey].turns, 1);
-  assert.equal(
-    replacementCtx.state.stats.active.tasks[`${planPath}1Current`],
-    undefined,
-  );
+  assert.equal(ctx.state.stats.active.tasks[nextStatsKey].turns, 1);
+  assert.equal(ctx.state.stats.active.tasks[`${planPath}1Current`], undefined);
 });
 
-test('auto loop starts next slice in a new session after no-op task commit', async () => {
+test('agent_end auto loop continues next slice in current session after no-op task commit', async () => {
   const cwd = join(stateDir, 'auto-loop-noop-commit-next-slice-project');
   const firstPlan = join('docs', 'plans', 'feature-slice-01-one.md');
   const secondPlan = join('docs', 'plans', 'feature-slice-02-two.md');
@@ -1985,16 +1974,14 @@ test('auto loop starts next slice in a new session after no-op task commit', asy
     ctx,
   );
 
-  assert.deepEqual(sentMessages, []);
-  assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${secondPlan}`);
-  assert.equal(ctx.state.autoFreshReason, 'between-tasks');
-
-  assert.equal(replacementMessages.length, 1);
+  assert.equal(replacementMessages.length, 0);
+  assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(
-    replacementMessages[0],
+    sentMessages[0],
     `/addy-build ${secondPlan}`,
     'Addy Build',
   );
+  assert.equal(ctx.state.autoFreshPrompt, undefined);
 });
 
 test('auto loop can disable between-task fresh context', async () => {
@@ -2072,7 +2059,7 @@ test('auto loop can disable between-task fresh context', async () => {
   }
 });
 
-test('auto loop starts review in a new session when configured', async () => {
+test('agent_end auto loop continues review in current session when fresh is configured', async () => {
   const cwd = join(stateDir, 'auto-loop-review-fresh-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -2166,27 +2153,21 @@ test('auto loop starts review in a new session when configured', async () => {
       ctx,
     );
 
-    assert.deepEqual(sentMessages, []);
-    assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 0);
-    assert.equal(ctx.state.autoFreshPrompt, `/addy-review ${planPath}`);
-    assert.equal(ctx.state.autoFreshReason, 'before-review');
+    assert.equal(sentMessages.length, 1);
+    assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 1);
+    assert.equal(ctx.state.autoFreshPrompt, undefined);
     assert.equal(ctx.state.current, 'review');
     assert.equal(ctx.state.phases.review, 'active');
 
-    assert.equal(replacementMessages.length, 1);
+    assert.equal(replacementMessages.length, 0);
     assertSentWorkflowPrompt(
-      replacementMessages[0],
+      sentMessages[0],
       `/addy-review ${planPath}`,
       'Addy Review',
     );
-    assert.equal(currentPhaseAtReviewSend, 'review');
-    assert.equal(replacementCtx.state.current, 'review');
-    assert.equal(replacementCtx.state.phases.review, 'active');
-    assert.equal(replacementCtx.state.stats.active.tasks[statsKey].turns, 2);
-    assert.equal(
-      replacementCtx.state.stats.active.tasks[statsKey].reviewRuns,
-      1,
-    );
+    assert.equal(currentPhaseAtReviewSend, undefined);
+    assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 2);
+    assert.equal(ctx.state.stats.active.tasks[statsKey].reviewRuns, 1);
   } finally {
     if (previousEnv === undefined)
       delete process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
@@ -2264,7 +2245,7 @@ test('auto loop starts every workflow step in a new session when configured', as
   }
 });
 
-test('fresh-context same-phase retry self-unblocks instead of pausing', async () => {
+test('agent_end fresh-context same-phase retry self-unblocks in current session', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
@@ -2316,6 +2297,12 @@ test('fresh-context same-phase retry self-unblocks instead of pausing', async ()
           isIdle: () => true,
           sendUserMessage: (message: string) =>
             replacementMessages.push(message),
+          newSession: async (options: {
+            withSession: (ctx: unknown) => Promise<void> | void;
+          }) => {
+            await options.withSession(replacementCtx);
+            return { cancelled: false };
+          },
         };
         await options.withSession(replacementCtx);
         return { cancelled: false };
@@ -2326,31 +2313,32 @@ test('fresh-context same-phase retry self-unblocks instead of pausing', async ()
 
     await events.get('agent_end')?.({}, ctx);
 
-    assert.deepEqual(sentMessages, []);
-    assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
+    assert.equal(sentMessages.length, 1);
+    assert.equal(replacementMessages.length, 0);
+    assert.equal(ctx.state.autoFreshPrompt, undefined);
 
     assertSentWorkflowPrompt(
-      replacementMessages[0],
+      sentMessages[0],
       `/addy-build ${planPath}`,
       'Addy Build',
     );
-    assert.equal(replacementCtx.state.autoFreshPrompt, undefined);
+    assert.equal(ctx.state.autoFreshPrompt, undefined);
     assert.equal(
-      replacementCtx.state.autoRetryKey?.startsWith(`/addy-build ${planPath}`),
+      ctx.state.autoRetryKey?.startsWith(`/addy-build ${planPath}`),
       true,
     );
-    assert.equal(replacementCtx.state.autoRetryCount, 1);
+    assert.equal(ctx.state.autoRetryCount, 1);
 
-    await events.get('agent_end')?.({}, replacementCtx);
+    await events.get('agent_end')?.({}, ctx);
 
-    assert.equal(replacementMessages.length, 2);
+    assert.equal(sentMessages.length, 2);
     assertSentWorkflowPrompt(
-      replacementMessages[1],
+      sentMessages[1],
       `/addy-build ${planPath}`,
       'Addy Build',
     );
     assert.match(
-      workflowPromptText(replacementMessages[1]) ?? '',
+      workflowPromptText(sentMessages[1]) ?? '',
       /Addy Auto Same-Phase Recovery Pass/,
     );
   } finally {
@@ -2360,7 +2348,7 @@ test('fresh-context same-phase retry self-unblocks instead of pausing', async ()
   }
 });
 
-test('review fix loop starts fix verify and review prompts in new sessions when configured', async () => {
+test('agent_end review fix loop continues fix verify and review prompts in current session', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
@@ -2460,9 +2448,9 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       },
       ctx,
     );
-    assert.deepEqual(sentMessages.splice(0), []);
+    assert.equal(replacementMessages.length, 0);
     assertSentWorkflowPrompt(
-      replacementMessages.at(-1),
+      sentMessages.splice(0)[0],
       `/addy-fix-all ${planPath}`,
       'Addy Fix All',
     );
@@ -2476,9 +2464,9 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       },
       ctx,
     );
-    assert.deepEqual(sentMessages.splice(0), []);
+    assert.equal(replacementMessages.length, 0);
     assertSentWorkflowPrompt(
-      replacementMessages.at(-1),
+      sentMessages.splice(0)[0],
       `/addy-verify ${planPath}`,
       'Addy Verify',
     );
@@ -2496,9 +2484,9 @@ test('review fix loop starts fix verify and review prompts in new sessions when 
       },
       ctx,
     );
-    assert.deepEqual(sentMessages.splice(0), []);
+    assert.equal(replacementMessages.length, 0);
     assertSentWorkflowPrompt(
-      replacementMessages.at(-1),
+      sentMessages.splice(0)[0],
       `/addy-review ${planPath}`,
       'Addy Review',
     );
@@ -2800,7 +2788,7 @@ test('auto mode starts finish in current session even when fresh before every st
   }
 });
 
-test('fresh context fallback dispatches pending review-fix prompt when newSession is unavailable', async () => {
+test('fresh context fallback compacts before dispatching pending review-fix prompt when newSession is unavailable', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
@@ -2819,6 +2807,7 @@ test('fresh context fallback dispatches pending review-fix prompt when newSessio
 
     const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
+    let compactCalls = 0;
     const ctx: any = {
       cwd,
       id: 'auto-review-fix-no-new-session',
@@ -2842,6 +2831,10 @@ test('fresh context fallback dispatches pending review-fix prompt when newSessio
       },
       ui: { setWidget() {}, notify() {} },
       isIdle: () => true,
+      compact: (options: { onComplete?: () => void }) => {
+        compactCalls += 1;
+        options.onComplete?.();
+      },
     };
 
     await events.get('agent_end')?.(
@@ -2861,6 +2854,9 @@ test('fresh context fallback dispatches pending review-fix prompt when newSessio
       ctx,
     );
 
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(compactCalls, 1);
     assertSentWorkflowPrompt(
       sentMessages.at(-1),
       `/addy-fix-all ${planPath}`,
@@ -3808,13 +3804,13 @@ test('project restore preserves pending fresh auto continuation but clears stale
   assert.equal(state.reviewStatsKey, undefined);
 });
 
-test('agent_end fresh handoff starts a replacement session directly', async () => {
+test('agent_end fresh handoff does not call newSession directly', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
     const { pi, events, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
-    const replacementMessages: string[] = [];
+    let newSessionCalls = 0;
     const ctx: any = {
       id: 'agent-end-trampoline-only',
       state: {
@@ -3832,17 +3828,9 @@ test('agent_end fresh handoff starts a replacement session directly', async () =
         autoMode: true,
         activePlan: 'docs/plans/current.md',
       },
-      newSession: async (options: {
-        withSession: (ctx: unknown) => Promise<void> | void;
-      }) => {
-        await options.withSession({
-          id: 'agent-end-trampoline-only-replacement',
-          ui: { setWidget() {}, notify() {} },
-          isIdle: () => true,
-          sendUserMessage: (message: string) =>
-            replacementMessages.push(message),
-        });
-        return { cancelled: false };
+      newSession: async () => {
+        newSessionCalls += 1;
+        throw new Error('agent_end must not call newSession');
       },
       ui: { setWidget() {} },
       isIdle: () => true,
@@ -3850,17 +3838,14 @@ test('agent_end fresh handoff starts a replacement session directly', async () =
 
     await events.get('agent_end')?.({}, ctx);
 
-    assert.deepEqual(sentMessages, []);
-    assert.equal(
-      ctx.state.autoFreshPrompt,
-      '/addy-build docs/plans/current.md',
-    );
-    assert.equal(ctx.state.autoFreshReason, 'before-step');
+    assert.equal(newSessionCalls, 0);
     assertSentWorkflowPrompt(
-      replacementMessages[0],
+      sentMessages[0],
       '/addy-build docs/plans/current.md',
       'Addy Build',
     );
+    assert.equal(ctx.state.autoFreshPrompt, undefined);
+    assert.equal(ctx.state.autoLastPrompt, '/addy-build docs/plans/current.md');
   } finally {
     if (previousEnv === undefined)
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -4302,7 +4287,7 @@ test('cancelled fresh continuation falls back to current session dispatch', asyn
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
-  assert.equal(sent[0].options, undefined);
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
   assert.equal(
     getContextWorkflowState(ctx).autoLastPrompt,
@@ -4361,15 +4346,305 @@ test('missing fresh-session API falls back with default delivery', async () => {
     '/addy-review docs/plans/current.md',
     'Addy Review',
   );
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
+test('fresh-session compaction fallback continues when compact throws', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-continue-compact-throws-project'),
+    id: 'auto-continue-compact-throws',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-review docs/plans/current.md',
+      autoFreshReason: 'before-review',
+      autoFreshDeliveryKey: 'compact-throws-key',
+    },
+    compact: () => {
+      throw new Error('compact failed');
+    },
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => sent.push({ message, options }),
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands
+    .get('addy-auto-continue')
+    ?.handler('--fresh before-review', ctx);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(notices.some(([message]) => /compact failed/.test(message)));
+  assertSentWorkflowPrompt(
+    sent[0].message,
+    '/addy-review docs/plans/current.md',
+    'Addy Review',
+  );
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
+test('fresh-session compaction fallback continues when compact reports onError', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-continue-compact-on-error-project'),
+    id: 'auto-continue-compact-on-error',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-review docs/plans/current.md',
+      autoFreshReason: 'before-review',
+      autoFreshDeliveryKey: 'compact-on-error-key',
+    },
+    compact: (options: { onError?: (error: Error) => void }) => {
+      options.onError?.(new Error('compact rejected'));
+    },
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => sent.push({ message, options }),
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands
+    .get('addy-auto-continue')
+    ?.handler('--fresh before-review', ctx);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(notices.some(([message]) => /compact rejected/.test(message)));
+  assertSentWorkflowPrompt(
+    sent[0].message,
+    '/addy-review docs/plans/current.md',
+    'Addy Review',
+  );
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
+test('busy missing fresh-session fallback waits for idle before default delivery', async () => {
+  const { pi, commands } = createPiMock();
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
+  let idle = false;
+  pi.sendUserMessage = (
+    message: string,
+    options?: { deliverAs?: string; streamingBehavior?: string },
+  ) => {
+    assert.equal(idle, true, 'default delivery must wait until Pi is idle');
+    return sent.push({ message, options });
+  };
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-continue-no-new-session-busy-project'),
+    id: 'auto-continue-no-new-session-busy',
+    isIdle: () => idle,
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-review docs/plans/current.md',
+      autoFreshReason: 'before-review',
+      autoFreshDeliveryKey: 'no-new-session-busy-key',
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands
+    .get('addy-auto-continue')
+    ?.handler('--fresh before-review', ctx);
+
+  assert.match(notices.at(-1)?.[0] ?? '', /continuing in the current session/);
+  assert.equal(sent.length, 0);
+  assert.equal(
+    getContextWorkflowState(ctx).autoFreshPrompt,
+    '/addy-review docs/plans/current.md',
+  );
+
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assertSentWorkflowPrompt(
+    sent[0].message,
+    '/addy-review docs/plans/current.md',
+    'Addy Review',
+  );
   assert.equal(sent[0].options, undefined);
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
-test('addy-auto retry consumes pending fresh prompt in current session', async () => {
+test('agent_end-created current-session fallback waits for idle before default delivery', async () => {
+  const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+  process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
+  const cwd = join(stateDir, 'agent-end-no-new-session-busy-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events } = createPiMock();
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
+  let idle = false;
+  pi.sendUserMessage = (
+    message: string,
+    options?: { deliverAs?: string; streamingBehavior?: string },
+  ) => {
+    assert.equal(idle, true, 'default delivery must wait until Pi is idle');
+    return sent.push({ message, options });
+  };
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: 'agent-end-no-new-session-busy',
+    isIdle: () => idle,
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'active',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-verify ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  try {
+    await events.get('agent_end')?.(
+      {
+        messages: [
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Verification passed.' }],
+          },
+        ],
+      },
+      ctx,
+    );
+
+    assert.match(
+      notices.at(-1)?.[0] ?? '',
+      /continuing in the current session/,
+    );
+    assert.equal(sent.length, 0);
+    assert.equal(
+      getContextWorkflowState(ctx).autoFreshPrompt,
+      `/addy-review ${planPath}`,
+    );
+
+    idle = true;
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    assertSentWorkflowPrompt(
+      sent[0].message,
+      `/addy-review ${planPath}`,
+      'Addy Review',
+    );
+    assert.equal(sent[0].options, undefined);
+    assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+  } finally {
+    if (previousEnv === undefined)
+      delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+    else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
+  }
+});
+
+test('addy-auto retry consumes pending fresh prompt in a new session', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const sent: string[] = [];
   let newSessionCalls = 0;
+  let replacementCtx: any;
   const ctx: any = {
     cwd: join(stateDir, 'auto-retry-pending-current-project'),
     id: 'auto-retry-pending-current',
@@ -4391,8 +4666,16 @@ test('addy-auto retry consumes pending fresh prompt in current session', async (
       autoFreshReason: 'before-step',
       autoFreshDeliveryKey: 'manual-retry-key',
     },
-    newSession: async () => {
+    newSession: async (options: {
+      withSession: (ctx: unknown) => Promise<void> | void;
+    }) => {
       newSessionCalls += 1;
+      replacementCtx = {
+        ...ctx,
+        id: 'auto-retry-pending-replacement',
+        sendUserMessage: (message: string) => sent.push(message),
+      };
+      await options.withSession(replacementCtx);
       return { cancelled: false };
     },
     sendUserMessage: (message: string) => sent.push(message),
@@ -4402,13 +4685,16 @@ test('addy-auto retry consumes pending fresh prompt in current session', async (
 
   await commands.get('addy-auto')?.handler('', ctx);
 
-  assert.equal(newSessionCalls, 0);
+  assert.equal(newSessionCalls, 1);
   assertSentWorkflowPrompt(
     sent[0],
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
-  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+  assert.equal(
+    getContextWorkflowState(replacementCtx).autoFreshPrompt,
+    undefined,
+  );
 });
 
 test('agent_end consumes pending fresh prompt before recomputing next action', async () => {
@@ -4460,7 +4746,7 @@ test('agent_end consumes pending fresh prompt before recomputing next action', a
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
-  assert.equal(sent[0].options, undefined);
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
