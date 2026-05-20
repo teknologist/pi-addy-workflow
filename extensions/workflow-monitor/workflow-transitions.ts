@@ -50,6 +50,7 @@ export type WorkflowState = {
   stats?: WorkflowStats;
   activeSpec?: string;
   activePlan?: string;
+  activeSuitePlan?: string;
   currentTask?: string;
   nextTask?: string;
   currentTaskIndex?: number;
@@ -260,7 +261,16 @@ function autoModeArtifactFromText(
   const parts = text.trim().split(/\s+/);
   if (parts[0] !== '/addy-auto') return undefined;
   if (parts[1] === 'stop') return undefined;
-  return parts.slice(1).join(' ') || undefined;
+  return validAutoModeArtifact(parts.slice(1).join(' ') || undefined);
+}
+
+function validAutoModeArtifact(
+  artifact: string | undefined,
+): string | undefined {
+  if (!artifact) return undefined;
+  const unquoted = unquoteArgument(artifact);
+  if (!unquoted) return undefined;
+  return /\.md$/i.test(unquoted) ? artifact : undefined;
 }
 
 function applyAutoModeEvent(
@@ -323,7 +333,9 @@ function applyAutoModeEvent(
     autoReviewTask: undefined,
     autoReviewTaskIndex: undefined,
     activePlan:
-      event.artifact ?? autoModeArtifactFromText(text) ?? state.activePlan,
+      validAutoModeArtifact(event.artifact) ??
+      autoModeArtifactFromText(text) ??
+      state.activePlan,
     lastTrigger,
     lastArtifact: event.artifact ?? state.lastArtifact,
   };
@@ -534,6 +546,7 @@ export function transitionWorkflow(
   next.warnings = warnings;
   next.activeSpec = baseState.activeSpec;
   next.activePlan = baseState.activePlan;
+  next.activeSuitePlan = baseState.activeSuitePlan;
   next.stats = baseState.stats;
   next.autoMode = baseState.autoMode;
   next.autoLastPrompt = baseState.autoLastPrompt;

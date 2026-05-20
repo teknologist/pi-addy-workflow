@@ -717,7 +717,7 @@ test('workflow widget resolves index plans to the first unfinished slice', () =>
     '/addy-build @docs/plans/2026-05-14-migration-slice-02-runtime.md',
   );
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-14-migration-slice-02-runtime.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-14-migration-slice-02-runtime.md | suite: 2026-05-14-migration-index.md',
     'Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2',
   ]);
 });

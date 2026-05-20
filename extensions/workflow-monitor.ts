@@ -1660,6 +1660,8 @@ async function maybeContinueAfterTaskCommit(
     ? {
         ...stateAfterCommit,
         activePlan: nextSlicePlan,
+        activeSuitePlan:
+          stateAfterCommit.activeSuitePlan ?? stateAfterCommit.activePlan,
         currentTask: undefined,
         nextTask: undefined,
         currentTaskIndex: undefined,

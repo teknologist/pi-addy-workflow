@@ -267,10 +267,13 @@ test('auto command activates the first unfinished slice when given an index plan
 
   const { pi, commands, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
+  const widgets: Array<[string, unknown]> = [];
   const ctx: any = {
     cwd,
     id: 'auto-command-index',
-    ui: { setWidget() {} },
+    ui: {
+      setWidget: (key: string, value: unknown) => widgets.push([key, value]),
+    },
     isIdle: () => true,
   };
 
@@ -279,7 +282,12 @@ test('auto command activates the first unfinished slice when given an index plan
     ?.handler('@docs/plans/migration-index.md', ctx);
 
   assert.equal(ctx.state.activePlan, '@docs/plans/migration-slice-01-api.md');
+  assert.equal(ctx.state.activeSuitePlan, '@docs/plans/migration-index.md');
   assert.equal(ctx.state.currentTask, 'Complete API');
+  assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
+    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | migration-slice-01-api.md | suite: migration-index.md',
+    'Current task: Complete API | Next task: none | Slice 1/2 | Task 1/1',
+  ]);
   assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(
     sentMessages[0],
@@ -5880,6 +5888,55 @@ test('auto mode input preserves plan and task progress while toggling footer lab
     getContextWorkflowState(nextCtx).activePlan,
     'docs/plans/auto-mode.md',
   );
+});
+
+test('auto mode ignores invalid slash-like plan artifacts', () => {
+  const ctx: any = {
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      activePlan: 'docs/plans/current.md',
+    },
+    ui: { setWidget() {} },
+  };
+
+  const state = handleWorkflowEvent(ctx, {
+    source: 'user-input',
+    text: '/addy-auto /add',
+  });
+
+  assert.equal(state.autoMode, true);
+  assert.equal(state.activePlan, 'docs/plans/current.md');
+});
+
+test('workflow state sanitizes invalid persisted slash active plan', () => {
+  const ctx: any = {
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      activePlan: '/add',
+    },
+  };
+
+  assert.equal(getContextWorkflowState(ctx).activePlan, undefined);
 });
 
 test('workflow state stores current and next task from active plan', () => {

@@ -116,35 +116,59 @@ function normalizeWorkflowStats(value: unknown): WorkflowStats {
 }
 
 function normalizeWorkflowState(state: WorkflowState): WorkflowState {
+  const sanitizedState = sanitizeWorkflowArtifacts(state);
   const normalizedTasks =
-    state.currentTask || state.nextTask
+    sanitizedState.currentTask || sanitizedState.nextTask
       ? {
-          currentTask: state.currentTask,
-          nextTask: state.nextTask,
-          currentTaskIndex: state.currentTaskIndex,
-          taskCount: state.taskCount,
-          currentSliceIndex: state.currentSliceIndex,
-          sliceCount: state.sliceCount,
-          currentTaskSummary: state.currentTaskSummary,
-          nextTaskSummary: state.nextTaskSummary,
+          currentTask: sanitizedState.currentTask,
+          nextTask: sanitizedState.nextTask,
+          currentTaskIndex: sanitizedState.currentTaskIndex,
+          taskCount: sanitizedState.taskCount,
+          currentSliceIndex: sanitizedState.currentSliceIndex,
+          sliceCount: sanitizedState.sliceCount,
+          currentTaskSummary: sanitizedState.currentTaskSummary,
+          nextTaskSummary: sanitizedState.nextTaskSummary,
         }
       : {};
 
-  const normalizedStats = { stats: normalizeWorkflowStats(state.stats) };
+  const normalizedStats = {
+    stats: normalizeWorkflowStats(sanitizedState.stats),
+  };
 
-  if (!state.current || phaseIndex(state.current) <= phaseIndex('plan'))
-    return { ...state, ...normalizedTasks, ...normalizedStats };
+  if (
+    !sanitizedState.current ||
+    phaseIndex(sanitizedState.current) <= phaseIndex('plan')
+  )
+    return { ...sanitizedState, ...normalizedTasks, ...normalizedStats };
 
   return {
-    ...state,
+    ...sanitizedState,
     ...normalizedTasks,
     ...normalizedStats,
     phases: {
-      ...state.phases,
+      ...sanitizedState.phases,
       define: 'complete',
       plan: 'complete',
     },
   };
+}
+
+function sanitizeWorkflowArtifacts(state: WorkflowState): WorkflowState {
+  const activePlan = sanitizePlanArtifact(state.activePlan);
+  const activeSuitePlan = sanitizePlanArtifact(state.activeSuitePlan);
+  if (
+    activePlan === state.activePlan &&
+    activeSuitePlan === state.activeSuitePlan
+  )
+    return state;
+  return { ...state, activePlan, activeSuitePlan };
+}
+
+function sanitizePlanArtifact(
+  planPath: string | undefined,
+): string | undefined {
+  if (planPath?.startsWith('/') && !/\.md$/i.test(planPath)) return undefined;
+  return planPath;
 }
 
 export function serializeWorkflowState(state: WorkflowState): string {
@@ -222,6 +246,15 @@ export function workflowArtifactForFooter(
 
 export function workflowArtifactName(path: string): string {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) ?? path;
+}
+
+function styledArtifactName(
+  path: string | undefined,
+  theme?: { fg?: (name: string, text: string) => string },
+): string | undefined {
+  if (!path) return undefined;
+  const name = workflowArtifactName(path);
+  return theme?.fg?.('mdLinkUrl', name) ?? theme?.fg?.('accent', name) ?? name;
 }
 
 type PlanTaskStatus = 'Implemented' | 'Verified' | 'Reviewed';
@@ -768,7 +801,11 @@ export function refreshWorkflowTasksFromPlan(
     );
     if (slicePlan && slicePlan !== state.activePlan)
       return refreshWorkflowTasksFromPlan(
-        { ...state, activePlan: slicePlan },
+        {
+          ...state,
+          activePlan: slicePlan,
+          activeSuitePlan: state.activeSuitePlan ?? state.activePlan,
+        },
         baseCwd,
       );
 
@@ -847,17 +884,17 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
         state.autoMode ? '🔁 Addy Workflow: ' : 'Addy Workflow: ',
       );
       const artifact = workflowArtifactForFooter(state);
-      const artifactName = artifact
-        ? workflowArtifactName(artifact)
-        : undefined;
-      const styledArtifactName = artifactName
-        ? (theme?.fg?.('mdLinkUrl', artifactName) ??
-          theme?.fg?.('accent', artifactName) ??
-          artifactName)
-        : undefined;
-      const artifactSuffix = styledArtifactName
-        ? ` | ${styledArtifactName}`
+      const styledArtifact = styledArtifactName(artifact, theme);
+      const styledSuiteArtifact =
+        state.activeSuitePlan && state.activeSuitePlan !== artifact
+          ? styledArtifactName(state.activeSuitePlan, theme)
+          : undefined;
+      const suiteSuffix = styledSuiteArtifact
+        ? ` | ${styleLabel('suite: ')}${styledSuiteArtifact}`
         : '';
+      const artifactSuffix = styledArtifact
+        ? ` | ${styledArtifact}${suiteSuffix}`
+        : suiteSuffix;
       const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
       const currentTask = state.currentTaskSummary ?? state.currentTask;
       const nextTask = state.nextTaskSummary ?? state.nextTask;
@@ -1123,7 +1160,11 @@ export function nextWorkflowActionForActivePlanLifecycle(
     );
     if (slicePlan && slicePlan !== state.activePlan)
       return nextWorkflowActionForActivePlanLifecycle(
-        { ...state, activePlan: slicePlan },
+        {
+          ...state,
+          activePlan: slicePlan,
+          activeSuitePlan: state.activeSuitePlan ?? state.activePlan,
+        },
         baseCwd,
       );
   }

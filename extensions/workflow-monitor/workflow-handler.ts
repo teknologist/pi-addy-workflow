@@ -110,6 +110,11 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   )
     return undefined;
   if (
+    candidate.activeSuitePlan !== undefined &&
+    typeof candidate.activeSuitePlan !== 'string'
+  )
+    return undefined;
+  if (
     candidate.autoMode !== undefined &&
     typeof candidate.autoMode !== 'boolean'
   )
