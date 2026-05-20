@@ -90,7 +90,6 @@ const PROMPT_TEMPLATE_BY_COMMAND: Record<string, string> = {
   '/addy-fix-all': 'addy-fix-all.md',
   '/addy-finish': 'addy-finish.md',
 };
-const AUTO_REVIEW_FIX_MAX = 5;
 const ADDY_STATS_MESSAGE_TYPE = 'pi-addy-workflow-stats';
 const AUTO_TASK_COMMIT_PROMPT = '__addy-auto-task-commit__';
 const AUTO_FRESH_IDLE_RETRY_MS = 50;
@@ -2060,6 +2059,12 @@ async function maybeDispatchReviewFixLoop(
   const key = reviewFixKey(state);
   const fixCount =
     state.autoReviewFixKey === key ? (state.autoReviewFixCount ?? 0) : 0;
+  const maxFixLoops = loadAddyWorkflowConfig(
+    ctx as {
+      cwd?: string;
+      ui?: { notify?: (message: string, level?: string) => void };
+    },
+  ).auto.review.maxFixLoops;
   const fingerprint = cleanReviewNeedsPlanSync
     ? reviewFindingsFingerprint(`Reviewed checkbox still unchecked for ${key}.`)
     : reviewFindingsFingerprint(reviewText);
@@ -2075,9 +2080,9 @@ async function maybeDispatchReviewFixLoop(
     return true;
   }
 
-  if (fixCount >= AUTO_REVIEW_FIX_MAX) {
+  if (fixCount >= maxFixLoops) {
     notify(
-      `Addy auto paused after ${AUTO_REVIEW_FIX_MAX} review fix loops for this task. Task: ${action?.taskTitle ?? 'current task'}.`,
+      `Addy auto paused after ${maxFixLoops} review fix loops for this task. Task: ${action?.taskTitle ?? 'current task'}.`,
     );
     return true;
   }

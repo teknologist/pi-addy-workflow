@@ -467,7 +467,7 @@ test('auto prompt defines autonomous task loop boundaries', async () => {
   assert.match(content, /failed tests/i);
   assert.match(content, /typecheck/i);
   assert.match(content, /review blockers/i);
-  assert.match(content, /5 review fix loops/i);
+  assert.match(content, /3 as the default maximum review fix loops/i);
   assert.match(content, /Task commit policy/i);
   assert.match(
     content,

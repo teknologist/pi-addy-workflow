@@ -57,8 +57,8 @@ Review fix loop guardrails:
 - If `/addy-review` surfaces actionable Critical/Important findings or safe scoped Suggestions and leaves `Reviewed` unchecked, run `/addy-fix-all <plan-path>` for the immediately preceding review result, then rerun `/addy-verify <plan-path>` and `/addy-review <plan-path>`.
 - Repeat review → fix-all → verify → review until review passes and checks `Reviewed`, or until a guardrail stops the loop.
 - If recovery says `Reviewed` lifecycle evidence is missing but the plan already has `[x] Reviewed` for the reviewed task and the latest real review said `No issues found`, classify it as workflow state/stat synchronization, not a reason to re-run review for the same completed slice.
-- Stop instead of looping when the same finding repeats after a fix attempt, validation cannot be fixed safely, the review requires product/security/architecture judgment, the fix would be broad/destructive/out of scope, or the task reaches 5 review fix loops.
-- Treat 5 as the default maximum review fix loops per task unless the user explicitly raises or lowers it.
+- Stop instead of looping when the same finding repeats after a fix attempt, validation cannot be fixed safely, the review requires product/security/architecture judgment, the fix would be broad/destructive/out of scope, or the task reaches the configured maximum review fix loops.
+- Treat 3 as the default maximum review fix loops per task unless `.pi/addy-workflow.json` configures `{"auto":{"review":{"maxFixLoops":<positive-integer>}}}`.
 
 Task commit policy:
 
@@ -70,7 +70,7 @@ Task commit policy:
 Fresh context policy:
 
 - By default, Addy starts a fresh Pi session before every `/addy-*` workflow step, whether manually typed or auto-dispatched.
-- Configure this in `.pi/addy-workflow.json` with `{"auto":{"freshContext":{"beforeEveryStep":true,"betweenTasks":true,"beforeReview":false}}}`.
+- Configure this in `.pi/addy-workflow.json` with `{"auto":{"freshContext":{"beforeEveryStep":true,"betweenTasks":true,"beforeReview":false},"review":{"maxFixLoops":3}}}`.
 - `betweenTasks` is retained for compatibility; `beforeReview` is only needed when `beforeEveryStep` is disabled but review-only fresh context is desired.
 - Environment overrides: `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP`, `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS`, and `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` accept `1/0`, `true/false`, `yes/no`, or `on/off`.
 

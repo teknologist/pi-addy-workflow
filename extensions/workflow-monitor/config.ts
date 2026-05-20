@@ -9,6 +9,9 @@ export type AddyWorkflowConfig = {
       betweenTasks: boolean;
       beforeReview: boolean;
     };
+    review: {
+      maxFixLoops: number;
+    };
   };
 };
 
@@ -26,6 +29,9 @@ export const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig = {
       betweenTasks: true,
       beforeReview: false,
     },
+    review: {
+      maxFixLoops: 3,
+    },
   },
 };
 
@@ -40,6 +46,9 @@ function cloneDefaultConfig(): AddyWorkflowConfig {
         beforeReview:
           DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeReview,
       },
+      review: {
+        maxFixLoops: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.review.maxFixLoops,
+      },
     },
   };
 }
@@ -51,6 +60,16 @@ function coerceBoolean(value: unknown): boolean | undefined {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return undefined;
+}
+
+function coercePositiveInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0)
+    return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) return undefined;
+  const number = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
 function mergeConfig(
@@ -65,33 +84,48 @@ function mergeConfig(
         betweenTasks?: unknown;
         beforeReview?: unknown;
       };
+      review?: {
+        maxFixLoops?: unknown;
+      };
     };
   };
   const freshContext = candidate.auto?.freshContext;
-  if (freshContext === undefined) return base;
-  if (typeof freshContext !== 'object' || freshContext === null)
+  const review = candidate.auto?.review;
+  if (freshContext === undefined && review === undefined) return base;
+  if (
+    freshContext !== undefined &&
+    (typeof freshContext !== 'object' || freshContext === null)
+  )
+    return undefined;
+  if (review !== undefined && (typeof review !== 'object' || review === null))
     return undefined;
 
   const beforeEveryStep =
-    freshContext.beforeEveryStep === undefined
+    freshContext?.beforeEveryStep === undefined
       ? undefined
       : coerceBoolean(freshContext.beforeEveryStep);
   const betweenTasks =
-    freshContext.betweenTasks === undefined
+    freshContext?.betweenTasks === undefined
       ? undefined
       : coerceBoolean(freshContext.betweenTasks);
   const beforeReview =
-    freshContext.beforeReview === undefined
+    freshContext?.beforeReview === undefined
       ? undefined
       : coerceBoolean(freshContext.beforeReview);
+  const maxFixLoops =
+    review?.maxFixLoops === undefined
+      ? undefined
+      : coercePositiveInteger(review.maxFixLoops);
   if (
-    freshContext.beforeEveryStep !== undefined &&
+    freshContext?.beforeEveryStep !== undefined &&
     beforeEveryStep === undefined
   )
     return undefined;
-  if (freshContext.betweenTasks !== undefined && betweenTasks === undefined)
+  if (freshContext?.betweenTasks !== undefined && betweenTasks === undefined)
     return undefined;
-  if (freshContext.beforeReview !== undefined && beforeReview === undefined)
+  if (freshContext?.beforeReview !== undefined && beforeReview === undefined)
+    return undefined;
+  if (review?.maxFixLoops !== undefined && maxFixLoops === undefined)
     return undefined;
 
   return {
@@ -101,6 +135,9 @@ function mergeConfig(
           beforeEveryStep ?? base.auto.freshContext.beforeEveryStep,
         betweenTasks: betweenTasks ?? base.auto.freshContext.betweenTasks,
         beforeReview: beforeReview ?? base.auto.freshContext.beforeReview,
+      },
+      review: {
+        maxFixLoops: maxFixLoops ?? base.auto.review.maxFixLoops,
       },
     },
   };
@@ -164,6 +201,9 @@ function applyEnv(
   const beforeReview = coerceBoolean(
     env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW,
   );
+  const maxFixLoops = coercePositiveInteger(
+    env.PI_ADDY_AUTO_REVIEW_MAX_FIX_LOOPS,
+  );
 
   return {
     auto: {
@@ -172,6 +212,9 @@ function applyEnv(
           beforeEveryStep ?? config.auto.freshContext.beforeEveryStep,
         betweenTasks: betweenTasks ?? config.auto.freshContext.betweenTasks,
         beforeReview: beforeReview ?? config.auto.freshContext.beforeReview,
+      },
+      review: {
+        maxFixLoops: maxFixLoops ?? config.auto.review.maxFixLoops,
       },
     },
   };

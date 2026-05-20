@@ -163,10 +163,14 @@ test('session start creates the global Addy workflow config with defaults', asyn
 
     const configPath = join(home, '.pi', 'agent', 'addy-workflow.json');
     assert.equal(existsSync(configPath), true);
-    assert.deepEqual(
-      JSON.parse(readFileSync(configPath, 'utf8')).auto.freshContext,
-      { beforeEveryStep: true, betweenTasks: true, beforeReview: false },
-    );
+    assert.deepEqual(JSON.parse(readFileSync(configPath, 'utf8')).auto, {
+      freshContext: {
+        beforeEveryStep: true,
+        betweenTasks: true,
+        beforeReview: false,
+      },
+      review: { maxFixLoops: 3 },
+    });
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
@@ -180,13 +184,17 @@ test('Addy workflow config uses fresh-context defaults and env overrides', () =>
       PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP: 'false',
       PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS: '0',
       PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW: 'true',
+      PI_ADDY_AUTO_REVIEW_MAX_FIX_LOOPS: '2',
     },
   );
 
-  assert.deepEqual(config.auto.freshContext, {
-    beforeEveryStep: false,
-    betweenTasks: false,
-    beforeReview: true,
+  assert.deepEqual(config.auto, {
+    freshContext: {
+      beforeEveryStep: false,
+      betweenTasks: false,
+      beforeReview: true,
+    },
+    review: { maxFixLoops: 2 },
   });
 });
 
@@ -196,16 +204,22 @@ test('Addy workflow config lets project config override defaults', () => {
   writeFileSync(
     join(cwd, '.pi', 'addy-workflow.json'),
     JSON.stringify({
-      auto: { freshContext: { betweenTasks: false, beforeReview: true } },
+      auto: {
+        freshContext: { betweenTasks: false, beforeReview: true },
+        review: { maxFixLoops: 4 },
+      },
     }),
   );
 
   const config = loadAddyWorkflowConfig({ cwd }, {});
 
-  assert.deepEqual(config.auto.freshContext, {
-    beforeEveryStep: true,
-    betweenTasks: false,
-    beforeReview: true,
+  assert.deepEqual(config.auto, {
+    freshContext: {
+      beforeEveryStep: true,
+      betweenTasks: false,
+      beforeReview: true,
+    },
+    review: { maxFixLoops: 4 },
   });
 });
 
@@ -226,10 +240,13 @@ test('Addy workflow config ignores malformed project config safely', () => {
     {},
   );
 
-  assert.deepEqual(config.auto.freshContext, {
-    beforeEveryStep: true,
-    betweenTasks: true,
-    beforeReview: false,
+  assert.deepEqual(config.auto, {
+    freshContext: {
+      beforeEveryStep: true,
+      betweenTasks: true,
+      beforeReview: false,
+    },
+    review: { maxFixLoops: 3 },
   });
   assert.match(
     notices.at(-1)?.[0] ?? '',
@@ -3592,7 +3609,7 @@ test('auto loop pauses after unclear commit output even when it contains a hash'
   assert.equal(notices.at(-1)?.[1], 'warning');
 });
 
-test('auto loop stops review fix loop after five attempts', async () => {
+test('auto loop stops review fix loop after three attempts by default', async () => {
   const cwd = join(stateDir, 'auto-loop-review-fix-max-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -3629,7 +3646,7 @@ test('auto loop stops review fix loop after five attempts', async () => {
       autoMode: true,
       autoLastPrompt: `/addy-review ${planPath}`,
       autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
-      autoReviewFixCount: 5,
+      autoReviewFixCount: 3,
       autoReviewFindingFingerprint: 'previous',
       activePlan: planPath,
     },
@@ -3659,7 +3676,83 @@ test('auto loop stops review fix loop after five attempts', async () => {
   );
 
   assert.equal(sentMessages.length, 0);
-  assert.match(notices.at(-1)?.[0] ?? '', /5 review fix loops/);
+  assert.match(notices.at(-1)?.[0] ?? '', /3 review fix loops/);
+  assert.equal(notices.at(-1)?.[1], 'warning');
+});
+
+test('auto loop review fix loop limit is configurable', async () => {
+  const cwd = join(stateDir, 'auto-loop-review-fix-configurable-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  mkdirSync(join(cwd, '.pi'), { recursive: true });
+  writeFileSync(
+    join(cwd, '.pi', 'addy-workflow.json'),
+    JSON.stringify({ auto: { review: { maxFixLoops: 2 } } }),
+  );
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-review-fix-configurable',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
+      autoReviewFixCount: 2,
+      autoReviewFindingFingerprint: 'previous',
+      activePlan: planPath,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Important: fix src/new-location.ts:42 before review can pass.',
+            },
+          ],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? '', /2 review fix loops/);
   assert.equal(notices.at(-1)?.[1], 'warning');
 });
 
