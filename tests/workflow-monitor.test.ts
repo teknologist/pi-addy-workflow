@@ -3089,7 +3089,7 @@ test('auto fresh continuations use the replacement session API for all reasons',
 
     assert.equal(sentMessages.length, 0);
     assert.equal(replacementEntries.at(-1)?.[0], WORKFLOW_STATE_ENTRY_TYPE);
-    assert.equal(replacementMessages[0].options, undefined);
+    assert.equal(replacementMessages[0].options?.streamingBehavior, 'followUp');
     assertSentWorkflowPrompt(
       replacementMessages[0].message,
       '/addy-build docs/plans/current.md',
@@ -4234,7 +4234,7 @@ test('fresh continuation uses default delivery on session start', async () => {
     '/addy-build docs/plans/current.md',
     'Addy Build',
   );
-  assert.equal(sent[0].options, undefined);
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
 });
 
 test('fresh continuation is not auto-dispatched inside subagent children', async () => {
@@ -4633,7 +4633,7 @@ test('busy missing fresh-session fallback waits for idle before default delivery
     '/addy-review docs/plans/current.md',
     'Addy Review',
   );
-  assert.equal(sent[0].options, undefined);
+  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
@@ -4730,7 +4730,7 @@ test('agent_end-created current-session fallback waits for idle before default d
       `/addy-review ${planPath}`,
       'Addy Review',
     );
-    assert.equal(sent[0].options, undefined);
+    assert.equal(sent[0].options?.streamingBehavior, 'followUp');
     assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
   } finally {
     if (previousEnv === undefined)

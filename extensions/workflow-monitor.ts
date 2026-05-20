@@ -690,6 +690,10 @@ function followUpDeliveryOptions(): UserMessageDeliveryOptions {
   return { deliverAs: 'followUp', streamingBehavior: 'followUp' };
 }
 
+function defaultDeliveryOptions(): UserMessageDeliveryOptions {
+  return { streamingBehavior: 'followUp' };
+}
+
 function sendUserMessage(
   pi: ExtensionAPI,
   ctx: unknown,
@@ -741,7 +745,9 @@ function sendUserMessage(
         piSender?.call(pi, content, deliveryOptions);
   return sender(
     deliveredMessage,
-    options.useDefaultDelivery ? undefined : followUpDeliveryOptions(),
+    options.useDefaultDelivery
+      ? defaultDeliveryOptions()
+      : followUpDeliveryOptions(),
   );
 }
 
