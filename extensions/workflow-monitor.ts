@@ -1277,11 +1277,13 @@ async function runFreshContextContinuation(
     if (
       await deliverPendingFreshPrompt(pi, ctx, initialState, {
         freshContextBypassReason: reason,
+        useDefaultDelivery: true,
       })
     )
       return;
     await dispatchNextAutoWorkflowPrompt(pi, ctx, false, {
       freshContextBypassReason: reason,
+      useDefaultDelivery: true,
     });
     return;
   }
@@ -1346,11 +1348,13 @@ async function runFreshContextContinuation(
     if (
       await deliverPendingFreshPrompt(pi, ctx, latestState, {
         freshContextBypassReason: reason,
+        useDefaultDelivery: true,
       })
     )
       return;
     await dispatchNextAutoWorkflowPrompt(pi, ctx, false, {
       freshContextBypassReason: reason,
+      useDefaultDelivery: true,
     });
   }
 }
@@ -2114,6 +2118,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
         !isSubagentChildSession() &&
         (await deliverPendingFreshPrompt(pi, ctx, stateWithReviewIssues, {
           freshContextBypassReason: stateWithReviewIssues.autoFreshReason,
+          useDefaultDelivery: true,
         }))
       )
         return;

@@ -4255,7 +4255,10 @@ test('auto fresh send failure preserves pending prompt for retry', async () => {
 test('cancelled fresh continuation falls back to current session dispatch', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
-  const sent: string[] = [];
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
   const notices: Array<[string, string | undefined]> = [];
   const ctx: any = {
     cwd: join(stateDir, 'auto-continue-cancel-fallback-project'),
@@ -4279,7 +4282,10 @@ test('cancelled fresh continuation falls back to current session dispatch', asyn
       autoFreshDeliveryKey: 'cancel-fallback-key',
     },
     newSession: async () => ({ cancelled: true }),
-    sendUserMessage: (message: string) => sent.push(message),
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => sent.push({ message, options }),
     ui: {
       setWidget() {},
       notify: (message: string, level?: string) =>
@@ -4292,15 +4298,71 @@ test('cancelled fresh continuation falls back to current session dispatch', asyn
 
   assert.match(notices.at(-1)?.[0] ?? '', /continuing in the current session/);
   assertSentWorkflowPrompt(
-    sent[0],
+    sent[0].message,
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
+  assert.equal(sent[0].options, undefined);
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
   assert.equal(
     getContextWorkflowState(ctx).autoLastPrompt,
     '/addy-verify docs/plans/current.md',
   );
+});
+
+test('missing fresh-session API falls back with default delivery', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-continue-no-new-session-fallback-project'),
+    id: 'auto-continue-no-new-session-fallback',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-review docs/plans/current.md',
+      autoFreshReason: 'before-review',
+      autoFreshDeliveryKey: 'no-new-session-fallback-key',
+    },
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => sent.push({ message, options }),
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands
+    .get('addy-auto-continue')
+    ?.handler('--fresh before-review', ctx);
+
+  assert.match(notices.at(-1)?.[0] ?? '', /continuing in the current session/);
+  assertSentWorkflowPrompt(
+    sent[0].message,
+    '/addy-review docs/plans/current.md',
+    'Addy Review',
+  );
+  assert.equal(sent[0].options, undefined);
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
 test('addy-auto retry consumes pending fresh prompt in current session', async () => {
@@ -4352,7 +4414,10 @@ test('addy-auto retry consumes pending fresh prompt in current session', async (
 test('agent_end consumes pending fresh prompt before recomputing next action', async () => {
   const { pi, events } = createPiMock();
   addyWorkflowMonitor(pi as never);
-  const sent: string[] = [];
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
   let newSessionCalls = 0;
   const ctx: any = {
     cwd: join(stateDir, 'agent-end-pending-current-project'),
@@ -4379,7 +4444,10 @@ test('agent_end consumes pending fresh prompt before recomputing next action', a
       newSessionCalls += 1;
       return { cancelled: false };
     },
-    sendUserMessage: (message: string) => sent.push(message),
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => sent.push({ message, options }),
     ui: { setWidget() {}, notify() {} },
   };
   setContextWorkflowState(ctx, ctx.state);
@@ -4388,10 +4456,11 @@ test('agent_end consumes pending fresh prompt before recomputing next action', a
 
   assert.equal(newSessionCalls, 0);
   assertSentWorkflowPrompt(
-    sent[0],
+    sent[0].message,
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
+  assert.equal(sent[0].options, undefined);
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
