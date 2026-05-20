@@ -1842,7 +1842,9 @@ async function dispatchAutoPromptFreshAware(
       const fallbackOptions = {
         ...options,
         freshContextBypassReason: reason,
-        useDefaultDelivery: true,
+        useDefaultDelivery: options.disableCompaction
+          ? options.useDefaultDelivery
+          : true,
       };
       if (options.disableCompaction)
         await deliverPendingFreshPromptInCurrentSession(
@@ -2616,9 +2618,9 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
             appendWorkflowEntry(pi),
           );
         } else if (validPendingFreshContinuation(pending)) {
-          schedulePendingFreshPromptAfterCompaction(pi, ctx, pending, {
+          await deliverPendingFreshPromptInCurrentSession(pi, ctx, pending, {
             freshContextBypassReason: pending.autoFreshReason,
-            useDefaultDelivery: true,
+            useDefaultDelivery: false,
           });
           return { action: 'continue' as const };
         }

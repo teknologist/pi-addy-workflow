@@ -4772,9 +4772,11 @@ test('addy-auto retry consumes pending fresh prompt without replacing the sessio
       newSessionCalls += 1;
       return { cancelled: false };
     },
-    compact: (options: { onComplete?: () => void }) => {
+    compact: (_options: { onComplete?: () => void }) => {
       compactCalls += 1;
-      options.onComplete?.();
+      throw new Error(
+        '/addy-auto retry must not compact or replace the session',
+      );
     },
     sendUserMessage: (message: string) => sent.push(message),
     ui: { setWidget() {}, notify() {} },
@@ -4784,7 +4786,7 @@ test('addy-auto retry consumes pending fresh prompt without replacing the sessio
   await commands.get('addy-auto')?.handler('', ctx);
 
   assert.equal(newSessionCalls, 0);
-  assert.equal(compactCalls, 1);
+  assert.equal(compactCalls, 0);
   assertSentWorkflowPrompt(
     sent[0],
     '/addy-verify docs/plans/current.md',
