@@ -1778,6 +1778,137 @@ test('auto loop runs fix-all when clean review leaves reviewed unchecked', async
   assert.equal(ctx.state.autoReviewFixCount, 1);
 });
 
+test('auto loop commits when clean review has checked reviewed but lifecycle evidence is stale', async () => {
+  const cwd = join(stateDir, 'auto-loop-clean-review-stale-evidence-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-clean-review-stale-evidence',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'No issues found.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.match(sentMessages[0], /Completed task: Current/);
+  assert.equal(ctx.state.autoReviewFixCount, undefined);
+});
+
+test('addy-auto advances from stale completed numeric slice to next unfinished slice', async () => {
+  const cwd = join(stateDir, 'auto-loop-stale-completed-numeric-slice-project');
+  const plansDir = join(cwd, 'docs', 'plans', 'suite');
+  const firstPlan = join(
+    'docs',
+    'plans',
+    'suite',
+    '02-b2bd-first-vertical-proof.md',
+  );
+  const secondPlan = join('docs', 'plans', 'suite', '03-b2bi-context-slice.md');
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(
+    join(cwd, firstPlan),
+    [
+      '## Task 1: Finished slice task',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(cwd, secondPlan),
+    [
+      '## Task 1: Next slice task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-stale-completed-numeric-slice',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Finished slice task',
+      currentTaskIndex: 1,
+      taskCount: 1,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => true,
+  };
+
+  await commands.get('addy-auto')?.handler({ args: [firstPlan] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-build ${secondPlan}`,
+    'Addy Build',
+  );
+  assert.equal(ctx.state.activePlan, secondPlan);
+  assert.equal(ctx.state.activeSuitePlan, firstPlan);
+});
+
 test('agent_end auto loop continues next task in current session after task commit', async () => {
   const cwd = join(stateDir, 'auto-loop-task-commit-continue-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');

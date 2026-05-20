@@ -557,12 +557,10 @@ export function nextUnfinishedSlicePlanPath(
   if (tasks.some((task) => !task.complete)) return undefined;
 
   const resolvedPlanPath = resolvePlanPath(state.activePlan, baseCwd);
-  const currentMatch = basename(resolvedPlanPath).match(
-    /^(.*?slice[-_]?)(\d+)/i,
-  );
-  if (!currentMatch) return undefined;
-  const currentPrefix = currentMatch[1].toLowerCase();
-  const currentNumber = Number.parseInt(currentMatch[2], 10);
+  const current = numberedSliceParts(resolvedPlanPath);
+  if (!current) return undefined;
+  const currentPrefix = current.prefix.toLowerCase();
+  const currentNumber = current.number;
 
   let candidates: string[];
   try {
@@ -575,12 +573,12 @@ export function nextUnfinishedSlicePlanPath(
 
   const nextCandidates = candidates
     .map((candidate) => {
-      const match = basename(candidate).match(/^(.*?slice[-_]?)(\d+)/i);
-      return match
+      const parts = numberedSliceParts(candidate);
+      return parts
         ? {
             path: candidate,
-            prefix: match[1].toLowerCase(),
-            number: Number.parseInt(match[2], 10),
+            prefix: parts.prefix.toLowerCase(),
+            number: parts.number,
           }
         : undefined;
     })

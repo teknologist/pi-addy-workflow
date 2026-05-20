@@ -22,11 +22,14 @@ Before pausing:
    - test/fixture/tooling gap
    - review finding needing a code or test fix
    - plan/status checkbox out of sync with evidence
+   - workflow state/stat synchronization lag where the plan already has the owned checkbox checked and this run has real phase evidence
    - genuinely unsafe or ambiguous decision
 4. Fix the root cause when the fix is safe and scoped to the current task.
 5. Add or update meaningful regression coverage when behavior changed.
 6. Re-run the required verification/review step.
 7. Update only the lifecycle checkbox owned by the completed step.
+
+If the repeated blocker is "missing lifecycle evidence: Reviewed" but the active task already has `[x] Reviewed` and the latest real `/addy-review` for that task reported `No issues found`, do not re-run review just to satisfy stale state. Treat it as synchronization lag, preserve the review evidence in the report, and let Addy auto commit or advance to the next unfinished slice.
 
 ## Missing or failing verification artifacts
 

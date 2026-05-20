@@ -24,7 +24,7 @@ Plan-selection rules follow the same rules as `/addy-build`:
 3. If no path is supplied, use the active plan from workflow state when it exists, including an active plan shown in the Addy Workflow footer.
 4. Read the active/supplied plan before asking the user anything.
 5. If the active/supplied slice still has unfinished implementation work, continue that plan.
-6. If the active/supplied slice is fully implemented, move to the next slice only when it can be inferred unambiguously from a forward-reference link, same-directory index, or next numbered slice filename.
+6. If the active/supplied slice already has all `Implemented`, `Verified`, and `Reviewed` checkboxes checked, treat that explicit path as stale completion evidence: do not re-run review for that slice; commit any remaining completed-task changes or move to the next slice when it can be inferred unambiguously from a forward-reference link, same-directory index, or next numbered slice filename.
 7. Ask the user with bounded candidate plan paths only when no active/supplied plan exists or the next slice cannot be inferred uniquely.
 
 `/addy-auto stop` stops autonomous mode. It must not clear the active spec, active plan, task progress, existing plan checkbox evidence, or active/historical stats. The stopped-loop output must include final aggregate stats for the completed or stopped loop, including turns, review runs, and issue buckets.
@@ -56,6 +56,7 @@ Review fix loop guardrails:
 
 - If `/addy-review` surfaces actionable Critical/Important findings or safe scoped Suggestions and leaves `Reviewed` unchecked, run `/addy-fix-all <plan-path>` for the immediately preceding review result, then rerun `/addy-verify <plan-path>` and `/addy-review <plan-path>`.
 - Repeat review → fix-all → verify → review until review passes and checks `Reviewed`, or until a guardrail stops the loop.
+- If recovery says `Reviewed` lifecycle evidence is missing but the plan already has `[x] Reviewed` for the reviewed task and the latest real review said `No issues found`, classify it as workflow state/stat synchronization, not a reason to re-run review for the same completed slice.
 - Stop instead of looping when the same finding repeats after a fix attempt, validation cannot be fixed safely, the review requires product/security/architecture judgment, the fix would be broad/destructive/out of scope, or the task reaches 5 review fix loops.
 - Treat 5 as the default maximum review fix loops per task unless the user explicitly raises or lowers it.
 

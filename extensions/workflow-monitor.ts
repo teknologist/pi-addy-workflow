@@ -34,6 +34,7 @@ import {
 import {
   nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
+  nextPromptForPhase,
   planTasksFromMarkdown,
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
@@ -988,6 +989,84 @@ function planTaskIsComplete(
   } catch {
     return false;
   }
+}
+
+function planLifecycleTasksAreComplete(
+  planPath: string | undefined,
+  baseCwd?: string,
+): boolean {
+  if (!planPath) return false;
+
+  try {
+    const tasks = planTasksFromMarkdown(
+      readFileSync(resolveWorkflowPlanPath(planPath, baseCwd), 'utf8'),
+    );
+    return tasks.length > 0 && tasks.every((task) => task.complete);
+  } catch {
+    return false;
+  }
+}
+
+function actionTargetsCompletePlanTask(
+  state: ReturnType<typeof getContextWorkflowState>,
+  action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
+  baseCwd?: string,
+): boolean {
+  if (!action?.taskTitle) return false;
+  return planTaskIsComplete(state.activePlan, baseCwd, {
+    taskIndex:
+      state.currentTask === action.taskTitle
+        ? state.currentTaskIndex
+        : undefined,
+    taskTitle: action.taskTitle,
+  });
+}
+
+function completedPlanAutoContinuation(
+  state: ReturnType<typeof getContextWorkflowState>,
+  action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
+  baseCwd?: string,
+):
+  | {
+      state: ReturnType<typeof getContextWorkflowState>;
+      action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>;
+    }
+  | undefined {
+  const command = commandFromPrompt(action?.prompt);
+  if (command !== '/addy-review' && command !== '/addy-finish')
+    return undefined;
+  if (!planLifecycleTasksAreComplete(state.activePlan, baseCwd))
+    return undefined;
+
+  const nextSlicePlan = nextUnfinishedSlicePlanPath(state, baseCwd);
+  if (!nextSlicePlan && command === '/addy-review')
+    return {
+      state,
+      action: {
+        prompt: nextPromptForPhase('finish', state.activePlan),
+        taskTitle: action?.taskTitle,
+        missingStatuses: [],
+      },
+    };
+  if (!nextSlicePlan) return undefined;
+
+  const nextState = {
+    ...state,
+    activePlan: nextSlicePlan,
+    activeSuitePlan: state.activeSuitePlan ?? state.activePlan,
+    currentTask: undefined,
+    nextTask: undefined,
+    currentTaskIndex: undefined,
+    taskCount: undefined,
+    currentTaskSummary: undefined,
+    nextTaskSummary: undefined,
+    autoReviewTask: undefined,
+    autoReviewTaskIndex: undefined,
+  };
+  return {
+    state: nextState,
+    action: nextWorkflowActionForActivePlanLifecycle(nextState, baseCwd),
+  };
 }
 
 function latestCompletedActiveStatsTarget(
@@ -1969,7 +2048,12 @@ async function maybeDispatchReviewFixLoop(
     commandFromPrompt(action?.prompt) === '/addy-review' &&
     action?.missingStatuses?.includes('Reviewed') &&
     action?.taskTitle &&
-    state.currentTask === action.taskTitle,
+    state.currentTask === action.taskTitle &&
+    !actionTargetsCompletePlanTask(
+      state,
+      action,
+      (ctx as { cwd?: string }).cwd,
+    ),
   );
   if (!hasActionableFindings && !cleanReviewNeedsPlanSync) return false;
 
@@ -2031,7 +2115,6 @@ async function maybeDispatchTaskCommit(
   if (!reviewText.trim() || reviewTextHasActionableFindings(reviewText))
     return false;
   const nextCommand = commandFromPrompt(action?.prompt);
-  if (nextCommand === '/addy-review') return false;
 
   const reviewedTask =
     previousState.autoReviewTask && previousState.autoReviewTask !== 'none'
@@ -2046,10 +2129,21 @@ async function maybeDispatchTaskCommit(
     action?.taskTitle &&
     action.taskTitle !== reviewedTask,
   );
+  const reviewedTaskIsComplete = planTaskIsComplete(
+    previousState.activePlan,
+    (ctx as { cwd?: string }).cwd,
+    {
+      taskIndex:
+        previousState.autoReviewTaskIndex ?? previousState.currentTaskIndex,
+      taskTitle: reviewedTask,
+    },
+  );
+  if (nextCommand === '/addy-review' && !reviewedTaskIsComplete) return false;
   if (
     !trackedReviewedTask &&
     !planMovedPastReviewTarget &&
-    !reviewedTaskWasCompleted(previousState, state)
+    !reviewedTaskWasCompleted(previousState, state) &&
+    !reviewedTaskIsComplete
   )
     return false;
 
@@ -2233,7 +2327,21 @@ async function dispatchNextAutoWorkflowPrompt(
     refreshedState,
     (ctx as { cwd?: string }).cwd,
   );
-  const prompt = action?.prompt;
+  const completedContinuation = completedPlanAutoContinuation(
+    refreshedState,
+    action,
+    (ctx as { cwd?: string }).cwd,
+  );
+  const dispatchState = completedContinuation?.state ?? refreshedState;
+  const dispatchAction = completedContinuation?.action ?? action;
+  if (completedContinuation) {
+    setContextWorkflowState(
+      workflowCtx,
+      completedContinuation.state,
+      options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
+    );
+  }
+  const prompt = dispatchAction?.prompt;
   if (!prompt) {
     (
       ctx as { ui?: { notify?: (message: string, level?: string) => void } }
@@ -2245,17 +2353,17 @@ async function dispatchNextAutoWorkflowPrompt(
   }
 
   const pendingCommitTarget = latestCompletedActiveStatsTarget(
-    refreshedState,
+    dispatchState,
     (ctx as { cwd?: string }).cwd,
   );
   if (
     pendingCommitTarget &&
-    commandFromPrompt(refreshedState.autoLastPrompt) !== AUTO_TASK_COMMIT_PROMPT
+    commandFromPrompt(dispatchState.autoLastPrompt) !== AUTO_TASK_COMMIT_PROMPT
   ) {
     await dispatchTaskCommitPrompt(
       pi,
       ctx,
-      refreshedState,
+      dispatchState,
       pendingCommitTarget,
       options,
     );
@@ -2263,8 +2371,8 @@ async function dispatchNextAutoWorkflowPrompt(
   }
 
   const lifecycleSyncedState = stateWithCompletedLifecyclePhasesFromPlan(
-    refreshedState,
-    action,
+    dispatchState,
+    dispatchAction,
   );
   const phase = phaseFromWorkflowPrompt(prompt);
   const retryKey = autoRetryKey(lifecycleSyncedState, prompt);
@@ -2280,18 +2388,18 @@ async function dispatchNextAutoWorkflowPrompt(
   ) {
     (
       ctx as { ui?: { notify?: (message: string, level?: string) => void } }
-    ).ui?.notify?.(autoPauseWarning(prompt, action), 'warning');
+    ).ui?.notify?.(autoPauseWarning(prompt, dispatchAction), 'warning');
     return;
   }
 
   const deliveryPrompt =
     !allowSamePhase && isSameIncompletePhase && retryCount >= 1
-      ? autoRecoveryPrompt(prompt, action, retryCount)
+      ? autoRecoveryPrompt(prompt, dispatchAction, retryCount)
       : undefined;
 
   const reviewTask =
     phase === 'review'
-      ? (action.taskTitle ?? lifecycleSyncedState.currentTask)
+      ? (dispatchAction?.taskTitle ?? lifecycleSyncedState.currentTask)
       : undefined;
   const finishTask =
     phase === 'finish' ? lifecycleSyncedState.autoReviewTask : undefined;
