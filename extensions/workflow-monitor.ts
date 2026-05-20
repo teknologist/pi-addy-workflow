@@ -64,6 +64,7 @@ type FreshContextReason = 'between-tasks' | 'before-step' | 'before-review';
 type DispatchOptions = {
   freshContextBypassReason?: FreshContextReason;
   appendEntry?: boolean;
+  useDefaultDelivery?: boolean;
 };
 type UserMessageDeliveryOptions = {
   deliverAs?: 'steer' | 'followUp';
@@ -656,8 +657,8 @@ function sendUserMessage(
   pi: ExtensionAPI,
   ctx: unknown,
   message: string,
-  options: { autoMode?: boolean } = {},
-): void {
+  options: { autoMode?: boolean; useDefaultDelivery?: boolean } = {},
+): void | Promise<void> {
   const expandedMessage = expandPackagedPromptTemplate(message);
   const deliveredMessage = options.autoMode
     ? appendAutoUnblockGuidance(expandedMessage, commandFromPrompt(message))
@@ -701,7 +702,10 @@ function sendUserMessage(
         contextSender.call(ctx, content, deliveryOptions)
     : (content: string, deliveryOptions?: UserMessageDeliveryOptions) =>
         piSender?.call(pi, content, deliveryOptions);
-  return sender(deliveredMessage, followUpDeliveryOptions());
+  return sender(
+    deliveredMessage,
+    options.useDefaultDelivery ? undefined : followUpDeliveryOptions(),
+  );
 }
 
 function canSendUserMessage(pi: ExtensionAPI, ctx: unknown): boolean {
@@ -1164,7 +1168,10 @@ async function deliverPendingFreshPrompt(
   const prompt = state.autoFreshPrompt;
   const deliveryPrompt = state.autoFreshExpandedPrompt ?? prompt;
   if (!canSendUserMessage(pi, ctx)) {
-    sendUserMessage(pi, ctx, deliveryPrompt, { autoMode: state.autoMode });
+    sendUserMessage(pi, ctx, deliveryPrompt, {
+      autoMode: state.autoMode,
+      useDefaultDelivery: options.useDefaultDelivery,
+    });
     return true;
   }
   const key =
@@ -1183,6 +1190,7 @@ async function deliverPendingFreshPrompt(
   try {
     await sendUserMessage(pi, ctx, deliveryPrompt, {
       autoMode: state.autoMode,
+      useDefaultDelivery: options.useDefaultDelivery,
     });
   } catch (error) {
     setContextWorkflowState(
@@ -1290,13 +1298,17 @@ async function runFreshContextContinuation(
           replacementPi,
           newCtx,
           replacementState,
-          { freshContextBypassReason: deliveryReason },
+          {
+            freshContextBypassReason: deliveryReason,
+            useDefaultDelivery: true,
+          },
         )
       )
         return;
       if (replacementState.autoFreshConsumedKey) return;
       await dispatchNextAutoWorkflowPrompt(replacementPi, newCtx, false, {
         freshContextBypassReason: deliveryReason,
+        useDefaultDelivery: true,
       });
     },
   });
@@ -1415,7 +1427,10 @@ function dispatchAutoPrompt(
     stateWithPromptPhase,
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
-  sendUserMessage(pi, ctx, deliveryPrompt, { autoMode: state.autoMode });
+  sendUserMessage(pi, ctx, deliveryPrompt, {
+    autoMode: state.autoMode,
+    useDefaultDelivery: options.useDefaultDelivery,
+  });
 }
 
 async function dispatchAutoPromptFreshAware(
@@ -1938,6 +1953,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
     )
       await deliverPendingFreshPrompt(pi, ctx, state, {
         freshContextBypassReason: state.autoFreshReason,
+        useDefaultDelivery: true,
       });
   });
 
@@ -2120,6 +2136,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
         } else if (validPendingFreshContinuation(pending)) {
           await deliverPendingFreshPrompt(pi, ctx, pending, {
             freshContextBypassReason: pending.autoFreshReason,
+            useDefaultDelivery: true,
           });
           return { action: 'continue' as const };
         }

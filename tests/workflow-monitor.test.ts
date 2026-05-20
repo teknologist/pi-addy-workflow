@@ -66,15 +66,22 @@ function createPiMock() {
   return { pi, events, commands, messageRenderers, entries, sentMessages };
 }
 
+function workflowPromptText(
+  message: string | { message: string } | undefined,
+): string | undefined {
+  return typeof message === 'string' ? message : message?.message;
+}
+
 function assertSentWorkflowPrompt(
-  message: string | undefined,
+  message: string | { message: string } | undefined,
   command: string,
   heading: string,
 ) {
-  assert.ok(message, 'expected a dispatched workflow prompt');
-  assert.match(message, new RegExp(`# ${heading}`));
+  const text = workflowPromptText(message);
+  assert.ok(text, 'expected a dispatched workflow prompt');
+  assert.match(text, new RegExp(`# ${heading}`));
   assert.ok(
-    message.includes(`Invocation: \`${command}\``),
+    text.includes(`Invocation: \`${command}\``),
     `expected invocation for ${command}`,
   );
 }
@@ -2206,7 +2213,10 @@ test('auto loop starts every workflow step in a new session when configured', as
   try {
     const { pi, commands, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
-    const replacementMessages: string[] = [];
+    const replacementMessages: Array<{
+      message: string;
+      options?: { deliverAs?: string; streamingBehavior?: string };
+    }> = [];
     let lastWidget: unknown;
     const ctx: any = {
       cwd,
@@ -2219,8 +2229,10 @@ test('auto loop starts every workflow step in a new session when configured', as
           id: 'auto-loop-every-step-replacement',
           ui: { setWidget() {}, notify() {} },
           isIdle: () => true,
-          sendUserMessage: (message: string) =>
-            replacementMessages.push(message),
+          sendUserMessage: (
+            message: string,
+            options?: { deliverAs?: string; streamingBehavior?: string },
+          ) => replacementMessages.push({ message, options }),
         });
         return { cancelled: false };
       },
@@ -2241,7 +2253,7 @@ test('auto loop starts every workflow step in a new session when configured', as
     assert.doesNotMatch(footer, /\[plan\]/);
 
     assertSentWorkflowPrompt(
-      replacementMessages[0],
+      replacementMessages[0].message,
       `/addy-build ${planPath}`,
       'Addy Build',
     );
@@ -2337,7 +2349,10 @@ test('fresh-context same-phase retry self-unblocks instead of pausing', async ()
       `/addy-build ${planPath}`,
       'Addy Build',
     );
-    assert.match(replacementMessages[1], /Addy Auto Same-Phase Recovery Pass/);
+    assert.match(
+      workflowPromptText(replacementMessages[1]) ?? '',
+      /Addy Auto Same-Phase Recovery Pass/,
+    );
   } finally {
     if (previousEnv === undefined)
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
@@ -2919,7 +2934,10 @@ test('auto fresh continuations use the replacement session API for all reasons',
   ] as const) {
     const { pi, commands, entries, sentMessages } = createPiMock();
     addyWorkflowMonitor(pi as never);
-    const replacementMessages: string[] = [];
+    const replacementMessages: Array<{
+      message: string;
+      options?: { deliverAs?: string; streamingBehavior?: string };
+    }> = [];
     const replacementEntries: Array<[string, unknown]> = [];
     let oldPiIsStale = false;
     pi.appendEntry = (type: string, data: unknown) => {
@@ -2960,8 +2978,10 @@ test('auto fresh continuations use the replacement session API for all reasons',
           },
           ui: { setWidget() {}, notify() {} },
           isIdle: () => true,
-          sendUserMessage: (message: string) =>
-            replacementMessages.push(message),
+          sendUserMessage: (
+            message: string,
+            options?: { deliverAs?: string; streamingBehavior?: string },
+          ) => replacementMessages.push({ message, options }),
         });
         return { cancelled: false };
       },
@@ -2973,8 +2993,9 @@ test('auto fresh continuations use the replacement session API for all reasons',
 
     assert.equal(sentMessages.length, 0);
     assert.equal(replacementEntries.at(-1)?.[0], WORKFLOW_STATE_ENTRY_TYPE);
+    assert.equal(replacementMessages[0].options, undefined);
     assertSentWorkflowPrompt(
-      replacementMessages[0],
+      replacementMessages[0].message,
       '/addy-build docs/plans/current.md',
       'Addy Build',
     );
@@ -4086,7 +4107,7 @@ test('consumed fresh continuation wins over stale branch pending state', async (
   assert.equal(replacementMessages.length, 0);
 });
 
-test('fresh continuation uses SDK streaming behavior for delivered prompt', async () => {
+test('fresh continuation uses default delivery on session start', async () => {
   const cwd = join(stateDir, 'fresh-continuation-streaming-options-project');
   const sent: Array<{
     message: string;
@@ -4128,10 +4149,7 @@ test('fresh continuation uses SDK streaming behavior for delivered prompt', asyn
     '/addy-build docs/plans/current.md',
     'Addy Build',
   );
-  assert.deepEqual(sent[0].options, {
-    deliverAs: 'followUp',
-    streamingBehavior: 'followUp',
-  });
+  assert.equal(sent[0].options, undefined);
 });
 
 test('fresh continuation is not auto-dispatched inside subagent children', async () => {
