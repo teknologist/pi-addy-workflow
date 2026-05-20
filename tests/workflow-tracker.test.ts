@@ -722,6 +722,73 @@ test('workflow widget resolves index plans to the first unfinished slice', () =>
   ]);
 });
 
+test('workflow widget resolves numeric-prefix index plans to the first unfinished slice', () => {
+  const cwd = join(taskFooterDir, 'numeric-prefix-index-plan-project');
+  const plansDir = join(
+    cwd,
+    'docs',
+    'plans',
+    '2026-05-19-v3-invoice-converter-non-regression-suite',
+  );
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(
+    join(plansDir, '00-index.md'),
+    [
+      '# V3 invoice converter non-regression suite plan index',
+      '',
+      '## Slice order',
+      '',
+      '1. [01 — Foundation contracts](./01-foundation-contracts.md)',
+      '2. [02 — B2Bd first vertical proof](./02-b2bd-first-vertical-proof.md)',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(plansDir, '01-foundation-contracts.md'),
+    [
+      '## Task 1: Read active plan',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '',
+      '## Task 2: Implement runner skeleton',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(plansDir, '02-b2bd-first-vertical-proof.md'),
+    [
+      '## Task 1: Build B2Bd proof',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    renderWorkflowWidget(
+      {
+        ...createInitialWorkflowState(),
+        current: 'build',
+        phases: {
+          ...createInitialWorkflowState().phases,
+          define: 'complete',
+          plan: 'complete',
+          build: 'active',
+        },
+        activePlan:
+          '@docs/plans/2026-05-19-v3-invoice-converter-non-regression-suite/00-index.md',
+      },
+      cwd,
+    )().render(),
+    [
+      'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 00-index.md',
+      'Current task: Implement runner skeleton | Next task: none | Slice 1/2 | Task 2/2',
+    ],
+  );
+});
+
 test('completed slice stays on current plan so finish runs before next slice', () => {
   const cwd = join(taskFooterDir, 'completed-slice-project');
   const plansDir = join(cwd, 'docs', 'plans');

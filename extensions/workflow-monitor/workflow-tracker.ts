@@ -464,7 +464,7 @@ function slicePlanPathsFromIndexMarkdown(
 ): string[] {
   const candidates =
     markdown.match(
-      /@?(?:[A-Za-z0-9._~/-]+\/)?[A-Za-z0-9._~/-]*slice[-_]\d+[A-Za-z0-9._~/-]*\.md\b/gi,
+      /@?(?:\.\.?\/|[A-Za-z0-9._~/-]+\/)?(?:[A-Za-z0-9._~-]*slice[-_]?\d+[A-Za-z0-9._~-]*|\d{1,3}[-_][A-Za-z0-9._~-]+)\.md\b/gi,
     ) ?? [];
   const paths: string[] = [];
   const seen = new Set<string>();
