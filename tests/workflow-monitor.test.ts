@@ -2175,7 +2175,81 @@ test('agent_end auto loop continues review in current session when fresh is conf
   }
 });
 
-test('auto loop starts every workflow step in a new session when configured', async () => {
+test('addy-auto continues review in current session when fresh is configured', async () => {
+  const previousEnv = process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
+  process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW = 'true';
+  try {
+    const cwd = join(stateDir, 'auto-command-review-current-project');
+    const planPath = join('docs', 'plans', 'auto-command-review.md');
+    mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+    writeFileSync(
+      join(cwd, planPath),
+      [
+        '## Task 1: Current',
+        '- [x] Implemented',
+        '- [x] Verified',
+        '- [ ] Reviewed',
+      ].join('\n'),
+    );
+
+    const { pi, commands, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    let newSessionCalls = 0;
+    const replacementMessages: string[] = [];
+    const ctx: any = {
+      cwd,
+      id: 'auto-command-review-current',
+      state: {
+        phases: {
+          define: 'complete',
+          plan: 'complete',
+          build: 'complete',
+          simplify: 'pending',
+          verify: 'complete',
+          review: 'pending',
+          finish: 'pending',
+        },
+        warnings: [],
+        current: 'verify',
+        autoMode: true,
+        activePlan: planPath,
+        currentTask: 'Current',
+        currentTaskIndex: 1,
+      },
+      newSession: async (options: {
+        withSession: (ctx: unknown) => Promise<void> | void;
+      }) => {
+        newSessionCalls += 1;
+        await options.withSession({
+          ...ctx,
+          id: 'auto-command-review-replacement',
+          sendUserMessage: (message: string) =>
+            replacementMessages.push(message),
+        });
+        return { cancelled: false };
+      },
+      isIdle: () => true,
+      ui: { setWidget() {}, notify() {} },
+    };
+    setContextWorkflowState(ctx, ctx.state);
+
+    await commands.get('addy-auto')?.handler('', ctx);
+
+    assert.equal(newSessionCalls, 0);
+    assert.equal(replacementMessages.length, 0);
+    assertSentWorkflowPrompt(
+      sentMessages[0],
+      `/addy-review ${planPath}`,
+      'Addy Review',
+    );
+  } finally {
+    if (previousEnv === undefined)
+      delete process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW;
+    else process.env.PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW = previousEnv;
+  }
+});
+
+test('addy-auto continues every workflow step in current session when fresh is configured', async () => {
   const cwd = join(stateDir, 'auto-loop-every-step-fresh-project');
   const planPath = join('docs', 'plans', 'auto-every-step.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -2223,8 +2297,8 @@ test('auto loop starts every workflow step in a new session when configured', as
 
     await commands.get('addy-auto')?.handler(planPath, ctx);
 
-    assert.deepEqual(sentMessages, []);
-    assert.equal(ctx.state.autoFreshPrompt, `/addy-build ${planPath}`);
+    assert.equal(replacementMessages.length, 0);
+    assert.equal(ctx.state.autoFreshPrompt, undefined);
     assert.equal(ctx.state.current, 'build');
     assert.equal(ctx.state.phases.build, 'active');
     const footer = (lastWidget as () => { render: () => string[] })()
@@ -2234,7 +2308,7 @@ test('auto loop starts every workflow step in a new session when configured', as
     assert.doesNotMatch(footer, /\[plan\]/);
 
     assertSentWorkflowPrompt(
-      replacementMessages[0].message,
+      sentMessages[0],
       `/addy-build ${planPath}`,
       'Addy Build',
     );
@@ -2497,7 +2571,7 @@ test('agent_end review fix loop continues fix verify and review prompts in curre
   }
 });
 
-test('fresh context emits visible clearing-context messages', async () => {
+test('auto-continue fresh context emits visible clearing-context messages', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
@@ -2522,6 +2596,23 @@ test('fresh context emits visible clearing-context messages', async () => {
     const ctx: any = {
       cwd,
       id: 'auto-fresh-visible-message',
+      state: {
+        phases: {
+          define: 'complete',
+          plan: 'complete',
+          build: 'pending',
+          simplify: 'pending',
+          verify: 'pending',
+          review: 'pending',
+          finish: 'pending',
+        },
+        warnings: [],
+        current: 'plan',
+        autoMode: true,
+        activePlan: planPath,
+        autoFreshPrompt: `/addy-build ${planPath}`,
+        autoFreshReason: 'before-step',
+      },
       sendMessage: (message: unknown) => messages.push(message),
       newSession: async (options: {
         withSession: (ctx: unknown) => Promise<void> | void;
@@ -2548,8 +2639,11 @@ test('fresh context emits visible clearing-context messages', async () => {
       },
       isIdle: () => true,
     };
+    setContextWorkflowState(ctx, ctx.state);
 
-    await commands.get('addy-auto')?.handler(planPath, ctx);
+    await commands
+      .get('addy-auto-continue')
+      ?.handler('--fresh before-step', ctx);
 
     assert.deepEqual(sentMessages, []);
 

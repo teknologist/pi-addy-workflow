@@ -2621,7 +2621,9 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       );
 
       if (args[0] !== 'stop')
-        await dispatchNextAutoWorkflowPrompt(pi, ctx, true);
+        await dispatchNextAutoWorkflowPrompt(pi, ctx, true, {
+          disableFreshSession: true,
+        });
       else {
         const state = getContextWorkflowState(ctx as never);
         showWorkflowStats(pi, ctx, state, { heading: 'Addy auto stopped.' });
