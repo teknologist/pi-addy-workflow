@@ -2196,6 +2196,7 @@ test('addy-auto continues review in current session when fresh is configured', a
     addyWorkflowMonitor(pi as never);
     let newSessionCalls = 0;
     const replacementMessages: string[] = [];
+    let compactCalls = 0;
     const ctx: any = {
       cwd,
       id: 'auto-command-review-current',
@@ -2228,6 +2229,10 @@ test('addy-auto continues review in current session when fresh is configured', a
         });
         return { cancelled: false };
       },
+      compact: () => {
+        compactCalls += 1;
+        throw new Error('/addy-auto must not compact or replace the session');
+      },
       isIdle: () => true,
       ui: { setWidget() {}, notify() {} },
     };
@@ -2236,6 +2241,7 @@ test('addy-auto continues review in current session when fresh is configured', a
     await commands.get('addy-auto')?.handler('', ctx);
 
     assert.equal(newSessionCalls, 0);
+    assert.equal(compactCalls, 0);
     assert.equal(replacementMessages.length, 0);
     assertSentWorkflowPrompt(
       sentMessages[0],

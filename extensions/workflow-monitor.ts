@@ -71,6 +71,7 @@ type DispatchOptions = {
   appendEntry?: boolean;
   useDefaultDelivery?: boolean;
   disableFreshSession?: boolean;
+  disableCompaction?: boolean;
 };
 type UserMessageDeliveryOptions = {
   deliverAs?: 'steer' | 'followUp';
@@ -1837,12 +1838,27 @@ async function dispatchAutoPromptFreshAware(
   );
   if (options.disableFreshSession) {
     const pendingState = getContextWorkflowState(ctx as never);
-    if (validPendingFreshContinuation(pendingState))
-      schedulePendingFreshPromptAfterCompaction(pi, ctx, pendingState, {
+    if (validPendingFreshContinuation(pendingState)) {
+      const fallbackOptions = {
         ...options,
         freshContextBypassReason: reason,
         useDefaultDelivery: true,
-      });
+      };
+      if (options.disableCompaction)
+        await deliverPendingFreshPromptInCurrentSession(
+          pi,
+          ctx,
+          pendingState,
+          fallbackOptions,
+        );
+      else
+        schedulePendingFreshPromptAfterCompaction(
+          pi,
+          ctx,
+          pendingState,
+          fallbackOptions,
+        );
+    }
     return;
   }
   await sendFreshContextContinuation(pi, ctx, reason);
@@ -2623,6 +2639,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       if (args[0] !== 'stop')
         await dispatchNextAutoWorkflowPrompt(pi, ctx, true, {
           disableFreshSession: true,
+          disableCompaction: true,
         });
       else {
         const state = getContextWorkflowState(ctx as never);
