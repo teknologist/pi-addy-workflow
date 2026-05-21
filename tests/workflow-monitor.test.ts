@@ -33,9 +33,11 @@ const stateDir = mkdtempSync(join(tmpdir(), 'pi-addy-workflow-test-'));
 const previousHomeEnv = process.env.HOME;
 const previousBeforeEveryStepEnv =
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
+const previousSubagentChildEnv = process.env.PI_SUBAGENT_CHILD;
 process.env.HOME = join(stateDir, 'home');
 process.env.PI_ADDY_WORKFLOW_STATE_DIR = stateDir;
 process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = '0';
+delete process.env.PI_SUBAGENT_CHILD;
 
 test.after(() => {
   if (previousHomeEnv === undefined) delete process.env.HOME;
@@ -46,6 +48,9 @@ test.after(() => {
   else
     process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP =
       previousBeforeEveryStepEnv;
+  if (previousSubagentChildEnv === undefined)
+    delete process.env.PI_SUBAGENT_CHILD;
+  else process.env.PI_SUBAGENT_CHILD = previousSubagentChildEnv;
   rmSync(stateDir, { recursive: true, force: true });
 });
 
@@ -1061,6 +1066,7 @@ test('auto loop pauses only after the same-phase retry safety cap', async () => 
   assert.equal(sentMessages.length, 0);
   assert.match(notices.at(-1)?.[0] ?? '', /paused at \/addy-build/);
   assert.equal(notices.at(-1)?.[1], 'warning');
+  assert.equal(ctx.state.autoPausedReason, 'same-phase-retry-limit');
 });
 
 test('auto loop runs fix-all when review surfaces actionable findings', async () => {
@@ -4296,6 +4302,8 @@ test('auto loop does not commit after review when plan cannot prove task complet
       taskCount: 1,
       autoMode: true,
       autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewTask: 'Current',
+      autoReviewTaskIndex: 1,
       activePlan: planPath,
     },
     ui: { setWidget() {} },
@@ -4708,6 +4716,79 @@ test('auto loop stops when the same review finding repeats after a fix attempt',
   assert.equal(sentMessages.length, 0);
   assert.match(notices.at(-1)?.[0] ?? '', /same review finding repeated/);
   assert.equal(notices.at(-1)?.[1], 'warning');
+});
+
+test('auto loop keys repeated review findings to tracked review target', async () => {
+  const cwd = join(stateDir, 'auto-loop-review-repeat-tracked-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Done',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const finding = 'Important: fix src/repeated.ts:12 before review can pass.';
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-review-repeat-tracked',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Next',
+      currentTaskIndex: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewTask: 'Done',
+      autoReviewTaskIndex: 1,
+      autoReviewFixKey: `${planPath}\u001f1\u001fDone`,
+      autoReviewFixCount: 1,
+      autoReviewFindingFingerprint: reviewFingerprintForTest([finding]),
+      activePlan: planPath,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: finding }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? '', /same review finding repeated/);
+  assert.equal(ctx.state.autoPausedReason, 'repeated-review-finding');
 });
 
 test('auto loop does not treat different warning bullets as repeated findings', async () => {

@@ -75,6 +75,7 @@ export type WorkflowAutoPausedReason =
   | 'unclear-commit-result'
   | 'max-review-fix-loops'
   | 'repeated-review-finding'
+  | 'same-phase-retry-limit'
   | 'user-stopped';
 
 export type WorkflowState = {

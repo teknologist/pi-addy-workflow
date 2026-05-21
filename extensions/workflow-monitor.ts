@@ -514,11 +514,12 @@ function reviewLineStartsFinding(line: string): boolean {
 function reviewFixKey(
   state: ReturnType<typeof getContextWorkflowState>,
 ): string {
-  return [
-    state.activePlan ?? '',
-    state.currentTaskIndex ?? '',
-    state.currentTask ?? '',
-  ].join('\u001f');
+  const taskIndex = state.autoReviewTaskIndex ?? state.currentTaskIndex ?? '';
+  const taskTitle =
+    state.autoReviewTask && state.autoReviewTask !== 'none'
+      ? state.autoReviewTask
+      : (state.currentTask ?? '');
+  return [state.activePlan ?? '', taskIndex, taskTitle].join('\u001f');
 }
 
 function reviewedTaskWasCompleted(
@@ -2385,9 +2386,6 @@ async function maybeDispatchTaskCommit(
     previousState.autoReviewTask && previousState.autoReviewTask !== 'none'
       ? previousState.autoReviewTask
       : previousState.currentTask;
-  const trackedReviewedTask = Boolean(
-    previousState.autoReviewTask && previousState.autoReviewTask !== 'none',
-  );
   const planMovedPastReviewTarget = Boolean(
     reviewedTask &&
     reviewedTask !== 'none' &&
@@ -2405,7 +2403,6 @@ async function maybeDispatchTaskCommit(
   );
   if (nextCommand === '/addy-review' && !reviewedTaskIsComplete) return false;
   if (
-    !trackedReviewedTask &&
     !planMovedPastReviewTarget &&
     !reviewedTaskWasCompleted(previousState, state) &&
     !reviewedTaskIsComplete
@@ -2693,6 +2690,11 @@ async function dispatchNextAutoWorkflowPrompt(
     isSameIncompletePhase &&
     retryCount >= AUTO_SAME_PHASE_MAX_RETRIES
   ) {
+    setContextWorkflowState(
+      workflowCtx,
+      { ...lifecycleSyncedState, autoPausedReason: 'same-phase-retry-limit' },
+      options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
+    );
     (
       ctx as { ui?: { notify?: (message: string, level?: string) => void } }
     ).ui?.notify?.(autoPauseWarning(prompt, dispatchAction), 'warning');
