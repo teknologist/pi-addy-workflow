@@ -1207,6 +1207,10 @@ test('auto loop commits a completed reviewed task before moving to the next task
     /Do not try to invoke, search for, or print a `\/commit` slash command/,
   );
   assert.match(sentMessages[0], /`git -C <repo> status --short`/);
+  assert.match(sentMessages[0], /run the project formatter/);
+  assert.match(sentMessages[0], /project lint\/format check/);
+  assert.match(sentMessages[0], /Stage all current changed files/);
+  assert.match(sentMessages[0], /tracked, unstaged, untracked/);
   assert.match(sentMessages[0], /Invocation: `__addy-auto-task-commit__`/);
   assert.match(sentMessages[0], /Do not call ask_user_question/);
 });

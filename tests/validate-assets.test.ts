@@ -473,6 +473,8 @@ test('auto prompt defines autonomous task loop boundaries', async () => {
     content,
     /Do not call `ask_user_question` for this auto-task commit/i,
   );
+  assert.match(content, /formatter and lint\/format checks/i);
+  assert.match(content, /untracked files and the plan checkbox update/i);
   assert.match(content, /expected git state/i);
   assert.match(content, /ambiguous-but-inferable next slices/i);
   assert.match(

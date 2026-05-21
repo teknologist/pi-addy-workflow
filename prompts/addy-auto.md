@@ -64,7 +64,8 @@ Task commit policy:
 
 - After a task has all three lifecycle checkboxes checked (`Implemented`, `Verified`, and `Reviewed`), commit the completed task work before moving to the next task or slice.
 - Do not call `ask_user_question` for this auto-task commit. `/addy-auto` is explicit permission to commit completed, verified, reviewed task work.
-- Use the same direct commit workflow as `/addy-finish`: inspect `git status`, stage all current changed files for the completed task including the plan checkbox update, review the staged diff, create one concise commit, and report the commit hash.
+- Use the same direct commit workflow as `/addy-finish`: inspect `git status`, run formatter and lint/format checks for the changed scope, stage all current changed files in scope including untracked files and the plan checkbox update, review the staged diff, create one concise commit, and report the commit hash.
+- Do not leave unstaged task changes behind after the auto-task commit. If formatter or lint fixes files, include those fixes in the commit; if lint/format still fails, fix safe scoped issues and rerun before committing.
 - After the commit is complete, continue to the next lifecycle action automatically.
 
 Fresh context policy:
