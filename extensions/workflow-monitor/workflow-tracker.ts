@@ -15,6 +15,7 @@ import {
 
 export const WORKFLOW_WIDGET_KEY = 'pi-addy-workflow';
 export const WORKFLOW_STATE_ENTRY_TYPE = 'pi-addy-workflow-state';
+export const ADDY_AUTO_TASK_COMMIT_PROMPT = '__addy-auto-task-commit__';
 const OPTIONAL_PHASES = new Set<WorkflowPhase>(['simplify']);
 
 function emptyIssueStats(): WorkflowIssueStats {
@@ -264,6 +265,26 @@ type PlanTask = {
   missingStatuses?: PlanTaskStatus[];
 };
 
+type PlanTaskFrontier = PlanTask & {
+  taskIndex: number;
+  missingStatuses: PlanTaskStatus[];
+  requiresCommit: boolean;
+};
+
+function definedWorkflowActionFields(fields: {
+  prompt: string;
+  plan?: string;
+  taskTitle?: string;
+  taskIndex?: number;
+  currentSliceIndex?: number;
+  missingStatuses?: PlanTaskStatus[];
+  requiresCommit?: boolean;
+}) {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  ) as typeof fields;
+}
+
 const REQUIRED_TASK_STATUSES: PlanTaskStatus[] = [
   'Implemented',
   'Verified',
@@ -301,6 +322,85 @@ function taskMatchesPlanTask(
     return false;
   if (candidate.taskTitle && candidate.taskTitle !== task.title) return false;
   return candidate.taskIndex !== undefined || Boolean(candidate.taskTitle);
+}
+
+export function workflowTaskCommitKey(
+  planPath: string,
+  taskIndex: number,
+  taskTitle: string,
+): string {
+  return [planPath, taskIndex, taskTitle].join('\u001f');
+}
+
+function taskHasCommitRecord(
+  state: WorkflowState,
+  planPath: string,
+  task: PlanTask,
+  index: number,
+): boolean {
+  const key = workflowTaskCommitKey(planPath, index + 1, task.title);
+  const record = state.committedTasks?.[key];
+  return Boolean(
+    record &&
+    record.plan === planPath &&
+    record.taskIndex === index + 1 &&
+    record.taskTitle === task.title,
+  );
+}
+
+function taskIsClosed(
+  state: WorkflowState,
+  planPath: string,
+  task: PlanTask,
+  index: number,
+): boolean {
+  return task.complete && taskHasCommitRecord(state, planPath, task, index);
+}
+
+function taskFrontier(
+  state: WorkflowState,
+  planPath: string,
+  tasks: PlanTask[],
+): PlanTaskFrontier | undefined {
+  return tasks
+    .map((candidate, index) => {
+      const hasCommit = taskHasCommitRecord(state, planPath, candidate, index);
+      const missingStatuses =
+        candidate.complete && hasCommit
+          ? []
+          : (effectiveTaskMissingStatuses(state, planPath, candidate, index) ??
+            candidate.missingStatuses ??
+            []);
+      return {
+        ...candidate,
+        taskIndex: index + 1,
+        missingStatuses,
+        requiresCommit:
+          missingStatuses.length === 0 && candidate.complete && !hasCommit,
+      };
+    })
+    .find(
+      (candidate) =>
+        !candidate.complete ||
+        candidate.missingStatuses.length > 0 ||
+        candidate.requiresCommit,
+    );
+}
+
+export function allTasksInCurrentPlanAreClosed(
+  state: WorkflowState,
+  baseCwd?: string,
+): boolean {
+  if (!state.activePlan) return false;
+  const markdown = readPlanMarkdown(state.activePlan, baseCwd);
+  if (!markdown) return false;
+  const tasks = planTasksFromMarkdown(markdown);
+  return (
+    tasks.length > 0 &&
+    tasks.every((task, index) =>
+      taskIsClosed(state, state.activePlan!, task, index),
+    )
+  );
 }
 
 function stateTargetsPlanTask(
@@ -520,6 +620,7 @@ function currentSlicePlanPathFromIndex(
   planPath: string,
   markdown: string,
   baseCwd?: string,
+  state?: WorkflowState,
 ): string | undefined {
   const slicePaths = slicePlanPathsFromIndexMarkdown(
     markdown,
@@ -533,7 +634,15 @@ function currentSlicePlanPathFromIndex(
     const tasks = planTasksFromMarkdown(sliceMarkdown);
     if (tasks.length === 0) continue;
     lastTaskSlice = slicePath;
-    if (tasks.some((task) => !task.complete)) return slicePath;
+    const sliceState = state
+      ? { ...state, activePlan: slicePath }
+      : { ...createInitialWorkflowState(), activePlan: slicePath };
+    if (
+      tasks.some(
+        (task, index) => !taskIsClosed(sliceState, slicePath, task, index),
+      )
+    )
+      return slicePath;
   }
   return lastTaskSlice;
 }
@@ -551,10 +660,16 @@ export function nextUnfinishedSlicePlanPath(
       state.activePlan,
       markdown,
       baseCwd,
+      state,
     );
     return slicePlan && slicePlan !== state.activePlan ? slicePlan : undefined;
   }
-  if (tasks.some((task) => !task.complete)) return undefined;
+  if (
+    tasks.some(
+      (task, index) => !taskIsClosed(state, state.activePlan!, task, index),
+    )
+  )
+    return undefined;
 
   const resolvedPlanPath = resolvePlanPath(state.activePlan, baseCwd);
   const current = numberedSliceParts(resolvedPlanPath);
@@ -598,11 +713,20 @@ export function nextUnfinishedSlicePlanPath(
     const candidateMarkdown = readPlanMarkdown(candidate.path, baseCwd);
     if (!candidateMarkdown) continue;
     const candidateTasks = planTasksFromMarkdown(candidateMarkdown);
+    const candidatePlanPath = planPathForDisplay(
+      candidate.path,
+      state.activePlan,
+      baseCwd,
+    );
+    const candidateState = { ...state, activePlan: candidatePlanPath };
     if (
       candidateTasks.length === 0 ||
-      candidateTasks.some((task) => !task.complete)
+      candidateTasks.some(
+        (task, index) =>
+          !taskIsClosed(candidateState, candidatePlanPath, task, index),
+      )
     ) {
-      return planPathForDisplay(candidate.path, state.activePlan, baseCwd);
+      return candidatePlanPath;
     }
   }
   return undefined;
@@ -827,10 +951,22 @@ export function workflowTaskFooterLine(
   planPath: string | undefined,
   baseCwd?: string,
   theme?: { fg?: (name: string, text: string) => string },
+  state?: WorkflowState,
 ): string | undefined {
   if (!planPath) return undefined;
   const markdown = readPlanMarkdown(planPath, baseCwd);
   if (!markdown) return undefined;
+  const effectiveState = state ?? {
+    ...createInitialWorkflowState(),
+    activePlan: planPath,
+  };
+  const taskClosed = (task: PlanTask, index: number) =>
+    taskIsClosed(
+      { ...effectiveState, activePlan: planPath },
+      planPath,
+      task,
+      index,
+    );
 
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
@@ -838,22 +974,30 @@ export function workflowTaskFooterLine(
       planPath,
       markdown,
       baseCwd,
+      effectiveState,
     );
     if (slicePlan && slicePlan !== planPath)
-      return workflowTaskFooterLine(slicePlan, baseCwd, theme);
+      return workflowTaskFooterLine(slicePlan, baseCwd, theme, {
+        ...effectiveState,
+        activePlan: slicePlan,
+      });
   }
 
   const styleLabel = (text: string) =>
     theme?.fg?.('accent', text) ?? theme?.fg?.('blue', text) ?? text;
   const sliceProgress = sliceProgressSuffix(planPath, baseCwd, styleLabel);
-  const currentIndex = tasks.findIndex((task) => !task.complete);
+  const currentIndex = tasks.findIndex(
+    (task, index) => !taskClosed(task, index),
+  );
   if (currentIndex === -1)
     return tasks.length > 0
       ? `${styleLabel('Current task: ')}all tasks complete | ${styleLabel('Next task: ')}none${sliceProgress}${progressSuffix('Task ', tasks.length, tasks.length, styleLabel)}${totalTaskProgressSuffix(planPath, tasks.length, baseCwd, styleLabel)}`
       : undefined;
 
   const current = tasks[currentIndex];
-  const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
+  const next = tasks
+    .slice(currentIndex + 1)
+    .find((task, offset) => !taskClosed(task, currentIndex + 1 + offset));
   return `${styleLabel('Current task: ')}${current.title} | ${styleLabel('Next task: ')}${next?.title ?? 'none'}${sliceProgress}${progressSuffix('Task ', currentIndex + 1, tasks.length, styleLabel)}${totalTaskProgressSuffix(planPath, currentIndex + 1, baseCwd, styleLabel)}`;
 }
 
@@ -874,6 +1018,7 @@ export function refreshWorkflowTasksFromPlan(
       state.activePlan,
       markdown,
       baseCwd,
+      state,
     );
     if (slicePlan && slicePlan !== state.activePlan)
       return refreshWorkflowTasksFromPlan(
@@ -898,7 +1043,9 @@ export function refreshWorkflowTasksFromPlan(
     };
   }
 
-  const currentIndex = tasks.findIndex((task) => !task.complete);
+  const currentIndex = tasks.findIndex(
+    (task, index) => !taskIsClosed(state, state.activePlan!, task, index),
+  );
   if (currentIndex === -1) {
     const currentTask = 'all tasks complete';
     const nextTask = 'none';
@@ -920,7 +1067,17 @@ export function refreshWorkflowTasksFromPlan(
   }
 
   const current = tasks[currentIndex];
-  const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
+  const next = tasks
+    .slice(currentIndex + 1)
+    .find(
+      (task, offset) =>
+        !taskIsClosed(
+          state,
+          state.activePlan!,
+          task,
+          currentIndex + 1 + offset,
+        ),
+    );
   const currentTask = current.title;
   const nextTask = next?.title ?? 'none';
   return {
@@ -994,7 +1151,7 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
       );
       const taskLine = currentTask
         ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
-        : workflowTaskFooterLine(state.activePlan, baseCwd, theme);
+        : workflowTaskFooterLine(state.activePlan, baseCwd, theme, state);
       const lines = taskLine ? [line, taskLine] : [line];
       return width
         ? lines.map((value) =>
@@ -1225,7 +1382,15 @@ export function nextWorkflowActionForActivePlanLifecycle(
   state: WorkflowState,
   baseCwd?: string,
 ):
-  | { prompt: string; taskTitle?: string; missingStatuses?: PlanTaskStatus[] }
+  | {
+      prompt: string;
+      plan?: string;
+      taskTitle?: string;
+      taskIndex?: number;
+      currentSliceIndex?: number;
+      missingStatuses?: PlanTaskStatus[];
+      requiresCommit?: boolean;
+    }
   | undefined {
   if (!state.activePlan) return undefined;
 
@@ -1239,6 +1404,7 @@ export function nextWorkflowActionForActivePlanLifecycle(
       state.activePlan,
       markdown,
       baseCwd,
+      state,
     );
     if (slicePlan && slicePlan !== state.activePlan)
       return nextWorkflowActionForActivePlanLifecycle(
@@ -1251,21 +1417,7 @@ export function nextWorkflowActionForActivePlanLifecycle(
       );
   }
 
-  const task = tasks
-    .map((candidate, index) => ({
-      ...candidate,
-      missingStatuses:
-        effectiveTaskMissingStatuses(
-          state,
-          state.activePlan!,
-          candidate,
-          index,
-        ) ?? candidate.missingStatuses,
-    }))
-    .find(
-      (candidate) =>
-        !candidate.complete || (candidate.missingStatuses?.length ?? 0) > 0,
-    );
+  const task = taskFrontier(state, state.activePlan, tasks);
   if (!task)
     return {
       prompt:
@@ -1276,27 +1428,55 @@ export function nextWorkflowActionForActivePlanLifecycle(
 
   const missingStatuses = task.missingStatuses ?? ['Implemented'];
   if (missingStatuses.includes('Implemented'))
-    return {
+    return definedWorkflowActionFields({
       prompt: nextPromptForPhase('build', state.activePlan),
+      plan: state.activePlan,
       taskTitle: task.title,
+      taskIndex: task.taskIndex,
+      currentSliceIndex: sliceProgressForPlanPath(state.activePlan, baseCwd)
+        ?.currentSliceIndex,
       missingStatuses,
-    };
+    });
   if (missingStatuses.includes('Verified'))
-    return {
+    return definedWorkflowActionFields({
       prompt: nextPromptForPhase('verify', state.activePlan),
+      plan: state.activePlan,
       taskTitle: task.title,
+      taskIndex: task.taskIndex,
+      currentSliceIndex: sliceProgressForPlanPath(state.activePlan, baseCwd)
+        ?.currentSliceIndex,
       missingStatuses,
-    };
+    });
   if (missingStatuses.includes('Reviewed'))
-    return {
+    return definedWorkflowActionFields({
       prompt: nextPromptForPhase('review', state.activePlan),
+      plan: state.activePlan,
       taskTitle: task.title,
+      taskIndex: task.taskIndex,
+      currentSliceIndex: sliceProgressForPlanPath(state.activePlan, baseCwd)
+        ?.currentSliceIndex,
       missingStatuses,
-    };
+    });
 
-  return {
+  if (task.requiresCommit)
+    return definedWorkflowActionFields({
+      prompt: ADDY_AUTO_TASK_COMMIT_PROMPT,
+      plan: state.activePlan,
+      taskTitle: task.title,
+      taskIndex: task.taskIndex,
+      currentSliceIndex: sliceProgressForPlanPath(state.activePlan, baseCwd)
+        ?.currentSliceIndex,
+      missingStatuses,
+      requiresCommit: true,
+    });
+
+  return definedWorkflowActionFields({
     prompt: nextPromptForPhase('build', state.activePlan),
+    plan: state.activePlan,
     taskTitle: task.title,
+    taskIndex: task.taskIndex,
+    currentSliceIndex: sliceProgressForPlanPath(state.activePlan, baseCwd)
+      ?.currentSliceIndex,
     missingStatuses,
-  };
+  });
 }

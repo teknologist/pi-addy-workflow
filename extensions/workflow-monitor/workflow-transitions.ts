@@ -31,6 +31,15 @@ export type WorkflowTaskStats = {
   issues: WorkflowIssueStats;
 };
 
+export type WorkflowTaskCommitRecord = {
+  plan: string;
+  sliceIndex?: number;
+  taskIndex: number;
+  taskTitle: string;
+  commitSha: string;
+  committedAt: string;
+};
+
 export type WorkflowStatsSession = {
   tasks: Record<string, WorkflowTaskStats>;
   endedReason?: string;
@@ -48,6 +57,7 @@ export type WorkflowState = {
   phases: Record<WorkflowPhase, PhaseStatus>;
   warnings: string[];
   stats?: WorkflowStats;
+  committedTasks?: Record<string, WorkflowTaskCommitRecord>;
   activeSpec?: string;
   activePlan?: string;
   activeSuitePlan?: string;
@@ -548,6 +558,7 @@ export function transitionWorkflow(
   next.activePlan = baseState.activePlan;
   next.activeSuitePlan = baseState.activeSuitePlan;
   next.stats = baseState.stats;
+  next.committedTasks = baseState.committedTasks;
   next.autoMode = baseState.autoMode;
   next.autoLastPrompt = baseState.autoLastPrompt;
   next.autoRetryKey = baseState.autoRetryKey;

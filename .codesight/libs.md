@@ -37,7 +37,7 @@
   - function renderWorkflowStrip: (state, theme?, text) => void
   - function workflowArtifactForFooter: (state) => string | undefined
   - function workflowArtifactName: (path) => string
-  - _...14 more_
+  - _...17 more_
 - `extensions/workflow-monitor/workflow-transitions.ts`
   - function createInitialWorkflowState: () => WorkflowState
   - function phaseIndex: (phase) => number
@@ -45,4 +45,4 @@
   - function transitionWorkflow: (state, event) => WorkflowState
   - type WorkflowPhase
   - type PhaseStatus
-  - _...9 more_
+  - _...10 more_

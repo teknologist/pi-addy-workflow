@@ -23,6 +23,7 @@ import {
   WORKFLOW_STATE_ENTRY_TYPE,
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
+  workflowTaskCommitKey,
 } from '../extensions/workflow-monitor/workflow-tracker.ts';
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
@@ -100,6 +101,25 @@ function assertSentWorkflowPrompt(
   assert.ok(
     text.includes(`Invocation: \`${command}\``),
     `expected invocation for ${command}`,
+  );
+}
+
+function committedTasksFor(
+  planPath: string,
+  tasks: Array<{ taskIndex: number; taskTitle: string; sliceIndex?: number }>,
+) {
+  return Object.fromEntries(
+    tasks.map((task) => [
+      workflowTaskCommitKey(planPath, task.taskIndex, task.taskTitle),
+      {
+        plan: planPath,
+        sliceIndex: task.sliceIndex,
+        taskIndex: task.taskIndex,
+        taskTitle: task.taskTitle,
+        commitSha: 'abc1234',
+        committedAt: '2026-05-21T00:00:00.000Z',
+      },
+    ]),
   );
 }
 
@@ -676,6 +696,123 @@ test('registered manual workflow step command exits auto mode', async () => {
       delete process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
     else process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = previousEnv;
   }
+});
+
+test('manual build command redirects to frontier verify instead of later build', async () => {
+  const cwd = join(stateDir, 'manual-build-frontier-guard-project');
+  const planPath = join('docs', 'plans', 'frontier.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Needs verification',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+      '',
+      '## Task 2: Later build',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: 'manual-build-frontier-guard',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      activePlan: planPath,
+      currentTask: 'Needs verification',
+      currentTaskIndex: 1,
+      taskCount: 2,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+
+  await commands.get('addy-build')?.handler({ args: [planPath] }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
+  assert.match(
+    notices.at(-1)?.[0] ?? '',
+    /frontier task requires \/addy-verify/,
+  );
+});
+
+test('raw manual build input redirects to frontier verify instead of later build', async () => {
+  const cwd = join(stateDir, 'raw-manual-build-frontier-guard-project');
+  const planPath = join('docs', 'plans', 'frontier.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Needs verification',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+      '',
+      '## Task 2: Later build',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'raw-manual-build-frontier-guard',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      activePlan: planPath,
+      currentTask: 'Needs verification',
+      currentTaskIndex: 1,
+      taskCount: 2,
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+
+  await events.get('input')?.({ input: `/addy-build ${planPath}` }, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
 });
 
 test('registered workflow next command exits auto mode', async () => {
@@ -2250,6 +2387,10 @@ test('addy-auto advances from stale completed numeric slice to next unfinished s
       currentTask: 'Finished slice task',
       currentTaskIndex: 1,
       taskCount: 1,
+      activePlan: firstPlan,
+      committedTasks: committedTasksFor(firstPlan, [
+        { taskIndex: 1, taskTitle: 'Finished slice task', sliceIndex: 2 },
+      ]),
     },
     ui: { setWidget() {}, notify() {} },
     isIdle: () => true,
@@ -2353,6 +2494,9 @@ test('agent_end auto loop continues next task in current session after task comm
     `/addy-build ${planPath}`,
     'Addy Build',
   );
+  const committed =
+    ctx.state.committedTasks?.[workflowTaskCommitKey(planPath, 1, 'Current')];
+  assert.equal(committed?.commitSha, 'abc1234');
   assert.equal(ctx.state.autoFreshPrompt, undefined);
   const nextStatsKey = `${planPath}2Next`;
   assert.equal(ctx.state.stats.active.tasks[nextStatsKey].turns, 1);
@@ -2470,6 +2614,9 @@ test('agent_end auto loop continues next slice in current session after no-op ta
     `/addy-build ${secondPlan}`,
     'Addy Build',
   );
+  const committed =
+    ctx.state.committedTasks?.[workflowTaskCommitKey(firstPlan, 1, 'Done')];
+  assert.equal(committed?.commitSha, 'no-changes');
   assert.equal(ctx.state.autoFreshPrompt, undefined);
 });
 
@@ -3343,6 +3490,22 @@ test('auto mode starts finish in current session even when fresh before every st
     const ctx: any = {
       cwd,
       id: 'auto-finish-no-fresh',
+      state: {
+        phases: {
+          define: 'complete',
+          plan: 'complete',
+          build: 'complete',
+          simplify: 'pending',
+          verify: 'complete',
+          review: 'complete',
+          finish: 'pending',
+        },
+        warnings: [],
+        activePlan: planPath,
+        committedTasks: committedTasksFor(planPath, [
+          { taskIndex: 1, taskTitle: 'Done' },
+        ]),
+      },
       newSession: async (options: {
         withSession: (ctx: unknown) => Promise<void> | void;
       }) => {
@@ -3651,6 +3814,50 @@ test('internal auto continuation input does not exit auto mode', async () => {
   assert.equal(ctx.state.current, 'verify');
 });
 
+test('extension-injected build input bypasses manual frontier guard', async () => {
+  const cwd = join(stateDir, 'extension-build-frontier-bypass-project');
+  const planPath = join('docs', 'plans', 'frontier.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Needs verification',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'extension-build-frontier-bypass',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+  };
+
+  await events.get('input')?.(
+    { input: `/addy-build ${planPath}`, source: 'extension' },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  assert.equal(ctx.state.current, 'build');
+});
+
 test('auto continuation cancellation does not use stale context after session replacement', async () => {
   const { pi, commands, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
@@ -3739,6 +3946,9 @@ test('auto loop stops after finish when all plan tasks are complete', async () =
       autoMode: true,
       autoLastPrompt: `/addy-finish ${planPath}`,
       activePlan: planPath,
+      committedTasks: committedTasksFor(planPath, [
+        { taskIndex: 1, taskTitle: 'Current' },
+      ]),
     },
     ui: {
       setWidget() {},
@@ -3800,6 +4010,9 @@ test('auto loop does not stop after finish when the finish result is incomplete'
       autoMode: true,
       autoLastPrompt: `/addy-finish ${planPath}`,
       activePlan: planPath,
+      committedTasks: committedTasksFor(planPath, [
+        { taskIndex: 1, taskTitle: 'Current' },
+      ]),
     },
     ui: {
       setWidget() {},
@@ -3951,6 +4164,8 @@ test('auto loop pauses after unclear commit output even when it contains a hash'
   assert.equal(sentMessages.length, 0);
   assert.match(notices.at(-1)?.[0] ?? '', /commit result was unclear/);
   assert.equal(notices.at(-1)?.[1], 'warning');
+  assert.equal(ctx.state.activePlan, planPath);
+  assert.equal(ctx.state.committedTasks, undefined);
 });
 
 test('auto loop accepts common successful commit output variants', async () => {
@@ -6544,6 +6759,9 @@ test('auto finish archives active stats and reports totals', async () => {
       autoMode: true,
       autoLastPrompt: `/addy-finish ${planPath}`,
       activePlan: planPath,
+      committedTasks: committedTasksFor(planPath, [
+        { taskIndex: 1, taskTitle: 'Current' },
+      ]),
       stats: {
         active: {
           tasks: {
@@ -6817,6 +7035,9 @@ test('auto stats use advanced numbered slice task grouping', async () => {
       current: 'review',
       autoMode: true,
       activePlan: indexPlan,
+      committedTasks: committedTasksFor(firstPlan, [
+        { taskIndex: 1, taskTitle: 'Done', sliceIndex: 1 },
+      ]),
     },
     ui: { setWidget() {} },
     isIdle: () => true,
@@ -7225,6 +7446,12 @@ test('workflow state stores current and next task from active plan', () => {
     source: 'file-write',
     artifact: referencedPlanPath,
   });
+  ctx.state = {
+    ...ctx.state,
+    committedTasks: committedTasksFor(referencedPlanPath, [
+      { taskIndex: 1, taskTitle: 'Done' },
+    ]),
+  };
   const build = handleWorkflowEvent(ctx, {
     source: 'user-input',
     text: '/addy-build',
@@ -7280,6 +7507,13 @@ test('bare verify keeps completed active slice on finish boundary', () => {
     source: 'user-input',
     text: '/addy-build @docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
   });
+  ctx.state = {
+    ...ctx.state,
+    committedTasks: committedTasksFor(
+      '@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
+      [{ taskIndex: 1, taskTitle: 'Done', sliceIndex: 5 }],
+    ),
+  };
   const verify = handleWorkflowEvent(ctx, {
     source: 'user-input',
     text: '/addy-verify',
@@ -7374,6 +7608,89 @@ test('workflow state round-trips from persisted append entries', () => {
 
   assert.equal(getContextWorkflowState(nextCtx).current, 'verify');
   assert.deepEqual(verify.warnings, []);
+});
+
+test('workflow state backfills committed task ledger from legacy task-commit stats', () => {
+  const planPath = 'docs/plans/slice-04.md';
+  const committedKey = workflowTaskCommitKey(planPath, 1, 'Committed task');
+  const buildOnlyKey = workflowTaskCommitKey(planPath, 2, 'Build-only task');
+  const legacyState = {
+    current: 'build',
+    phases: {
+      define: 'complete',
+      plan: 'complete',
+      build: 'active',
+      simplify: 'pending',
+      verify: 'pending',
+      review: 'pending',
+      finish: 'pending',
+    },
+    warnings: [],
+    activePlan: planPath,
+    stats: {
+      active: { tasks: {} },
+      history: [
+        {
+          endedReason: 'task-commit',
+          tasks: {
+            committed: {
+              plan: planPath,
+              sliceIndex: 4,
+              taskIndex: 1,
+              taskTitle: 'Committed task',
+              turns: 3,
+              verifyRuns: 1,
+              reviewRuns: 1,
+              issues: {
+                critical: 0,
+                important: 0,
+                suggestion: 0,
+                unknown: 0,
+                total: 0,
+              },
+            },
+            buildOnly: {
+              plan: planPath,
+              sliceIndex: 4,
+              taskIndex: 2,
+              taskTitle: 'Build-only task',
+              turns: 1,
+              verifyRuns: 0,
+              reviewRuns: 0,
+              issues: {
+                critical: 0,
+                important: 0,
+                suggestion: 0,
+                unknown: 0,
+                total: 0,
+              },
+            },
+          },
+        },
+      ],
+    },
+  };
+
+  const state = getContextWorkflowState({
+    id: 'legacy-task-commit-ledger-backfill',
+    sessionManager: {
+      getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, legacyState]],
+    },
+  });
+
+  assert.deepEqual(state.committedTasks?.[committedKey], {
+    plan: planPath,
+    sliceIndex: 4,
+    taskIndex: 1,
+    taskTitle: 'Committed task',
+    commitSha: state.committedTasks?.[committedKey]?.commitSha,
+    committedAt: 'legacy-task-commit',
+  });
+  assert.match(
+    state.committedTasks?.[committedKey]?.commitSha ?? '',
+    /^legacy:/,
+  );
+  assert.equal(state.committedTasks?.[buildOnlyKey], undefined);
 });
 
 test('workflow state skips malformed latest entries', () => {

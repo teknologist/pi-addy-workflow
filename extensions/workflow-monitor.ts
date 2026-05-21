@@ -32,12 +32,15 @@ import {
   type WorkflowPhase,
 } from './workflow-monitor/workflow-transitions.ts';
 import {
+  ADDY_AUTO_TASK_COMMIT_PROMPT,
+  allTasksInCurrentPlanAreClosed,
   nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
   nextPromptForPhase,
   planTasksFromMarkdown,
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
+  workflowTaskCommitKey,
 } from './workflow-monitor/workflow-tracker.ts';
 
 type CommandEvent = string | { args?: string[]; input?: string };
@@ -92,7 +95,7 @@ const PROMPT_TEMPLATE_BY_COMMAND: Record<string, string> = {
   '/addy-finish': 'addy-finish.md',
 };
 const ADDY_STATS_MESSAGE_TYPE = 'pi-addy-workflow-stats';
-const AUTO_TASK_COMMIT_PROMPT = '__addy-auto-task-commit__';
+const AUTO_TASK_COMMIT_PROMPT = ADDY_AUTO_TASK_COMMIT_PROMPT;
 const AUTO_FRESH_IDLE_RETRY_MS = 50;
 const AUTO_FRESH_IDLE_MAX_ATTEMPTS = 1200;
 const FRESH_CONTEXT_STEP_COMMANDS = new Set([
@@ -374,6 +377,17 @@ function agentTextReportsCommitComplete(text: string): boolean {
     /\b(no changes to commit|nothing to commit|working tree clean)\b/i.test(
       text,
     )
+  );
+}
+
+function commitShaFromAgentText(text: string): string {
+  return (
+    text.match(/\bCOMMIT:\s*([0-9a-f]{7,40})\b/i)?.[1] ??
+    text.match(
+      /\b(?:committed|created commit|commit(?:ted)? hash(?: is)?):?\s*`?([0-9a-f]{7,40})`?\b/i,
+    )?.[1] ??
+    text.match(/\[[^\]\r\n]+\s+([0-9a-f]{7,40})\]\s+/i)?.[1] ??
+    'no-changes'
   );
 }
 
@@ -1103,20 +1117,44 @@ function planTaskIsComplete(
   }
 }
 
-function planLifecycleTasksAreComplete(
-  planPath: string | undefined,
-  baseCwd?: string,
-): boolean {
-  if (!planPath) return false;
+function actionCommitTarget(
+  state: ReturnType<typeof getContextWorkflowState>,
+  action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
+): WorkflowStatsTarget | undefined {
+  if (!action?.requiresCommit || !action.taskTitle) return undefined;
+  return {
+    plan: action.plan ?? state.activePlan,
+    sliceIndex: action.currentSliceIndex ?? state.currentSliceIndex,
+    taskIndex: action.taskIndex ?? state.currentTaskIndex,
+    taskTitle: action.taskTitle,
+  };
+}
 
-  try {
-    const tasks = planTasksFromMarkdown(
-      readFileSync(resolveWorkflowPlanPath(planPath, baseCwd), 'utf8'),
-    );
-    return tasks.length > 0 && tasks.every((task) => task.complete);
-  } catch {
-    return false;
-  }
+function recordCommittedTask(
+  state: ReturnType<typeof getContextWorkflowState>,
+  target: WorkflowStatsTarget | undefined,
+  commitSha: string,
+): ReturnType<typeof getContextWorkflowState> {
+  const plan = target?.plan ?? state.activePlan;
+  const taskIndex = target?.taskIndex ?? state.currentTaskIndex;
+  const taskTitle = target?.taskTitle ?? state.currentTask;
+  if (!plan || !taskIndex || !taskTitle || taskTitle === 'none') return state;
+
+  const key = workflowTaskCommitKey(plan, taskIndex, taskTitle);
+  return {
+    ...state,
+    committedTasks: {
+      ...state.committedTasks,
+      [key]: {
+        plan,
+        sliceIndex: target?.sliceIndex ?? state.currentSliceIndex,
+        taskIndex,
+        taskTitle,
+        commitSha,
+        committedAt: new Date().toISOString(),
+      },
+    },
+  };
 }
 
 function actionTargetsCompletePlanTask(
@@ -1147,8 +1185,7 @@ function completedPlanAutoContinuation(
   const command = commandFromPrompt(action?.prompt);
   if (command !== '/addy-review' && command !== '/addy-finish')
     return undefined;
-  if (!planLifecycleTasksAreComplete(state.activePlan, baseCwd))
-    return undefined;
+  if (!allTasksInCurrentPlanAreClosed(state, baseCwd)) return undefined;
 
   const nextSlicePlan = nextUnfinishedSlicePlanPath(state, baseCwd);
   if (!nextSlicePlan && command === '/addy-review')
@@ -1932,6 +1969,61 @@ function shouldFreshContextBeforeStep(input: string, ctx: unknown): boolean {
   ).auto.freshContext.beforeEveryStep;
 }
 
+async function dispatchManualFrontierGuard(
+  pi: ExtensionAPI,
+  input: string,
+  ctx: unknown,
+  options: DispatchOptions = {},
+): Promise<boolean> {
+  const command = commandFromPrompt(input);
+  if (command !== '/addy-build') return false;
+
+  const state = getContextWorkflowState(ctx as never);
+  if (!state.activePlan) return false;
+  const action = nextWorkflowActionForActivePlanLifecycle(
+    state,
+    (ctx as { cwd?: string }).cwd,
+  );
+  const requiredCommand = commandFromPrompt(action?.prompt);
+  if (!action?.prompt || requiredCommand === '/addy-build') return false;
+
+  const notify = (message: string, level: string) =>
+    (
+      ctx as { ui?: { notify?: (message: string, level?: string) => void } }
+    ).ui?.notify?.(message, level);
+  notify(
+    `Addy refused /addy-build because the frontier task requires ${requiredCommand}.`,
+    'warning',
+  );
+
+  const commitTarget = actionCommitTarget(state, action);
+  if (commitTarget) {
+    await dispatchTaskCommitPrompt(pi, ctx, state, commitTarget, {
+      ...options,
+      useDefaultDelivery: true,
+    });
+    return true;
+  }
+
+  await dispatchAutoPromptFreshAware(
+    pi,
+    ctx,
+    action.prompt,
+    state,
+    {},
+    action.taskTitle
+      ? {
+          plan: state.activePlan,
+          sliceIndex: state.currentSliceIndex,
+          taskIndex: action.taskIndex ?? state.currentTaskIndex,
+          taskTitle: action.taskTitle,
+        }
+      : undefined,
+    { ...options, useDefaultDelivery: true },
+  );
+  return true;
+}
+
 async function dispatchManualStepWithFreshContextConfig(
   pi: ExtensionAPI,
   input: string,
@@ -2306,13 +2398,21 @@ async function maybeContinueAfterTaskCommit(
     return true;
   }
 
-  const committedTarget = latestActiveStatsTarget(state);
+  const cwd = (ctx as { cwd?: string }).cwd;
+  const committedTarget =
+    latestActiveStatsTarget(state) ??
+    actionCommitTarget(
+      state,
+      nextWorkflowActionForActivePlanLifecycle(state, cwd),
+    );
   const stateAfterCommit = {
-    ...archiveWorkflowStats(state, 'task-commit'),
+    ...archiveWorkflowStats(
+      recordCommittedTask(state, committedTarget, commitShaFromAgentText(text)),
+      'task-commit',
+    ),
     autoReviewTask: committedTarget?.taskTitle,
     autoReviewTaskIndex: committedTarget?.taskIndex,
   };
-  const cwd = (ctx as { cwd?: string }).cwd;
   const nextSlicePlan = nextUnfinishedSlicePlanPath(stateAfterCommit, cwd);
   const continuationState = nextSlicePlan
     ? {
@@ -2470,6 +2570,21 @@ async function dispatchNextAutoWorkflowPrompt(
     ).ui?.notify?.(
       'Addy auto is active, but no active plan is available.',
       'warning',
+    );
+    return;
+  }
+
+  const actionPendingCommitTarget = actionCommitTarget(
+    dispatchState,
+    dispatchAction,
+  );
+  if (actionPendingCommitTarget) {
+    await dispatchTaskCommitPrompt(
+      pi,
+      ctx,
+      dispatchState,
+      actionPendingCommitTarget,
+      options,
     );
     return;
   }
@@ -2644,7 +2759,7 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       });
   });
 
-  pi.on('input', (event: InputEvent, ctx: unknown) => {
+  pi.on('input', async (event: InputEvent, ctx: unknown) => {
     const input = event.input ?? event.text ?? '';
     const workflowText = workflowTextFromInput(input);
     const state = getContextWorkflowState(ctx as never);
@@ -2660,6 +2775,12 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       return { action: 'continue' as const };
     }
     const manualAddyCommand = isManualAddyWorkflowCommand(input);
+    if (
+      manualAddyCommand &&
+      event.source !== 'extension' &&
+      (await dispatchManualFrontierGuard(pi, workflowText, ctx))
+    )
+      return { action: 'continue' as const };
     handleWorkflowEvent(
       ctx as never,
       {
@@ -2798,6 +2919,8 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
       handler: async (event: CommandEvent, ctx: unknown) => {
         const args = parseCommandArgs(event);
         const input = `${command}${args.length ? ` ${args.join(' ')}` : ''}`;
+        if (await dispatchManualFrontierGuard(pi, input, ctx))
+          return { action: 'continue' as const };
         handleWorkflowEvent(
           ctx as never,
           { source: 'command', text: input, manualAddyCommand: true },

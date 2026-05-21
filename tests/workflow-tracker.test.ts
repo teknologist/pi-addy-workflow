@@ -11,6 +11,7 @@ import {
 } from '../extensions/workflow-monitor/workflow-transitions.ts';
 import {
   nextPromptForActivePlanLifecycle,
+  nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
   nextPromptForPhase,
   parseWorkflowState,
@@ -19,6 +20,7 @@ import {
   renderWorkflowStrip,
   renderWorkflowWidget,
   unfinishedLifecycleStepsFromMarkdown,
+  workflowTaskCommitKey,
 } from '../extensions/workflow-monitor/workflow-tracker.ts';
 import {
   handleWorkflowEvent,
@@ -27,6 +29,25 @@ import {
 } from '../extensions/workflow-monitor/workflow-handler.ts';
 
 const taskFooterDir = '/tmp/pi-addy-workflow-task-footer-test';
+
+function committedTasksFor(
+  planPath: string,
+  tasks: Array<{ taskIndex: number; taskTitle: string; sliceIndex?: number }>,
+) {
+  return Object.fromEntries(
+    tasks.map((task) => [
+      workflowTaskCommitKey(planPath, task.taskIndex, task.taskTitle),
+      {
+        plan: planPath,
+        sliceIndex: task.sliceIndex,
+        taskIndex: task.taskIndex,
+        taskTitle: task.taskTitle,
+        commitSha: 'abc1234',
+        committedAt: '2026-05-21T00:00:00.000Z',
+      },
+    ]),
+  );
+}
 
 test('prompt triggers map to phases', () => {
   assert.equal(
@@ -574,7 +595,13 @@ test('workflow widget renders current and next task from active plan', () => {
 
   const state = refreshWorkflowTasksFromPlan(
     transitionWorkflow(
-      { ...createInitialWorkflowState(), activePlan: planPath },
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        committedTasks: committedTasksFor(planPath, [
+          { taskIndex: 1, taskTitle: 'Existing import path' },
+        ]),
+      },
       { source: 'user-input', text: '/addy-build' },
     ),
   );
@@ -700,6 +727,10 @@ test('workflow widget resolves index plans to the first unfinished slice', () =>
         build: 'active',
       },
       activePlan: '@docs/plans/2026-05-14-migration-index.md',
+      committedTasks: committedTasksFor(
+        '@docs/plans/2026-05-14-migration-slice-01-api.md',
+        [{ taskIndex: 1, taskTitle: 'Complete public API', sliceIndex: 1 }],
+      ),
     },
     cwd,
   );
@@ -779,6 +810,10 @@ test('workflow widget resolves numeric-prefix index plans to the first unfinishe
         },
         activePlan:
           '@docs/plans/2026-05-19-v3-invoice-converter-non-regression-suite/00-index.md',
+        committedTasks: committedTasksFor(
+          '@docs/plans/2026-05-19-v3-invoice-converter-non-regression-suite/01-foundation-contracts.md',
+          [{ taskIndex: 1, taskTitle: 'Read active plan', sliceIndex: 1 }],
+        ),
       },
       cwd,
     )().render(),
@@ -828,6 +863,10 @@ test('workflow widget renders cumulative total task progress across slices', () 
         build: 'active',
       },
       activePlan: '@docs/plans/2026-05-21-feature-slice-02.md',
+      committedTasks: committedTasksFor(
+        '@docs/plans/2026-05-21-feature-slice-02.md',
+        [{ taskIndex: 1, taskTitle: 'Slice 2 task 1', sliceIndex: 2 }],
+      ),
     },
     cwd,
   );
@@ -875,6 +914,9 @@ test('completed slice stays on current plan so finish runs before next slice', (
         review: 'active',
       },
       activePlan,
+      committedTasks: committedTasksFor(activePlan, [
+        { taskIndex: 1, taskTitle: 'Complete public API', sliceIndex: 1 },
+      ]),
     },
     cwd,
   );
@@ -995,6 +1037,10 @@ test('completed active slice stays on current slice until finish', () => {
       },
       activePlan:
         '@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
+      committedTasks: committedTasksFor(
+        '@docs/plans/2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
+        [{ taskIndex: 1, taskTitle: 'Finished slice task', sliceIndex: 5 }],
+      ),
     },
     cwd,
   );
@@ -1040,6 +1086,10 @@ test('workflow widget renders task and slice progress for complete direct plan f
       build: 'active' as const,
     },
     activePlan: '@docs/plans/2026-05-08-invoice-csv-etl-slice-02-test.md',
+    committedTasks: committedTasksFor(
+      '@docs/plans/2026-05-08-invoice-csv-etl-slice-02-test.md',
+      [{ taskIndex: 1, taskTitle: 'Complete task', sliceIndex: 2 }],
+    ),
   };
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
@@ -1195,6 +1245,9 @@ test('refreshing workflow tasks does not reopen fully checked task from stale re
     nextTaskSummary: 'Next summary',
     autoReviewTask: 'Already reviewed task',
     autoReviewTaskIndex: 1,
+    committedTasks: committedTasksFor(planPath, [
+      { taskIndex: 1, taskTitle: 'Already reviewed task' },
+    ]),
   });
 
   assert.equal(state.currentTask, 'Next unfinished task');
@@ -1243,6 +1296,10 @@ test('refreshing workflow keeps completed direct slice on finish boundary', () =
       warnings: ['finish started before build and verify and review.'],
       activePlan:
         'docs/plans/2026-05-08-invoice-csv-etl-slice-08-prod-readiness.md',
+      committedTasks: committedTasksFor(
+        'docs/plans/2026-05-08-invoice-csv-etl-slice-08-prod-readiness.md',
+        [{ taskIndex: 1, taskTitle: 'Complete task', sliceIndex: 8 }],
+      ),
       currentTask: 'all tasks complete',
       nextTask: 'none',
       currentTaskIndex: 20,
@@ -1368,7 +1425,9 @@ test('active plan lifecycle ignores verified and reviewed checkboxes without pha
     ),
     {
       prompt: `/addy-verify ${planPath}`,
+      plan: planPath,
       taskTitle: 'Build illegally checked everything',
+      taskIndex: 1,
       missingStatuses: ['Verified', 'Reviewed'],
     },
   );
@@ -1428,13 +1487,15 @@ test('active plan lifecycle ignores verified checkbox without phase-run evidence
     ),
     {
       prompt: `/addy-verify ${planPath}`,
+      plan: planPath,
       taskTitle: 'Resumed illegal checkbox state',
+      taskIndex: 1,
       missingStatuses: ['Reviewed', 'Verified'],
     },
   );
 });
 
-test('active plan lifecycle accepts reviewed checkbox after review phase evidence exists', () => {
+test('active plan lifecycle sends reviewed task to commit before later build', () => {
   const cwd = join(taskFooterDir, 'phase-evidence-reviewed-project');
   const planPath = join('docs', 'plans', 'phase-evidence-reviewed.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -1487,8 +1548,140 @@ test('active plan lifecycle accepts reviewed checkbox after review phase evidenc
       cwd,
     ),
     {
+      prompt: '__addy-auto-task-commit__',
+      plan: planPath,
+      taskTitle: 'Reviewed by Addy',
+      taskIndex: 1,
+      missingStatuses: [],
+      requiresCommit: true,
+    },
+  );
+});
+
+test('active plan lifecycle routes verified task to review before later build', () => {
+  const cwd = join(taskFooterDir, 'phase-evidence-verified-project');
+  const planPath = join('docs', 'plans', 'phase-evidence-verified.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Verified by Addy',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+      '',
+      '## Task 2: Later task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    nextWorkflowActionForActivePlanLifecycle(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        currentTask: 'Verified by Addy',
+        currentTaskIndex: 1,
+      },
+      cwd,
+    ),
+    {
+      prompt: `/addy-review ${planPath}`,
+      plan: planPath,
+      taskTitle: 'Verified by Addy',
+      taskIndex: 1,
+      missingStatuses: ['Reviewed'],
+    },
+  );
+});
+
+test('next slice discovery waits for commit ledger on checked final task', () => {
+  const cwd = join(taskFooterDir, 'slice-boundary-commit-gate-project');
+  const firstPlan = join('docs', 'plans', 'feature-slice-01.md');
+  const secondPlan = join('docs', 'plans', 'feature-slice-02.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, firstPlan),
+    [
+      '## Task 1: Last task',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(cwd, secondPlan),
+    [
+      '## Task 1: Next slice task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.equal(
+    nextUnfinishedSlicePlanPath(
+      { ...createInitialWorkflowState(), activePlan: firstPlan },
+      cwd,
+    ),
+    undefined,
+  );
+  assert.equal(
+    nextUnfinishedSlicePlanPath(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: firstPlan,
+        committedTasks: committedTasksFor(firstPlan, [
+          { taskIndex: 1, taskTitle: 'Last task' },
+        ]),
+      },
+      cwd,
+    ),
+    secondPlan,
+  );
+});
+
+test('active plan lifecycle advances after reviewed task has commit ledger entry', () => {
+  const cwd = join(taskFooterDir, 'phase-evidence-reviewed-committed-project');
+  const planPath = join(
+    'docs',
+    'plans',
+    'phase-evidence-reviewed-committed.md',
+  );
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Reviewed by Addy',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '',
+      '## Task 2: Later task',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    nextWorkflowActionForActivePlanLifecycle(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        committedTasks: committedTasksFor(planPath, [
+          { taskIndex: 1, taskTitle: 'Reviewed by Addy' },
+        ]),
+      },
+      cwd,
+    ),
+    {
       prompt: `/addy-build ${planPath}`,
+      plan: planPath,
       taskTitle: 'Later task',
+      taskIndex: 2,
       missingStatuses: ['Implemented', 'Verified', 'Reviewed'],
     },
   );

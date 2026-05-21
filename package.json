@@ -1,6 +1,6 @@
 {
   "name": "pi-addy-workflow",
-  "version": "0.16.15",
+  "version": "0.16.16",
   "description": "Addy Osmani agent-skills workflow for Pi coding agent",
   "type": "module",
   "license": "MIT",
