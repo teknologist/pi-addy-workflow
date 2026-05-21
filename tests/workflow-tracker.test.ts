@@ -718,7 +718,7 @@ test('workflow widget resolves index plans to the first unfinished slice', () =>
   );
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-14-migration-slice-02-runtime.md | suite: 2026-05-14-migration-index.md',
-    'Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2',
+    'Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2 | Total tasks 2/3',
   ]);
 });
 
@@ -784,9 +784,58 @@ test('workflow widget resolves numeric-prefix index plans to the first unfinishe
     )().render(),
     [
       'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 00-index.md',
-      'Current task: Implement runner skeleton | Next task: none | Slice 1/2 | Task 2/2',
+      'Current task: Implement runner skeleton | Next task: none | Slice 1/2 | Task 2/2 | Total tasks 2/3',
     ],
   );
+});
+
+test('workflow widget renders cumulative total task progress across slices', () => {
+  const cwd = join(taskFooterDir, 'total-task-progress-project');
+  const plansDir = join(cwd, 'docs', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  for (const sliceNumber of [1, 2, 3]) {
+    writeFileSync(
+      join(
+        plansDir,
+        `2026-05-21-feature-slice-${String(sliceNumber).padStart(2, '0')}.md`,
+      ),
+      [1, 2, 3, 4]
+        .flatMap((taskNumber) => [
+          `## Task ${taskNumber}: Slice ${sliceNumber} task ${taskNumber}`,
+          taskNumber < 2 || sliceNumber < 2
+            ? '- [x] Implemented'
+            : '- [ ] Implemented',
+          taskNumber < 2 || sliceNumber < 2
+            ? '- [x] Verified'
+            : '- [ ] Verified',
+          taskNumber < 2 || sliceNumber < 2
+            ? '- [x] Reviewed'
+            : '- [ ] Reviewed',
+          '',
+        ])
+        .join('\n'),
+    );
+  }
+
+  const state = refreshWorkflowTasksFromPlan(
+    {
+      ...createInitialWorkflowState(),
+      current: 'build',
+      phases: {
+        ...createInitialWorkflowState().phases,
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+      },
+      activePlan: '@docs/plans/2026-05-21-feature-slice-02.md',
+    },
+    cwd,
+  );
+
+  assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-21-feature-slice-02.md',
+    'Current task: Slice 2 task 2 | Next task: Slice 2 task 3 | Slice 2/3 | Task 2/4 | Total tasks 6/12',
+  ]);
 });
 
 test('completed slice stays on current plan so finish runs before next slice', () => {
@@ -958,7 +1007,7 @@ test('completed active slice stays on current slice until finish', () => {
   assert.equal(state.nextTask, 'none');
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
-    'Current task: all tasks complete | Next task: none | Slice 5/8 | Task 1/1',
+    'Current task: all tasks complete | Next task: none | Slice 5/8 | Task 1/1 | Total tasks 5/10',
   ]);
 });
 
@@ -995,7 +1044,7 @@ test('workflow widget renders task and slice progress for complete direct plan f
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-08-invoice-csv-etl-slice-02-test.md',
-    'Current task: all tasks complete | Next task: none | Slice 2/3 | Task 1/1',
+    'Current task: all tasks complete | Next task: none | Slice 2/3 | Task 1/1 | Total tasks 2/3',
   ]);
 });
 

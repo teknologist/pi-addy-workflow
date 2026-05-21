@@ -327,7 +327,7 @@ test('auto command activates the first unfinished slice when given an index plan
   assert.equal(ctx.state.currentTask, 'Complete API');
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
     '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | migration-slice-01-api.md | suite: migration-index.md',
-    'Current task: Complete API | Next task: none | Slice 1/2 | Task 1/1',
+    'Current task: Complete API | Next task: none | Slice 1/2 | Task 1/1 | Total tasks 1/2',
   ]);
   assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(
@@ -1213,6 +1213,326 @@ test('auto loop commits a completed reviewed task before moving to the next task
   assert.match(sentMessages[0], /tracked, unstaged, untracked/);
   assert.match(sentMessages[0], /Invocation: `__addy-auto-task-commit__`/);
   assert.match(sentMessages[0], /Do not call ask_user_question/);
+});
+
+test('auto loop waits for idle before sending task commit as a new turn', async () => {
+  const cwd = join(stateDir, 'auto-loop-task-commit-idle-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages, sentMessageOptions } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-task-commit-idle',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'No issues found.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.deepEqual(sentMessageOptions[0], {
+    streamingBehavior: 'followUp',
+  });
+});
+
+test('auto loop drops stale delayed task commit before idle delivery', async () => {
+  const cwd = join(stateDir, 'auto-loop-task-commit-stale-idle-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-task-commit-stale-idle',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'No issues found.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  setContextWorkflowState(ctx, {
+    ...getContextWorkflowState(ctx),
+    autoLastPrompt: `/addy-build ${planPath}`,
+  });
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 0);
+});
+
+test('auto loop preserves retry path when delayed task commit delivery fails', async () => {
+  const cwd = join(stateDir, 'auto-loop-task-commit-idle-failure-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sentMessages: string[] = [];
+  const notices: Array<[string, string | undefined]> = [];
+  let idle = false;
+  let shouldReject = true;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-task-commit-idle-failure',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    sendUserMessage: (message: string) => {
+      if (shouldReject) return Promise.reject(new Error('sender unavailable'));
+      sentMessages.push(message);
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'No issues found.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? '', /could not deliver/);
+  assert.equal(notices.at(-1)?.[1], 'warning');
+  assert.equal(
+    getContextWorkflowState(ctx).autoLastPrompt,
+    '__addy-auto-task-commit__',
+  );
+
+  shouldReject = false;
+  await commands.get('addy-auto')?.handler({ args: [] }, ctx);
+
+  assert.match(sentMessages.at(-1) ?? '', /^# Addy Auto Commit/);
+});
+
+test('auto loop preserves retry path when immediate task commit delivery fails', async () => {
+  const cwd = join(stateDir, 'auto-loop-task-commit-immediate-failure-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sentMessages: string[] = [];
+  const notices: Array<[string, string | undefined]> = [];
+  let shouldReject = true;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-task-commit-immediate-failure',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    sendUserMessage: (message: string) => {
+      if (shouldReject) return Promise.reject(new Error('sender unavailable'));
+      sentMessages.push(message);
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'No issues found.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? '', /could not deliver/);
+  assert.equal(
+    getContextWorkflowState(ctx).autoLastPrompt,
+    '__addy-auto-task-commit__',
+  );
+
+  await commands.get('addy-auto')?.handler({ args: [] }, ctx);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(notices.at(-1)?.[0] ?? '', /could not deliver/);
+  assert.equal(
+    getContextWorkflowState(ctx).autoLastPrompt,
+    '__addy-auto-task-commit__',
+  );
+
+  shouldReject = false;
+  await commands.get('addy-auto')?.handler({ args: [] }, ctx);
+
+  assert.match(sentMessages.at(-1) ?? '', /^# Addy Auto Commit/);
 });
 
 test('auto loop does not accept reviewed checkbox written by build without review evidence', async () => {
@@ -6103,7 +6423,6 @@ test('auto-dispatched fix, verify, review, finish, and commit prompts record tas
   );
   assert.match(sentMessages.at(-1) ?? '', /^# Addy Auto Commit/);
   assert.deepEqual(sentMessageOptions.at(-1), {
-    deliverAs: 'followUp',
     streamingBehavior: 'followUp',
   });
   assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);

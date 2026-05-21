@@ -680,6 +680,84 @@ function sliceProgressSuffix(
   );
 }
 
+function totalTaskProgressForSlice(
+  planPath: string | undefined,
+  currentTaskIndex: number | undefined,
+  baseCwd?: string,
+): { currentTaskIndex: number; taskCount: number } | undefined {
+  if (
+    !planPath ||
+    typeof currentTaskIndex !== 'number' ||
+    !Number.isSafeInteger(currentTaskIndex)
+  )
+    return undefined;
+  const resolved = resolvePlanPath(planPath, baseCwd);
+  const current = numberedSliceParts(resolved);
+  if (!current || current.number <= 0) return undefined;
+
+  let candidates: string[];
+  try {
+    candidates = readdirSync(dirname(resolved))
+      .map((entry) => resolve(dirname(resolved), entry))
+      .filter((candidate) => readablePlanFile(candidate));
+  } catch {
+    return undefined;
+  }
+
+  const sliceTasks = candidates
+    .map((candidate) => {
+      const parts = numberedSliceParts(candidate);
+      if (!parts || parts.number <= 0) return undefined;
+      if (parts.prefix.toLowerCase() !== current.prefix.toLowerCase())
+        return undefined;
+      const markdown = readPlanMarkdown(candidate, baseCwd);
+      if (!markdown) return undefined;
+      const tasks = planTasksFromMarkdown(markdown);
+      return tasks.length > 0
+        ? { number: parts.number, taskCount: tasks.length }
+        : undefined;
+    })
+    .filter((candidate): candidate is { number: number; taskCount: number } =>
+      Boolean(candidate),
+    )
+    .sort((left, right) => left.number - right.number);
+
+  if (!sliceTasks.some((slice) => slice.number === current.number))
+    return undefined;
+
+  const totalTaskCount = sliceTasks.reduce(
+    (sum, slice) => sum + slice.taskCount,
+    0,
+  );
+  const priorTaskCount = sliceTasks
+    .filter((slice) => slice.number < current.number)
+    .reduce((sum, slice) => sum + slice.taskCount, 0);
+  const totalCurrentTaskIndex = priorTaskCount + currentTaskIndex;
+
+  return isValidProgress(totalCurrentTaskIndex, totalTaskCount)
+    ? { currentTaskIndex: totalCurrentTaskIndex, taskCount: totalTaskCount }
+    : undefined;
+}
+
+function totalTaskProgressSuffix(
+  planPath: string | undefined,
+  currentTaskIndex: number | undefined,
+  baseCwd: string | undefined,
+  styleLabel: (text: string) => string,
+): string {
+  const progress = totalTaskProgressForSlice(
+    planPath,
+    currentTaskIndex,
+    baseCwd,
+  );
+  return progressSuffix(
+    'Total tasks ',
+    progress?.currentTaskIndex,
+    progress?.taskCount,
+    styleLabel,
+  );
+}
+
 export function planTasksFromMarkdown(markdown: string): PlanTask[] {
   const headingTasks: PlanTask[] = [];
   const checkboxTasks: PlanTask[] = [];
@@ -771,12 +849,12 @@ export function workflowTaskFooterLine(
   const currentIndex = tasks.findIndex((task) => !task.complete);
   if (currentIndex === -1)
     return tasks.length > 0
-      ? `${styleLabel('Current task: ')}all tasks complete | ${styleLabel('Next task: ')}none${sliceProgress}${progressSuffix('Task ', tasks.length, tasks.length, styleLabel)}`
+      ? `${styleLabel('Current task: ')}all tasks complete | ${styleLabel('Next task: ')}none${sliceProgress}${progressSuffix('Task ', tasks.length, tasks.length, styleLabel)}${totalTaskProgressSuffix(planPath, tasks.length, baseCwd, styleLabel)}`
       : undefined;
 
   const current = tasks[currentIndex];
   const next = tasks.slice(currentIndex + 1).find((task) => !task.complete);
-  return `${styleLabel('Current task: ')}${current.title} | ${styleLabel('Next task: ')}${next?.title ?? 'none'}${sliceProgress}${progressSuffix('Task ', currentIndex + 1, tasks.length, styleLabel)}`;
+  return `${styleLabel('Current task: ')}${current.title} | ${styleLabel('Next task: ')}${next?.title ?? 'none'}${sliceProgress}${progressSuffix('Task ', currentIndex + 1, tasks.length, styleLabel)}${totalTaskProgressSuffix(planPath, currentIndex + 1, baseCwd, styleLabel)}`;
 }
 
 export function refreshWorkflowTasksFromPlan(
@@ -908,8 +986,14 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
         state.sliceCount,
         styleLabel,
       );
+      const totalTaskProgress = totalTaskProgressSuffix(
+        state.activePlan,
+        state.currentTaskIndex,
+        baseCwd,
+        styleLabel,
+      );
       const taskLine = currentTask
-        ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}`
+        ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
         : workflowTaskFooterLine(state.activePlan, baseCwd, theme);
       const lines = taskLine ? [line, taskLine] : [line];
       return width

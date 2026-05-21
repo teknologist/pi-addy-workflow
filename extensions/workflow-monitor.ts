@@ -71,6 +71,7 @@ type DispatchOptions = {
   freshContextBypassReason?: FreshContextReason;
   appendEntry?: boolean;
   useDefaultDelivery?: boolean;
+  idleTurnDelivery?: boolean;
   disableFreshSession?: boolean;
   disableCompaction?: boolean;
 };
@@ -107,6 +108,7 @@ const FRESH_CONTEXT_STEP_COMMANDS = new Set([
 const consumedAutoFreshKeys = new Set<string>();
 const scheduledAutoFreshKeys = new Set<string>();
 const scheduledAutoFreshCompactionKeys = new Set<string>();
+const scheduledIdleUserMessageKeys = new Set<string>();
 const AUTO_SAME_PHASE_MAX_RETRIES = 12;
 
 type CompactOptions = {
@@ -706,16 +708,113 @@ function defaultDeliveryOptions(): UserMessageDeliveryOptions {
   return { deliverAs: 'followUp', streamingBehavior: 'followUp' };
 }
 
+function idleTurnDeliveryOptions(): UserMessageDeliveryOptions {
+  return { streamingBehavior: 'followUp' };
+}
+
+function idleUserMessageKey(ctx: unknown, message: string): string {
+  const contextId = (ctx as { id?: unknown }).id;
+  const cwd = (ctx as { cwd?: unknown }).cwd;
+  return createHash('sha256')
+    .update(`${typeof contextId === 'string' ? contextId : ''}\u001f`)
+    .update(`${typeof cwd === 'string' ? cwd : ''}\u001f`)
+    .update(message)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function handleUserMessageDeliveryFailure(ctx: unknown, error: unknown): void {
+  const details = error instanceof Error ? error.message : String(error);
+  notifyWorkflowWarning(
+    ctx,
+    `Addy auto could not deliver the next workflow prompt: ${details}. Run /addy-auto to retry it.`,
+  );
+}
+
+function safeSendUserMessage(
+  pi: ExtensionAPI,
+  ctx: unknown,
+  message: string,
+  options: {
+    autoMode?: boolean;
+    useDefaultDelivery?: boolean;
+    idleTurnDelivery?: boolean;
+  },
+): void {
+  try {
+    void Promise.resolve(sendUserMessage(pi, ctx, message, options)).catch(
+      (error) => handleUserMessageDeliveryFailure(ctx, error),
+    );
+  } catch (error) {
+    handleUserMessageDeliveryFailure(ctx, error);
+  }
+}
+
+function scheduleUserMessageAfterIdle(
+  pi: ExtensionAPI,
+  ctx: unknown,
+  message: string,
+  options: {
+    autoMode?: boolean;
+    useDefaultDelivery?: boolean;
+    idleTurnDelivery?: boolean;
+  },
+): void {
+  const key = idleUserMessageKey(ctx, message);
+  if (scheduledIdleUserMessageKeys.has(key)) return;
+  scheduledIdleUserMessageKeys.add(key);
+
+  const attempt = (attempts: number) => {
+    if (isContextBusy(ctx)) {
+      if (attempts >= AUTO_FRESH_IDLE_MAX_ATTEMPTS) {
+        scheduledIdleUserMessageKeys.delete(key);
+        notifyWorkflowWarning(
+          ctx,
+          'Addy auto is still busy; the next workflow prompt was not delivered. Run /addy-auto to retry it.',
+        );
+        return;
+      }
+      setTimeout(() => attempt(attempts + 1), AUTO_FRESH_IDLE_RETRY_MS);
+      return;
+    }
+
+    scheduledIdleUserMessageKeys.delete(key);
+    const latestState = getContextWorkflowState(ctx as never);
+    if (
+      options.idleTurnDelivery &&
+      commandFromPrompt(latestState.autoLastPrompt) !== AUTO_TASK_COMMIT_PROMPT
+    )
+      return;
+    safeSendUserMessage(pi, ctx, message, options);
+  };
+
+  setTimeout(() => attempt(0), 0);
+}
+
 function sendUserMessage(
   pi: ExtensionAPI,
   ctx: unknown,
   message: string,
-  options: { autoMode?: boolean; useDefaultDelivery?: boolean } = {},
+  options: {
+    autoMode?: boolean;
+    useDefaultDelivery?: boolean;
+    idleTurnDelivery?: boolean;
+  } = {},
 ): void | Promise<void> {
   const expandedMessage = expandPackagedPromptTemplate(message);
   const deliveredMessage = options.autoMode
     ? appendAutoUnblockGuidance(expandedMessage, commandFromPrompt(message))
     : expandedMessage;
+  if (
+    options.idleTurnDelivery &&
+    options.useDefaultDelivery &&
+    hasContextIdleSignal(ctx) &&
+    canSendUserMessage(pi, ctx) &&
+    isContextBusy(ctx)
+  ) {
+    scheduleUserMessageAfterIdle(pi, ctx, message, options);
+    return;
+  }
   const contextSender = (
     ctx as {
       sendUserMessage?: (
@@ -758,7 +857,9 @@ function sendUserMessage(
   return sender(
     deliveredMessage,
     options.useDefaultDelivery
-      ? defaultDeliveryOptions()
+      ? options.idleTurnDelivery
+        ? idleTurnDeliveryOptions()
+        : defaultDeliveryOptions()
       : followUpDeliveryOptions(),
   );
 }
@@ -1896,10 +1997,14 @@ function dispatchAutoPrompt(
     stateWithPromptPhase,
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
-  sendUserMessage(pi, ctx, deliveryPrompt, {
+  const deliveryOptions = {
     autoMode: state.autoMode,
     useDefaultDelivery: options.useDefaultDelivery,
-  });
+    idleTurnDelivery: options.idleTurnDelivery,
+  };
+  if (options.idleTurnDelivery)
+    safeSendUserMessage(pi, ctx, deliveryPrompt, deliveryOptions);
+  else sendUserMessage(pi, ctx, deliveryPrompt, deliveryOptions);
 }
 
 async function dispatchAutoPromptFreshAware(
@@ -1985,7 +2090,7 @@ async function dispatchTaskCommitPrompt(
       autoReviewTaskIndex: undefined,
     },
     target,
-    { ...options, useDefaultDelivery: true },
+    { ...options, useDefaultDelivery: true, idleTurnDelivery: true },
   );
 }
 
@@ -2754,6 +2859,23 @@ export default function addyWorkflowMonitor(pi: ExtensionAPI) {
             useDefaultDelivery: false,
           });
           return { action: 'continue' as const };
+        } else if (
+          commandFromPrompt(pending.autoLastPrompt) === AUTO_TASK_COMMIT_PROMPT
+        ) {
+          const pendingCommitTarget = latestActiveStatsTarget(pending);
+          if (pendingCommitTarget) {
+            await dispatchTaskCommitPrompt(
+              pi,
+              ctx,
+              pending,
+              pendingCommitTarget,
+              {
+                disableFreshSession: true,
+                disableCompaction: true,
+              },
+            );
+            return { action: 'continue' as const };
+          }
         }
       }
       const text = `/addy-auto${args.length ? ` ${args.join(' ')}` : ''}`;
