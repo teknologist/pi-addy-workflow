@@ -2652,6 +2652,82 @@ test('agent_end auto loop continues next task in current session after task comm
   assert.equal(ctx.state.stats.active.tasks[`${planPath}1Current`], undefined);
 });
 
+test('agent_end auto loop preserves next task prompt when current context cannot send', async () => {
+  const cwd = join(stateDir, 'auto-loop-task-commit-no-sender-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  delete (pi as { sendUserMessage?: unknown }).sendUserMessage;
+  addyWorkflowMonitor(pi as never);
+  const editorTexts: string[] = [];
+  const notices: Array<[string, string | undefined]> = [];
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-task-commit-no-sender',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      autoLastPrompt: [
+        '# Addy Auto Commit',
+        '',
+        'Invocation: `__addy-auto-task-commit__`',
+      ].join('\n'),
+      activePlan: planPath,
+    },
+    ui: {
+      setWidget() {},
+      setEditorText: (text: string) => editorTexts.push(text),
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'COMMIT: abc1234' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  assert.match(editorTexts[0], /# Addy Build/);
+  assert.match(notices.at(-1)?.[0] ?? '', /preserved for retry/);
+  assert.equal(ctx.state.autoMode, true);
+  assert.equal(ctx.state.autoPendingAction?.prompt, `/addy-build ${planPath}`);
+  assert.equal(ctx.state.autoPendingAction?.taskTitle, 'Next');
+  assert.equal(ctx.state.autoPendingAction?.reason, 'idle-retry');
+});
+
 test('agent_end auto loop continues next slice in current session after no-op task commit', async () => {
   const cwd = join(stateDir, 'auto-loop-noop-commit-next-slice-project');
   const firstPlan = join('docs', 'plans', 'feature-slice-01-one.md');

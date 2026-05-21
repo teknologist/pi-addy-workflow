@@ -866,6 +866,11 @@ function sendUserMessage(
     }
   ).sendUserMessage;
   if (!contextSender && !piSender) {
+    if (options.autoMode)
+      preservePendingAutoActionAfterDeliveryFailure(
+        ctx,
+        workflowTextFromInput(message),
+      );
     (
       ctx as {
         ui?: {
@@ -877,7 +882,9 @@ function sendUserMessage(
     (
       ctx as { ui?: { notify?: (message: string, level?: string) => void } }
     ).ui?.notify?.(
-      `Prefilled ${message}; submit it to continue Addy auto.`,
+      options.autoMode
+        ? `Prefilled ${workflowTextFromInput(message)}; Addy auto could not send it, so the prompt was preserved for retry.`
+        : `Prefilled ${message}; submit it to continue Addy auto.`,
       'info',
     );
     return;
