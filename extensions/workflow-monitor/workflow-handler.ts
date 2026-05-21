@@ -339,19 +339,27 @@ function projectWorkflowStateKey(ctx: WorkflowContext): string {
     .slice(0, 24);
 }
 
-function workflowStateDir(): string {
+function workflowStateDir(ctx?: WorkflowContext): string {
+  const projectScope = [ctx?.cwd, process.cwd()].find(
+    (value) => typeof value === 'string' && value.length > 0,
+  );
   return (
     process.env.PI_ADDY_WORKFLOW_STATE_DIR ??
-    join(homedir(), '.pi', 'agent', 'state', 'pi-addy-workflow')
+    (projectScope
+      ? join(projectScope, '.pi', 'addy-workflow', 'state')
+      : join(homedir(), '.pi', 'agent', 'state', 'pi-addy-workflow'))
   );
 }
 
-function workflowStatePath(key: string): string {
-  return join(workflowStateDir(), `${key}.json`);
+function workflowStatePath(key: string, ctx?: WorkflowContext): string {
+  return join(workflowStateDir(ctx), `${key}.json`);
 }
 
-function readStoredWorkflowState(key: string): WorkflowState | undefined {
-  const path = workflowStatePath(key);
+function readStoredWorkflowState(
+  key: string,
+  ctx?: WorkflowContext,
+): WorkflowState | undefined {
+  const path = workflowStatePath(key, ctx);
   if (!existsSync(path)) return undefined;
 
   try {
@@ -361,10 +369,14 @@ function readStoredWorkflowState(key: string): WorkflowState | undefined {
   }
 }
 
-function writeStoredWorkflowState(key: string, state: WorkflowState): void {
-  const path = workflowStatePath(key);
+function writeStoredWorkflowState(
+  key: string,
+  state: WorkflowState,
+  ctx?: WorkflowContext,
+): void {
+  const path = workflowStatePath(key, ctx);
   try {
-    mkdirSync(workflowStateDir(), { recursive: true });
+    mkdirSync(workflowStateDir(ctx), { recursive: true });
     writeFileSync(
       path,
       JSON.stringify({ type: WORKFLOW_STATE_ENTRY_TYPE, state }),
@@ -394,8 +406,11 @@ const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
   'reviewStatsAgent',
 ] as const satisfies readonly (keyof WorkflowState)[];
 
-function projectFallbackWorkflowState(key: string): WorkflowState | undefined {
-  const state = workflowMemory.get(key) ?? readStoredWorkflowState(key);
+function projectFallbackWorkflowState(
+  key: string,
+  ctx: WorkflowContext,
+): WorkflowState | undefined {
+  const state = workflowMemory.get(key) ?? readStoredWorkflowState(key, ctx);
   if (!state) return undefined;
   const validPendingFresh = Boolean(
     state.autoFreshPrompt && state.autoFreshReason,
@@ -434,7 +449,7 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
   const key = workflowStateKey(ctx);
   const projectKey = projectWorkflowStateKey(ctx);
   const projectState =
-    workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey);
+    workflowMemory.get(projectKey) ?? readStoredWorkflowState(projectKey, ctx);
   const stateIfNotStalePending = (state: WorkflowState): WorkflowState => {
     const projectConsumedPendingFresh = Boolean(
       projectState &&
@@ -460,8 +475,8 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
 
   return (
     workflowMemory.get(key) ??
-    readStoredWorkflowState(key) ??
-    projectFallbackWorkflowState(projectKey) ??
+    readStoredWorkflowState(key, ctx) ??
+    projectFallbackWorkflowState(projectKey, ctx) ??
     createInitialWorkflowState()
   );
 }
@@ -477,8 +492,8 @@ export function setContextWorkflowState(
   const projectKey = projectWorkflowStateKey(ctx);
   workflowMemory.set(key, state);
   workflowMemory.set(projectKey, state);
-  writeStoredWorkflowState(key, state);
-  writeStoredWorkflowState(projectKey, state);
+  writeStoredWorkflowState(key, state, ctx);
+  writeStoredWorkflowState(projectKey, state, ctx);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
   ctx.ui?.setWidget?.(
     WORKFLOW_WIDGET_KEY,
@@ -919,8 +934,8 @@ export function resetWorkflow(
   const projectKey = projectWorkflowStateKey(ctx);
   workflowMemory.set(key, state);
   workflowMemory.set(projectKey, state);
-  writeStoredWorkflowState(key, state);
-  writeStoredWorkflowState(projectKey, state);
+  writeStoredWorkflowState(key, state, ctx);
+  writeStoredWorkflowState(projectKey, state, ctx);
   appendEntry?.(WORKFLOW_STATE_ENTRY_TYPE, state);
   ctx.ui?.setWidget?.(WORKFLOW_WIDGET_KEY, undefined);
   return state;

@@ -3254,7 +3254,10 @@ test('auto fresh continuations use the replacement session API for all reasons',
 
     assert.equal(sentMessages.length, 0);
     assert.equal(replacementEntries.at(-1)?.[0], WORKFLOW_STATE_ENTRY_TYPE);
-    assert.equal(replacementMessages[0].options?.streamingBehavior, 'followUp');
+    assert.deepEqual(replacementMessages[0].options, {
+      deliverAs: 'followUp',
+      streamingBehavior: 'followUp',
+    });
     assertSentWorkflowPrompt(
       replacementMessages[0].message,
       '/addy-build docs/plans/current.md',
@@ -4572,7 +4575,10 @@ test('fresh continuation uses default delivery on session start', async () => {
     '/addy-build docs/plans/current.md',
     'Addy Build',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
 });
 
 test('fresh continuation is not auto-dispatched inside subagent children', async () => {
@@ -4725,7 +4731,10 @@ test('cancelled fresh continuation falls back to current session dispatch', asyn
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
   assert.equal(
     getContextWorkflowState(ctx).autoLastPrompt,
@@ -4784,7 +4793,10 @@ test('missing fresh-session API falls back with default delivery', async () => {
     '/addy-review docs/plans/current.md',
     'Addy Review',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
@@ -4843,7 +4855,10 @@ test('fresh-session compaction fallback continues when compact throws', async ()
     '/addy-review docs/plans/current.md',
     'Addy Review',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
@@ -4902,7 +4917,10 @@ test('fresh-session compaction fallback continues when compact reports onError',
     '/addy-review docs/plans/current.md',
     'Addy Review',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
@@ -4971,7 +4989,10 @@ test('busy missing fresh-session fallback waits for idle before default delivery
     '/addy-review docs/plans/current.md',
     'Addy Review',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
@@ -5068,7 +5089,10 @@ test('agent_end-created current-session fallback waits for idle before default d
       `/addy-review ${planPath}`,
       'Addy Review',
     );
-    assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+    assert.deepEqual(sent[0].options, {
+      deliverAs: 'followUp',
+      streamingBehavior: 'followUp',
+    });
     assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
   } finally {
     if (previousEnv === undefined)
@@ -5182,7 +5206,10 @@ test('agent_end consumes pending fresh prompt before recomputing next action', a
     '/addy-verify docs/plans/current.md',
     'Addy Verify',
   );
-  assert.equal(sent[0].options?.streamingBehavior, 'followUp');
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
@@ -6072,6 +6099,7 @@ test('auto-dispatched fix, verify, review, finish, and commit prompts record tas
   );
   assert.match(sentMessages.at(-1) ?? '', /^# Addy Auto Commit/);
   assert.deepEqual(sentMessageOptions.at(-1), {
+    deliverAs: 'followUp',
     streamingBehavior: 'followUp',
   });
   assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);
@@ -6690,6 +6718,49 @@ test('active plan written during plan phase survives fresh sessions for next bui
     `/addy-build ${planPath}`,
   );
   assert.deepEqual(prefills, [`/addy-build ${planPath}`]);
+});
+
+test('workflow state persists under the project .pi directory by default', () => {
+  const previousStateDir = process.env.PI_ADDY_WORKFLOW_STATE_DIR;
+  delete process.env.PI_ADDY_WORKFLOW_STATE_DIR;
+  const cwd = join(stateDir, 'project-local-state');
+  const sessionId = 'project-local-state-session';
+  const sessionKey = createHash('sha256')
+    .update(sessionId)
+    .digest('hex')
+    .slice(0, 24);
+  const projectKey = createHash('sha256')
+    .update(`project:${cwd}`)
+    .digest('hex')
+    .slice(0, 24);
+  const ctx: any = {
+    cwd,
+    id: sessionId,
+    ui: { setWidget() {} },
+  };
+
+  try {
+    const state = handleWorkflowEvent(ctx, {
+      source: 'user-input',
+      text: '/addy-build docs/plans/local.md',
+    });
+
+    assert.equal(state.activePlan, 'docs/plans/local.md');
+    assert.ok(
+      existsSync(
+        join(cwd, '.pi', 'addy-workflow', 'state', `${sessionKey}.json`),
+      ),
+    );
+    assert.ok(
+      existsSync(
+        join(cwd, '.pi', 'addy-workflow', 'state', `${projectKey}.json`),
+      ),
+    );
+  } finally {
+    if (previousStateDir === undefined)
+      delete process.env.PI_ADDY_WORKFLOW_STATE_DIR;
+    else process.env.PI_ADDY_WORKFLOW_STATE_DIR = previousStateDir;
+  }
 });
 
 test('auto mode input preserves plan and task progress while toggling footer label', () => {

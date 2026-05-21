@@ -702,7 +702,7 @@ function followUpDeliveryOptions(): UserMessageDeliveryOptions {
 }
 
 function defaultDeliveryOptions(): UserMessageDeliveryOptions {
-  return { streamingBehavior: 'followUp' };
+  return { deliverAs: 'followUp', streamingBehavior: 'followUp' };
 }
 
 function sendUserMessage(
