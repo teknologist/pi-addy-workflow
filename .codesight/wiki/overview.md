@@ -13,11 +13,11 @@
 Changes to these files have the widest blast radius across the codebase:
 
 - `extensions/workflow-monitor.ts` — imported by **2** files
+- `tests/helpers.ts` — imported by **2** files
 - `extensions/bootstrap/core.ts` — imported by **1** files
 - `extensions/workflow-monitor/workflow-transitions.ts` — imported by **1** files
 - `extensions/workflow-monitor/warnings.ts` — imported by **1** files
 - `extensions/bootstrap.ts` — imported by **1** files
-- `extensions/agent-installer.ts` — imported by **1** files
 
 ## Required Environment Variables
 

@@ -25,6 +25,7 @@ import {
   renderWorkflowStatsText,
   workflowTaskCommitKey,
 } from '../extensions/workflow-monitor/workflow-tracker.ts';
+import { expectedTotalTasksProgress } from './helpers.ts';
 
 type Handler = (event: unknown, ctx: unknown) => Promise<unknown>;
 type CommandConfig = { description: string; handler: Handler };
@@ -352,7 +353,7 @@ test('auto command activates the first unfinished slice when given an index plan
   assert.equal(ctx.state.currentTask, 'Complete API');
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
     '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | migration-slice-01-api.md | suite: migration-index.md',
-    'Current task: Complete API | Next task: none | Slice 1/2 | Task 1/1 | Total tasks 1/2',
+    `Current task: Complete API | Next task: none | Slice 1/2 | Task 1/1 | ${expectedTotalTasksProgress(1, 2)}`,
   ]);
   assert.equal(sentMessages.length, 1);
   assertSentWorkflowPrompt(

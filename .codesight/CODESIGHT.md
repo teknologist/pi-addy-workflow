@@ -3,8 +3,8 @@
 > **Stack:** raw-http | none | unknown | typescript
 
 > 0 routes | 0 models | 0 components | 7 lib files | 6 env vars | 0 middleware | 0% test coverage
-> **Token savings:** this file is ~1,300 tokens. Without it, AI exploration would cost ~9,200 tokens. **Saves ~7,900 tokens per conversation.**
-> **Last scanned:** 2026-05-21 18:43 — re-run after significant changes
+> **Token savings:** this file is ~1,300 tokens. Without it, AI exploration would cost ~9,400 tokens. **Saves ~8,000 tokens per conversation.**
+> **Last scanned:** 2026-05-21 19:08 — re-run after significant changes
 
 ---
 
@@ -81,6 +81,7 @@
 ## Most Imported Files (change these carefully)
 
 - `extensions/workflow-monitor.ts` — imported by **2** files
+- `tests/helpers.ts` — imported by **2** files
 - `extensions/bootstrap/core.ts` — imported by **1** files
 - `extensions/workflow-monitor/workflow-transitions.ts` — imported by **1** files
 - `extensions/workflow-monitor/warnings.ts` — imported by **1** files
@@ -91,6 +92,7 @@
 ## Import Map (who imports what)
 
 - `extensions/workflow-monitor.ts` ← `tests/validate-assets.test.ts`, `tests/workflow-monitor.test.ts`
+- `tests/helpers.ts` ← `tests/workflow-monitor.test.ts`, `tests/workflow-tracker.test.ts`
 - `extensions/bootstrap/core.ts` ← `extensions/bootstrap.ts`
 - `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/warnings.ts`
 - `extensions/workflow-monitor/warnings.ts` ← `extensions/workflow-monitor/workflow-handler.ts`
@@ -103,7 +105,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 5 test files found
+> 6 test files found
 
 ---
 

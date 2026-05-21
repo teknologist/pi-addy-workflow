@@ -788,6 +788,78 @@ function progressSuffix(
     : '';
 }
 
+function darkGrayBg(text: string): string {
+  return `\x1b[48;5;236m${text}\x1b[0m`;
+}
+
+function darkGrayBgBoldWhite(text: string): string {
+  return `\x1b[48;5;236;1;37m${text}\x1b[0m`;
+}
+
+function darkAccent(text: string): string {
+  return `\x1b[38;5;32m${text}\x1b[0m`;
+}
+
+const DARK_ACCENT_BG = '\x1b[48;5;32m';
+
+function bgBoldWhite(bgAnsi: string, text: string): string {
+  return `${bgAnsi}\x1b[1;37m${text}\x1b[0m`;
+}
+
+function createProgressBar(
+  percentage: number | null,
+  width = 15,
+  label?: string | null,
+  styleFilled: (text: string) => string = (text) => text,
+  styleEmpty: (text: string) => string = (text) => text,
+  styleFilledLabel: (text: string) => string = (text) => text,
+  styleEmptyLabel: (text: string) => string = styleFilledLabel,
+): string {
+  const filled =
+    percentage === null ? 0 : Math.round((percentage / 100) * width);
+  const renderRange = (start: number, end: number) => {
+    const filledCount = Math.max(0, Math.min(end, filled) - start);
+    const emptyCount = Math.max(0, end - Math.max(start, filled));
+    const filledPart =
+      filledCount > 0 ? styleFilled('█'.repeat(filledCount)) : '';
+    const emptyPart = emptyCount > 0 ? styleEmpty(' '.repeat(emptyCount)) : '';
+    return filledPart + emptyPart;
+  };
+
+  if (!label || label.length > width) {
+    return `[${renderRange(0, width)}]`;
+  }
+
+  const labelStart = Math.floor((width - label.length) / 2);
+  const labelEnd = labelStart + label.length;
+  const styledLabel = [...label]
+    .map((character, index) =>
+      labelStart + index < filled
+        ? styleFilledLabel(character)
+        : styleEmptyLabel(character),
+    )
+    .join('');
+  return `[${renderRange(0, labelStart)}${styledLabel}${renderRange(labelEnd, width)}]`;
+}
+
+function clampPercentage(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function taskCompletionProgressBar(index: number, count: number): string {
+  const percentage = clampPercentage((index / count) * 100);
+  return createProgressBar(
+    percentage,
+    15,
+    `${percentage}%`,
+    darkAccent,
+    darkGrayBg,
+    (text) => bgBoldWhite(DARK_ACCENT_BG, text),
+    darkGrayBgBoldWhite,
+  );
+}
+
 function sliceProgressSuffix(
   planPath: string | undefined,
   baseCwd: string | undefined,
@@ -874,12 +946,11 @@ function totalTaskProgressSuffix(
     currentTaskIndex,
     baseCwd,
   );
-  return progressSuffix(
-    'Total tasks ',
-    progress?.currentTaskIndex,
-    progress?.taskCount,
-    styleLabel,
-  );
+  if (!progress) return '';
+  return ` | ${styleLabel('Total tasks ')}${taskCompletionProgressBar(
+    progress.currentTaskIndex,
+    progress.taskCount,
+  )} ${progress.currentTaskIndex}/${progress.taskCount}`;
 }
 
 export function planTasksFromMarkdown(markdown: string): PlanTask[] {

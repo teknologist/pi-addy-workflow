@@ -27,6 +27,7 @@ import {
   openNextWorkflowPrompt,
   resetWorkflow,
 } from '../extensions/workflow-monitor/workflow-handler.ts';
+import { expectedTotalTasksProgress } from './helpers.ts';
 
 const taskFooterDir = '/tmp/pi-addy-workflow-task-footer-test';
 
@@ -749,7 +750,7 @@ test('workflow widget resolves index plans to the first unfinished slice', () =>
   );
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-14-migration-slice-02-runtime.md | suite: 2026-05-14-migration-index.md',
-    'Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2 | Total tasks 2/3',
+    `Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2 | ${expectedTotalTasksProgress(2, 3)}`,
   ]);
 });
 
@@ -819,7 +820,7 @@ test('workflow widget resolves numeric-prefix index plans to the first unfinishe
     )().render(),
     [
       'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 00-index.md',
-      'Current task: Implement runner skeleton | Next task: none | Slice 1/2 | Task 2/2 | Total tasks 2/3',
+      `Current task: Implement runner skeleton | Next task: none | Slice 1/2 | Task 2/2 | ${expectedTotalTasksProgress(2, 3)}`,
     ],
   );
 });
@@ -873,7 +874,7 @@ test('workflow widget renders cumulative total task progress across slices', () 
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-21-feature-slice-02.md',
-    'Current task: Slice 2 task 2 | Next task: Slice 2 task 3 | Slice 2/3 | Task 2/4 | Total tasks 6/12',
+    `Current task: Slice 2 task 2 | Next task: Slice 2 task 3 | Slice 2/3 | Task 2/4 | ${expectedTotalTasksProgress(6, 12)}`,
   ]);
 });
 
@@ -1053,7 +1054,7 @@ test('completed active slice stays on current slice until finish', () => {
   assert.equal(state.nextTask, 'none');
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
-    'Current task: all tasks complete | Next task: none | Slice 5/8 | Task 1/1 | Total tasks 5/10',
+    `Current task: all tasks complete | Next task: none | Slice 5/8 | Task 1/1 | ${expectedTotalTasksProgress(5, 10)}`,
   ]);
 });
 
@@ -1094,7 +1095,7 @@ test('workflow widget renders task and slice progress for complete direct plan f
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
     'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-08-invoice-csv-etl-slice-02-test.md',
-    'Current task: all tasks complete | Next task: none | Slice 2/3 | Task 1/1 | Total tasks 2/3',
+    `Current task: all tasks complete | Next task: none | Slice 2/3 | Task 1/1 | ${expectedTotalTasksProgress(2, 3)}`,
   ]);
 });
 
