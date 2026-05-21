@@ -3626,6 +3626,103 @@ test('auto loop pauses after unclear commit output even when it contains a hash'
   assert.equal(notices.at(-1)?.[1], 'warning');
 });
 
+test('auto loop accepts common successful commit output variants', async () => {
+  const variants = [
+    'Committed 4386b11c.',
+    'Created commit 4386b11c.',
+    'Commit hash: 4386b11c',
+    '[main 4386b11c] fix: continue auto commit prompts',
+  ];
+
+  for (const [index, output] of variants.entries()) {
+    const cwd = join(stateDir, `auto-loop-commit-output-variant-${index}`);
+    const planPath = join('docs', 'plans', 'auto-loop.md');
+    mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+    writeFileSync(
+      join(cwd, planPath),
+      [
+        '## Task 1: Current',
+        '- [x] Implemented',
+        '- [x] Verified',
+        '- [x] Reviewed',
+      ].join('\n'),
+    );
+
+    const { pi, events, sentMessages } = createPiMock();
+    addyWorkflowMonitor(pi as never);
+    const notices: Array<[string, string | undefined]> = [];
+    const ctx: any = {
+      cwd,
+      id: `auto-loop-commit-output-variant-${index}`,
+      state: {
+        phases: {
+          define: 'complete',
+          plan: 'complete',
+          build: 'complete',
+          simplify: 'pending',
+          verify: 'complete',
+          review: 'active',
+          finish: 'pending',
+        },
+        warnings: [],
+        current: 'review',
+        autoMode: true,
+        autoLastPrompt: [
+          '# Addy Auto Commit',
+          '',
+          'Invocation: `__addy-auto-task-commit__`',
+        ].join('\n'),
+        activePlan: planPath,
+        stats: {
+          active: {
+            tasks: {
+              [`${planPath}\u001f\u001f1\u001fCurrent`]: {
+                plan: planPath,
+                taskIndex: 1,
+                taskTitle: 'Current',
+                turns: 1,
+                reviewRuns: 1,
+                issues: {
+                  critical: 0,
+                  important: 0,
+                  suggestion: 0,
+                  unknown: 0,
+                  total: 0,
+                },
+              },
+            },
+          },
+          history: [],
+        },
+      },
+      ui: {
+        setWidget() {},
+        notify: (message: string, level?: string) =>
+          notices.push([message, level]),
+      },
+      isIdle: () => true,
+    };
+
+    await events.get('agent_end')?.(
+      {
+        messages: [
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: output }],
+          },
+        ],
+      },
+      ctx,
+    );
+
+    assert.ok(
+      !notices.some(([message]) => /commit result was unclear/.test(message)),
+      output,
+    );
+    assert.ok(sentMessages.at(-1), output);
+  }
+});
+
 test('auto loop stops review fix loop after three attempts by default', async () => {
   const cwd = join(stateDir, 'auto-loop-review-fix-max-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
