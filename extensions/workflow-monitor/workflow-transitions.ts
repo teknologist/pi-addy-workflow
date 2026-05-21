@@ -52,6 +52,31 @@ export type WorkflowStats = {
 
 export type AutoFreshReason = 'between-tasks' | 'before-step' | 'before-review';
 
+export type AutoPendingActionReason =
+  | 'next-action'
+  | 'fresh-fallback'
+  | 'idle-retry'
+  | 'commit-frontier';
+
+export type WorkflowAutoPendingAction = {
+  key: string;
+  prompt: string;
+  expandedPrompt?: string;
+  plan?: string;
+  taskIndex?: number;
+  taskTitle?: string;
+  sliceIndex?: number;
+  reason: AutoPendingActionReason;
+  attempts: number;
+  createdAt: string;
+};
+
+export type WorkflowAutoPausedReason =
+  | 'unclear-commit-result'
+  | 'max-review-fix-loops'
+  | 'repeated-review-finding'
+  | 'user-stopped';
+
 export type WorkflowState = {
   current?: WorkflowPhase;
   phases: Record<WorkflowPhase, PhaseStatus>;
@@ -73,6 +98,8 @@ export type WorkflowState = {
   lastArtifact?: string;
   testStatus?: 'detected' | 'passed' | 'failed';
   autoMode?: boolean;
+  autoPendingAction?: WorkflowAutoPendingAction;
+  autoPausedReason?: WorkflowAutoPausedReason;
   autoLastPrompt?: string;
   autoRetryKey?: string;
   autoRetryCount?: number;
@@ -295,6 +322,8 @@ function applyAutoModeEvent(
     return {
       ...state,
       autoMode: false,
+      autoPendingAction: undefined,
+      autoPausedReason: 'user-stopped',
       autoLastPrompt: undefined,
       autoRetryKey: undefined,
       autoRetryCount: undefined,
@@ -332,6 +361,8 @@ function applyAutoModeEvent(
   return {
     ...state,
     autoMode: true,
+    autoPendingAction: undefined,
+    autoPausedReason: undefined,
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
@@ -355,6 +386,8 @@ function exitAutoMode(state: WorkflowState): WorkflowState {
   return {
     ...state,
     autoMode: false,
+    autoPendingAction: undefined,
+    autoPausedReason: undefined,
     autoLastPrompt: undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
@@ -560,6 +593,8 @@ export function transitionWorkflow(
   next.stats = baseState.stats;
   next.committedTasks = baseState.committedTasks;
   next.autoMode = baseState.autoMode;
+  next.autoPendingAction = baseState.autoPendingAction;
+  next.autoPausedReason = baseState.autoPausedReason;
   next.autoLastPrompt = baseState.autoLastPrompt;
   next.autoRetryKey = baseState.autoRetryKey;
   next.autoRetryCount = baseState.autoRetryCount;

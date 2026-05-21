@@ -4658,6 +4658,44 @@ test('malformed persisted auto retry state is ignored', () => {
   assert.equal(getContextWorkflowState(ctx).autoMode, undefined);
 });
 
+test('malformed persisted auto pending action state is ignored', () => {
+  const ctx: any = {
+    cwd: join(stateDir, 'malformed-auto-pending-state-project'),
+    id: 'malformed-auto-pending-state',
+    sessionManager: {
+      getBranch: () => [
+        [
+          WORKFLOW_STATE_ENTRY_TYPE,
+          {
+            phases: {
+              define: 'complete',
+              plan: 'complete',
+              build: 'active',
+              simplify: 'pending',
+              verify: 'pending',
+              review: 'pending',
+              finish: 'pending',
+            },
+            warnings: [],
+            current: 'build',
+            autoMode: true,
+            activePlan: 'docs/plans/auto-loop.md',
+            autoPendingAction: {
+              key: 'bad-pending',
+              prompt: '/addy-build docs/plans/auto-loop.md',
+              reason: 'not-a-real-reason',
+              attempts: 0,
+              createdAt: '2026-05-21T00:00:00.000Z',
+            },
+          },
+        ],
+      ],
+    },
+  };
+
+  assert.equal(getContextWorkflowState(ctx).autoMode, undefined);
+});
+
 test('session start renders workflow widget before first workflow instruction', async () => {
   const { pi, events } = createPiMock();
   addyWorkflowMonitor(pi as never);
@@ -4713,7 +4751,7 @@ test('session start restores persisted workflow widget state', async () => {
   ]);
 });
 
-test('session project restore clears stale auto loop controls', async () => {
+test('session project restore preserves persistent auto mode but clears stale prompt controls', async () => {
   const cwd = join(stateDir, 'startup-auto-sanitize-project');
   const planPath = 'docs/plans/startup-auto.md';
   const firstCtx: any = {
@@ -4731,7 +4769,7 @@ test('session project restore clears stale auto loop controls', async () => {
 
   assert.equal(state.current, undefined);
   assert.equal(state.activePlan, planPath);
-  assert.equal(state.autoMode, false);
+  assert.equal(state.autoMode, true);
   assert.equal(state.autoLastPrompt, undefined);
 });
 
@@ -4918,6 +4956,187 @@ test('session start consumes pending fresh continuation without spawning another
     'Addy Build',
   );
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
+test('session start watchdog resumes stale reviewed task commit frontier', async () => {
+  const cwd = join(stateDir, 'startup-watchdog-commit-frontier-project');
+  const planPath = join('docs', 'plans', 'watchdog-commit.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Needs commit',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+    ].join('\n'),
+  );
+  setContextWorkflowState(
+    { cwd, id: 'startup-watchdog-commit-source', ui: { setWidget() {} } },
+    {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'complete',
+        finish: 'pending',
+      },
+      warnings: [],
+      autoMode: true,
+      activePlan: planPath,
+      stats: {
+        active: {
+          tasks: {
+            [`${planPath}\u001f\u001f1\u001fNeeds commit`]: {
+              plan: planPath,
+              taskIndex: 1,
+              taskTitle: 'Needs commit',
+              turns: 2,
+              verifyRuns: 1,
+              reviewRuns: 1,
+              issues: {
+                critical: 0,
+                important: 0,
+                suggestion: 0,
+                unknown: 0,
+                total: 0,
+              },
+            },
+          },
+        },
+        history: [],
+      },
+    },
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  await events.get('session_start')?.(
+    {},
+    { cwd, id: 'startup-watchdog-commit-next', ui: { setWidget() {} } },
+  );
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    '__addy-auto-task-commit__',
+    'Addy Auto Commit',
+  );
+});
+
+test('session start watchdog supersedes stale pending auto action', async () => {
+  const cwd = join(stateDir, 'startup-watchdog-stale-pending-project');
+  const planPath = join('docs', 'plans', 'watchdog-stale.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Verify now',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+  setContextWorkflowState(
+    { cwd, id: 'startup-watchdog-stale-source', ui: { setWidget() {} } },
+    {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      autoMode: true,
+      activePlan: planPath,
+      autoPendingAction: {
+        key: 'stale-build-action',
+        prompt: `/addy-build ${planPath}`,
+        plan: planPath,
+        taskIndex: 1,
+        taskTitle: 'Verify now',
+        reason: 'next-action',
+        attempts: 0,
+        createdAt: '2026-05-21T00:00:00.000Z',
+      },
+    },
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'startup-watchdog-stale-next',
+    ui: { setWidget() {} },
+  };
+  await events.get('session_start')?.({}, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoPendingAction, undefined);
+});
+
+test('plain addy-auto resumes after explicit stop pause', async () => {
+  const cwd = join(stateDir, 'command-watchdog-stop-resume-project');
+  const planPath = join('docs', 'plans', 'watchdog-stop-resume.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Start work',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, commands, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'command-watchdog-stop-resume',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'pending',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      autoMode: true,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands.get('addy-auto')?.handler({ args: ['stop'] }, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.equal(getContextWorkflowState(ctx).autoMode, false);
+  assert.equal(getContextWorkflowState(ctx).autoPausedReason, 'user-stopped');
+
+  await commands.get('addy-auto')?.handler({}, ctx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-build ${planPath}`,
+    'Addy Build',
+  );
+  assert.equal(getContextWorkflowState(ctx).autoPausedReason, undefined);
 });
 
 test('session start ignores reasonless pending fresh state', async () => {
@@ -5760,7 +5979,7 @@ test('agent_end consumes pending fresh prompt before recomputing next action', a
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
-test('provider transport failure preserves auto prompt for fresh retry', async () => {
+test('provider transport failure preserves auto prompt for watchdog retry', async () => {
   const { pi, events, sentMessages } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const ctx: any = {
@@ -5803,9 +6022,12 @@ test('provider transport failure preserves auto prompt for fresh retry', async (
 
   const state = getContextWorkflowState(ctx);
   assert.deepEqual(sentMessages, []);
-  assert.equal(state.autoFreshPrompt, '/addy-verify docs/plans/current.md');
-  assert.equal(state.autoFreshReason, 'before-step');
-  assert.equal(state.autoFreshConsumedKey, undefined);
+  assert.equal(state.autoFreshPrompt, undefined);
+  assert.equal(
+    state.autoPendingAction?.prompt,
+    '/addy-verify docs/plans/current.md',
+  );
+  assert.equal(state.autoPendingAction?.reason, 'idle-retry');
 });
 
 test('pending fresh prompt is preserved when no sender can auto-dispatch', async () => {

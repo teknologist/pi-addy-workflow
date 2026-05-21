@@ -12,6 +12,7 @@ import {
   type WorkflowIssueStats,
   type WorkflowPhase,
   type WorkflowState,
+  type WorkflowAutoPendingAction,
   type WorkflowTaskCommitRecord,
   type WorkflowTaskStats,
 } from './workflow-transitions.ts';
@@ -105,6 +106,79 @@ function coerceCommittedTasks(
     committedTasks[key] = record;
   }
   return committedTasks;
+}
+
+function isAutoPendingActionReason(
+  value: unknown,
+): value is WorkflowAutoPendingAction['reason'] {
+  return (
+    value === 'next-action' ||
+    value === 'fresh-fallback' ||
+    value === 'idle-retry' ||
+    value === 'commit-frontier'
+  );
+}
+
+function coerceAutoPendingAction(
+  value: unknown,
+): WorkflowAutoPendingAction | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    return undefined;
+  const candidate = value as Partial<WorkflowAutoPendingAction>;
+  if (
+    typeof candidate.key !== 'string' ||
+    candidate.key.length === 0 ||
+    typeof candidate.prompt !== 'string' ||
+    candidate.prompt.length === 0 ||
+    !isAutoPendingActionReason(candidate.reason) ||
+    !isNonNegativeSafeInteger(candidate.attempts) ||
+    typeof candidate.createdAt !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.expandedPrompt !== undefined &&
+    typeof candidate.expandedPrompt !== 'string'
+  )
+    return undefined;
+  if (candidate.plan !== undefined && typeof candidate.plan !== 'string')
+    return undefined;
+  if (
+    candidate.taskIndex !== undefined &&
+    !isPositiveSafeInteger(candidate.taskIndex)
+  )
+    return undefined;
+  if (
+    candidate.taskTitle !== undefined &&
+    typeof candidate.taskTitle !== 'string'
+  )
+    return undefined;
+  if (
+    candidate.sliceIndex !== undefined &&
+    !isPositiveSafeInteger(candidate.sliceIndex)
+  )
+    return undefined;
+  return {
+    key: candidate.key,
+    prompt: candidate.prompt,
+    expandedPrompt: candidate.expandedPrompt,
+    plan: candidate.plan,
+    taskIndex: candidate.taskIndex,
+    taskTitle: candidate.taskTitle,
+    sliceIndex: candidate.sliceIndex,
+    reason: candidate.reason,
+    attempts: candidate.attempts,
+    createdAt: candidate.createdAt,
+  };
+}
+
+function isAutoPausedReason(value: unknown): boolean {
+  return (
+    value === 'unclear-commit-result' ||
+    value === 'max-review-fix-loops' ||
+    value === 'repeated-review-finding' ||
+    value === 'user-stopped'
+  );
 }
 
 function taskStatHasLifecycleEvidence(
@@ -236,6 +310,16 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (
     candidate.autoMode !== undefined &&
     typeof candidate.autoMode !== 'boolean'
+  )
+    return undefined;
+  const autoPendingAction = coerceAutoPendingAction(
+    candidate.autoPendingAction,
+  );
+  if (candidate.autoPendingAction !== undefined && !autoPendingAction)
+    return undefined;
+  if (
+    candidate.autoPausedReason !== undefined &&
+    !isAutoPausedReason(candidate.autoPausedReason)
   )
     return undefined;
   if (
@@ -390,6 +474,7 @@ function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   return {
     ...candidate,
     committedTasks: migratedCommittedTasks,
+    autoPendingAction,
     current,
     phases: phases as Record<WorkflowPhase, PhaseStatus>,
     warnings: candidate.warnings,
@@ -509,6 +594,8 @@ function writeStoredWorkflowState(
 
 const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
   'autoLastPrompt',
+  'autoPendingAction',
+  'autoPausedReason',
   'autoRetryKey',
   'autoRetryCount',
   'autoFreshPrompt',
@@ -535,15 +622,18 @@ function projectFallbackWorkflowState(
   const validPendingFresh = Boolean(
     state.autoFreshPrompt && state.autoFreshReason,
   );
+  const validPendingAction = Boolean(state.autoPendingAction);
   const preserveFreshRetry = Boolean(
     validPendingFresh &&
     state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}`),
   );
   const sanitized = {
     ...state,
-    autoMode: validPendingFresh,
+    autoMode: Boolean(
+      state.autoMode || validPendingFresh || validPendingAction,
+    ),
   };
-  if (!validPendingFresh) {
+  if (!validPendingFresh && !validPendingAction && !state.autoMode) {
     for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS)
       sanitized[field] = undefined;
     return sanitized;
