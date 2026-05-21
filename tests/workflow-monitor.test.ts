@@ -1997,6 +1997,155 @@ test('auto loop commits reviewed task even when refreshed state already points a
   assert.doesNotMatch(sentMessages[0], /Completed task: Next/);
 });
 
+test('auto loop preserves project auto state over stale non-auto branch state after review', async () => {
+  const cwd = join(stateDir, 'auto-loop-stale-non-auto-review-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+
+  const projectCtx: any = {
+    cwd,
+    id: 'auto-loop-stale-non-auto-review-project-state',
+    ui: { setWidget() {} },
+  };
+  setContextWorkflowState(projectCtx, {
+    phases: {
+      define: 'complete',
+      plan: 'complete',
+      build: 'complete',
+      simplify: 'pending',
+      verify: 'complete',
+      review: 'active',
+      finish: 'pending',
+    },
+    warnings: [],
+    current: 'review',
+    currentTask: 'Current',
+    currentTaskIndex: 1,
+    taskCount: 2,
+    autoMode: true,
+    autoLastPrompt: `/addy-review ${planPath}`,
+    activePlan: planPath,
+  });
+
+  const staleBranchState = {
+    phases: {
+      define: 'complete',
+      plan: 'complete',
+      build: 'complete',
+      simplify: 'pending',
+      verify: 'complete',
+      review: 'complete',
+      finish: 'active',
+    },
+    warnings: [],
+    current: 'finish',
+    currentTask: 'Current',
+    currentTaskIndex: 1,
+    taskCount: 2,
+    autoMode: false,
+    autoLastPrompt: undefined,
+    lastTrigger: '/addy-finish',
+    activePlan: planPath,
+  };
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-stale-non-auto-review-session',
+    sessionManager: {
+      getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, staleBranchState]],
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  assert.equal(getContextWorkflowState(ctx).autoMode, true);
+  assert.equal(
+    getContextWorkflowState(ctx).autoLastPrompt,
+    `/addy-review ${planPath}`,
+  );
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'No issues found. Marked Reviewed.' },
+          ],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.match(sentMessages[0], /Completed task: Current/);
+  assert.equal(getContextWorkflowState(ctx).autoMode, true);
+});
+
+test('explicit addy-auto stop is not resurrected by older project auto state', () => {
+  const cwd = join(stateDir, 'auto-loop-stop-not-resurrected-project');
+  const { pi } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+
+  const projectCtx: any = {
+    cwd,
+    id: 'auto-loop-stop-not-resurrected-project-state',
+    ui: { setWidget() {} },
+  };
+  setContextWorkflowState(projectCtx, {
+    phases: {
+      define: 'complete',
+      plan: 'complete',
+      build: 'active',
+      simplify: 'pending',
+      verify: 'pending',
+      review: 'pending',
+      finish: 'pending',
+    },
+    warnings: [],
+    current: 'build',
+    autoMode: true,
+    autoLastPrompt: '/addy-build docs/plans/current.md',
+    activePlan: 'docs/plans/current.md',
+  });
+
+  const stoppedState = {
+    ...projectCtx.state,
+    autoMode: false,
+    autoLastPrompt: undefined,
+    autoPausedReason: 'user-stopped',
+    lastTrigger: '/addy-auto stop',
+  };
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-stop-not-resurrected-session',
+    sessionManager: {
+      getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, stoppedState]],
+    },
+    ui: { setWidget() {} },
+  };
+
+  assert.equal(getContextWorkflowState(ctx).autoMode, false);
+  assert.equal(getContextWorkflowState(ctx).autoLastPrompt, undefined);
+});
+
 test('auto loop fixes review findings even when plan was incorrectly marked reviewed', async () => {
   const cwd = join(stateDir, 'auto-loop-reviewed-with-findings-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');

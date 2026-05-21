@@ -613,6 +613,37 @@ const PROJECT_FALLBACK_AUTO_CONTROL_FIELDS = [
   'reviewStatsAgent',
 ] as const satisfies readonly (keyof WorkflowState)[];
 
+function hasLiveAutoControl(state: WorkflowState | undefined): boolean {
+  return Boolean(
+    state &&
+    (state.autoMode ||
+      (state.autoFreshPrompt && state.autoFreshReason) ||
+      state.autoPendingAction),
+  );
+}
+
+function explicitlyStoppedAuto(state: WorkflowState): boolean {
+  return Boolean(
+    state.autoPausedReason === 'user-stopped' ||
+    /^\/addy-auto\s+stop\b/.test(state.lastTrigger ?? ''),
+  );
+}
+
+function withProjectAutoControl(
+  state: WorkflowState,
+  projectState: WorkflowState | undefined,
+): WorkflowState {
+  if (!hasLiveAutoControl(projectState)) return state;
+  if (state.autoMode || explicitlyStoppedAuto(state)) return state;
+
+  const merged = { ...state, autoMode: true };
+  for (const field of PROJECT_FALLBACK_AUTO_CONTROL_FIELDS) {
+    const value = projectState?.[field];
+    if (value !== undefined) merged[field] = value as never;
+  }
+  return merged;
+}
+
 function projectFallbackWorkflowState(
   key: string,
   ctx: WorkflowContext,
@@ -673,7 +704,7 @@ export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
       !projectState.autoFreshPrompt
     )
       return parseWorkflowState(projectState);
-    return state;
+    return withProjectAutoControl(state, projectState);
   };
 
   for (const entry of [...entries].reverse()) {
