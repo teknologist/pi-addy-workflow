@@ -54,6 +54,9 @@ function createPiMock() {
   const messageRenderers = new Map<string, unknown>();
   const entries: Array<[string, unknown]> = [];
   const sentMessages: string[] = [];
+  const sentMessageOptions: Array<
+    { deliverAs?: string; streamingBehavior?: string } | undefined
+  > = [];
   const pi = {
     on: (name: string, handler: Handler) => events.set(name, handler),
     registerCommand: (name: string, config: CommandConfig) =>
@@ -61,9 +64,23 @@ function createPiMock() {
     registerMessageRenderer: (name: string, renderer: unknown) =>
       messageRenderers.set(name, renderer),
     appendEntry: (type: string, data: unknown) => entries.push([type, data]),
-    sendUserMessage: (message: string) => sentMessages.push(message),
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => {
+      sentMessages.push(message);
+      sentMessageOptions.push(options);
+    },
   };
-  return { pi, events, commands, messageRenderers, entries, sentMessages };
+  return {
+    pi,
+    events,
+    commands,
+    messageRenderers,
+    entries,
+    sentMessages,
+    sentMessageOptions,
+  };
 }
 
 function workflowPromptText(
@@ -5814,7 +5831,8 @@ test('auto-dispatched fix, verify, review, finish, and commit prompts record tas
     ].join('\n'),
   );
 
-  const { pi, events, commands, sentMessages } = createPiMock();
+  const { pi, events, commands, sentMessages, sentMessageOptions } =
+    createPiMock();
   addyWorkflowMonitor(pi as never);
   const replacementMessages: string[] = [];
   let replacementCtx: any;
@@ -5956,6 +5974,9 @@ test('auto-dispatched fix, verify, review, finish, and commit prompts record tas
     ctx,
   );
   assert.match(sentMessages.at(-1) ?? '', /^# Addy Auto Commit/);
+  assert.deepEqual(sentMessageOptions.at(-1), {
+    streamingBehavior: 'followUp',
+  });
   assert.equal(ctx.state.stats.active.tasks[statsKey].turns, 5);
 
   await events.get('agent_end')?.(

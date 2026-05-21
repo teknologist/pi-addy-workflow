@@ -29,4 +29,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor.ts`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-05-20_
+_Back to [index.md](./index.md) · Generated 2026-05-21_

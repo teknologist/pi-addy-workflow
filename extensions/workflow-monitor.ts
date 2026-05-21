@@ -1973,7 +1973,7 @@ async function dispatchTaskCommitPrompt(
       autoReviewTaskIndex: undefined,
     },
     target,
-    options,
+    { ...options, useDefaultDelivery: true },
   );
 }
 
