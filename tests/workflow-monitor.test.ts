@@ -506,7 +506,7 @@ test('auto-dispatched workflow prompts advance the footer phase', async () => {
     ].join('\n'),
   );
 
-  const { pi, events, sentMessages } = createPiMock();
+  const { pi, events, sentMessages, sentMessageOptions } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const ctx: any = {
     cwd,
@@ -546,6 +546,9 @@ test('auto-dispatched workflow prompts advance the footer phase', async () => {
     `/addy-review ${planPath}`,
     'Addy Review',
   );
+  assert.deepEqual(sentMessageOptions[0], {
+    streamingBehavior: 'followUp',
+  });
   assert.equal(ctx.state.current, 'review');
   assert.equal(ctx.state.phases.verify, 'complete');
   assert.equal(ctx.state.phases.review, 'active');

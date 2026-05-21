@@ -2798,7 +2798,11 @@ async function dispatchNextAutoWorkflowPromptAfterAgentEnd(
   event: AgentEndEvent,
 ): Promise<void> {
   const workflowCtx = ctx as never;
-  const agentEndOptions: DispatchOptions = { disableFreshSession: true };
+  const agentEndOptions: DispatchOptions = {
+    disableFreshSession: true,
+    idleTurnDelivery: true,
+    useDefaultDelivery: true,
+  };
   const state = getContextWorkflowState(workflowCtx);
   if (
     await maybeContinueAfterTaskCommit(pi, ctx, event, state, agentEndOptions)
