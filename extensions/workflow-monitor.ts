@@ -734,22 +734,52 @@ function idleUserMessageKey(ctx: unknown, message: string): string {
     .slice(0, 16);
 }
 
+function autoWorkflowActionKeyForPromptState(
+  prompt: string,
+  state: ReturnType<typeof getContextWorkflowState>,
+  target: WorkflowStatsTarget | undefined = latestActiveStatsTarget(state),
+): string {
+  return pendingAutoActionForPrompt(prompt, state, target, 'idle-retry').key;
+}
+
+function currentAutoWorkflowActionKey(
+  state: ReturnType<typeof getContextWorkflowState>,
+): string | undefined {
+  const prompt = state.autoLastPrompt
+    ? workflowTextFromInput(state.autoLastPrompt)
+    : state.autoPendingAction?.prompt;
+  if (!prompt) return undefined;
+  return autoWorkflowActionKeyForPromptState(prompt, state);
+}
+
+function preservePendingAutoActionForRetry(
+  ctx: unknown,
+  message: string,
+  deliveryPrompt?: string,
+): string | undefined {
+  const state = getContextWorkflowState(ctx as never);
+  if (!state.autoMode) return undefined;
+  const prompt = workflowTextFromInput(message);
+  const pendingAction = pendingAutoActionForPrompt(
+    prompt,
+    state,
+    latestActiveStatsTarget(state),
+    'idle-retry',
+    deliveryPrompt,
+  );
+  setContextWorkflowState(
+    ctx as never,
+    { ...state, autoPendingAction: pendingAction },
+    appendWorkflowEntryFromContext(ctx),
+  );
+  return pendingAction.key;
+}
+
 function preservePendingAutoActionAfterDeliveryFailure(
   ctx: unknown,
   message: string,
 ): void {
-  const state = getContextWorkflowState(ctx as never);
-  if (!state.autoMode) return;
-  setContextWorkflowState(
-    ctx as never,
-    stateWithPendingAutoAction(
-      state,
-      message,
-      latestActiveStatsTarget(state),
-      'idle-retry',
-    ),
-    appendWorkflowEntryFromContext(ctx),
-  );
+  preservePendingAutoActionForRetry(ctx, workflowTextFromInput(message));
 }
 
 function handleUserMessageDeliveryFailure(
@@ -797,30 +827,56 @@ function scheduleUserMessageAfterIdle(
   const key = idleUserMessageKey(ctx, message);
   if (scheduledIdleUserMessageKeys.has(key)) return;
   scheduledIdleUserMessageKeys.add(key);
+  const scheduledActionKey = options.autoMode
+    ? preservePendingAutoActionForRetry(ctx, message)
+    : undefined;
 
   const attempt = (attempts: number) => {
-    if (isContextBusy(ctx)) {
-      if (attempts >= AUTO_FRESH_IDLE_MAX_ATTEMPTS) {
-        scheduledIdleUserMessageKeys.delete(key);
-        preservePendingAutoActionAfterDeliveryFailure(ctx, message);
-        notifyWorkflowWarning(
-          ctx,
-          'Addy auto is still busy; the next workflow prompt was preserved for retry.',
-        );
+    try {
+      if (isContextBusy(ctx)) {
+        if (attempts >= AUTO_FRESH_IDLE_MAX_ATTEMPTS) {
+          scheduledIdleUserMessageKeys.delete(key);
+          preservePendingAutoActionAfterDeliveryFailure(ctx, message);
+          notifyWorkflowWarning(
+            ctx,
+            'Addy auto is still busy; the next workflow prompt was preserved for retry.',
+          );
+          return;
+        }
+        setTimeout(() => attempt(attempts + 1), AUTO_FRESH_IDLE_RETRY_MS);
         return;
       }
-      setTimeout(() => attempt(attempts + 1), AUTO_FRESH_IDLE_RETRY_MS);
-      return;
-    }
 
-    scheduledIdleUserMessageKeys.delete(key);
-    const latestState = getContextWorkflowState(ctx as never);
-    if (
-      options.idleTurnDelivery &&
-      commandFromPrompt(latestState.autoLastPrompt) !== AUTO_TASK_COMMIT_PROMPT
-    )
-      return;
-    safeSendUserMessage(pi, ctx, message, options);
+      scheduledIdleUserMessageKeys.delete(key);
+      const latestState = getContextWorkflowState(ctx as never);
+      if (options.idleTurnDelivery && scheduledActionKey) {
+        const latestActionKey = currentAutoWorkflowActionKey(latestState);
+        if (latestActionKey !== scheduledActionKey) return;
+      }
+      if (
+        scheduledActionKey &&
+        latestState.autoPendingAction?.key === scheduledActionKey
+      ) {
+        setContextWorkflowState(
+          ctx as never,
+          { ...latestState, autoPendingAction: undefined },
+          appendWorkflowEntryFromContext(ctx),
+        );
+      }
+      safeSendUserMessage(pi, ctx, message, options);
+    } catch (error) {
+      scheduledIdleUserMessageKeys.delete(key);
+      if (isStaleExtensionContextError(error)) return;
+      try {
+        handleUserMessageDeliveryFailure(ctx, message, error);
+      } catch {
+        const details = error instanceof Error ? error.message : String(error);
+        notifyWorkflowWarning(
+          ctx,
+          `Addy auto could not deliver the next workflow prompt: ${details}.`,
+        );
+      }
+    }
   };
 
   setTimeout(() => attempt(0), 0);

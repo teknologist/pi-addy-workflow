@@ -443,6 +443,140 @@ test('auto loop dispatches verify after the current task is implemented', async 
   assert.equal(ctx.state.phases.verify, 'active');
 });
 
+test('auto loop waits for idle before sending verify as a new turn', async () => {
+  const cwd = join(stateDir, 'auto-loop-verify-idle-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages, sentMessageOptions } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-verify-idle',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.({}, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.equal(ctx.state.autoPendingAction?.prompt, `/addy-verify ${planPath}`);
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
+  assert.deepEqual(sentMessageOptions[0], {
+    streamingBehavior: 'followUp',
+  });
+  assert.equal(ctx.state.autoPendingAction, undefined);
+});
+
+test('auto loop waits for idle before sending review as a new turn', async () => {
+  const cwd = join(stateDir, 'auto-loop-review-idle-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages, sentMessageOptions } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-review-idle',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'active',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-verify ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Verified.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 0);
+  assert.equal(ctx.state.autoPendingAction?.prompt, `/addy-review ${planPath}`);
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-review ${planPath}`,
+    'Addy Review',
+  );
+  assert.deepEqual(sentMessageOptions[0], {
+    streamingBehavior: 'followUp',
+  });
+  assert.equal(ctx.state.autoPendingAction, undefined);
+});
+
 test('auto loop starts verify from an implemented plan without skipped-build warning', async () => {
   const cwd = join(stateDir, 'auto-loop-implemented-entry-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
@@ -1499,6 +1633,116 @@ test('auto loop drops stale delayed task commit before idle delivery', async () 
   await new Promise((resolve) => setTimeout(resolve, 75));
 
   assert.equal(sentMessages.length, 0);
+});
+
+test('auto loop preserves delayed prompt when session is compacted before idle delivery', async () => {
+  const cwd = join(stateDir, 'auto-loop-stale-idle-review-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-stale-idle-review',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'active',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'verify',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      stats: {
+        active: {
+          tasks: {
+            [`${planPath}\u001f\u001f1\u001fCurrent`]: {
+              plan: planPath,
+              taskIndex: 1,
+              taskTitle: 'Current',
+              turns: 1,
+              verifyRuns: 1,
+              reviewRuns: 0,
+              issues: {
+                critical: 0,
+                important: 0,
+                suggestion: 0,
+                unknown: 0,
+                total: 0,
+              },
+            },
+          },
+        },
+        history: [],
+      },
+      autoMode: true,
+      autoLastPrompt: `/addy-verify ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Verified.' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(ctx.state.autoPendingAction?.prompt, `/addy-review ${planPath}`);
+  ctx.sessionManager = {
+    getBranch() {
+      throw new Error('This extension ctx is stale after session replacement');
+    },
+  };
+  const uncaught: unknown[] = [];
+  const onUncaught = (error: unknown) => uncaught.push(error);
+  process.once('uncaughtException', onUncaught);
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  process.off('uncaughtException', onUncaught);
+
+  assert.equal(sentMessages.length, 0);
+  assert.deepEqual(uncaught, []);
+  assert.equal(ctx.state.autoPendingAction?.prompt, `/addy-review ${planPath}`);
+
+  const nextCtx: any = {
+    cwd,
+    id: 'auto-loop-stale-idle-review-next',
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => true,
+  };
+  await events.get('session_start')?.({}, nextCtx);
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-review ${planPath}`,
+    'Addy Review',
+  );
 });
 
 test('auto loop preserves retry path when delayed task commit delivery fails', async () => {
