@@ -449,7 +449,7 @@ function reviewIssueFindings(text: string): ReviewIssueFinding[] {
     }
 
     if (
-      (/\b[\w./-]+:\d+\b/.test(line) ||
+      (reviewLineLooksLikeFileLineCitation(line) ||
         /\b(blocking issue|blocker|must fix|should fix)\b/.test(line)) &&
       !reviewLineIsEmptyFinding(line)
     ) {
@@ -460,6 +460,62 @@ function reviewIssueFindings(text: string): ReviewIssueFinding[] {
   if (findings.length === 0 && reviewTextClearlyFoundIssues(text))
     findings.push({ line: text.trim().toLowerCase(), severity: 'unknown' });
   return findings;
+}
+
+// Allow-list of file extensions used by `reviewLineLooksLikeFileLineCitation`
+// to accept bare-filename citations like `config.json:5` while rejecting bare
+// host:port tokens like `api.example.com:443`. Covers common source code,
+// config, data, web, doc, and build manifests. New entries should be lower
+// case and may be added when a real review surfaces a missed citation.
+const REVIEW_CITATION_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
+  // source code
+  'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs',
+  'py', 'rb', 'go', 'rs', 'java', 'kt', 'kts', 'scala', 'swift',
+  'cs', 'fs', 'vb', 'c', 'cc', 'cpp', 'cxx', 'h', 'hh', 'hpp', 'hxx',
+  'm', 'mm', 'php', 'lua', 'pl', 'pm', 'r', 'jl',
+  'dart', 'elm', 'ex', 'exs', 'erl', 'hrl', 'clj', 'cljs', 'edn',
+  'sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd',
+  // config / data
+  'json', 'jsonc', 'jsonl', 'yaml', 'yml', 'toml',
+  'ini', 'cfg', 'conf', 'env', 'properties', 'plist',
+  'xml', 'xsd', 'xsl', 'xslt', 'proto', 'graphql', 'gql', 'prisma',
+  // web / markup
+  'html', 'htm', 'css', 'scss', 'sass', 'less', 'styl',
+  'vue', 'svelte', 'astro',
+  // docs
+  'md', 'mdx', 'rst', 'adoc', 'txt', 'tex',
+  // build / lock manifests
+  'gradle', 'sbt', 'lock', 'mod', 'sum',
+]);
+
+function reviewLineLooksLikeFileLineCitation(line: string): boolean {
+  // Heuristic to catch `src/foo.ts:42` style citations that the agent forgot
+  // to put under a Critical/Important/Suggestion section. We must NOT match
+  // host:port tokens such as `localhost:3031`, `127.0.0.1:443`,
+  // `api.example.com:443`, or URLs like `http://localhost:3031` that
+  // legitimately appear in /addy-verify proof blocks for clean reviews.
+  // Those proof lines are stable across iterations and would otherwise
+  // produce a deterministic fingerprint that trips the auto loop's "same
+  // review finding repeated" pause.
+  for (const match of line.matchAll(/\b([\w./-]+):\d+\b/g)) {
+    const start = match.index ?? 0;
+    // Skip URL host tokens: when `://` immediately precedes the match, the
+    // matched text is the host portion of a URL such as `localhost:3031` in
+    // `http://localhost:3031`. We skip just this match and keep scanning,
+    // so a line like `src/server.ts:42 see http://localhost:3031` is still
+    // recognised as actionable via the earlier `src/server.ts:42` match.
+    if (line.slice(0, start).endsWith('://')) continue;
+    const prefix = match[1] ?? '';
+    // Path-shaped prefix is a strong file:line signal.
+    if (prefix.includes('/')) return true;
+    // Bare filename: require the final dot-suffix to be in the allow-list of
+    // known file extensions. This rejects hostnames like `example.com:443`,
+    // `service.local:8080`, `db.example.org:5432` whose tail extension is a
+    // TLD, not a source file extension.
+    const extension = prefix.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+    if (extension && REVIEW_CITATION_FILE_EXTENSIONS.has(extension)) return true;
+  }
+  return false;
 }
 
 function reviewTextClearlyFoundIssues(text: string): boolean {

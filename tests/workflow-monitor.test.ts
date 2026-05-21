@@ -5039,6 +5039,279 @@ test('auto loop keys repeated review findings to tracked review target', async (
   assert.equal(ctx.state.autoPausedReason, 'repeated-review-finding');
 });
 
+test('auto loop does not pause when a clean review proof block contains a localhost url with port', async () => {
+  // Regression: the catch-all `\b[\w./-]+:\d+\b` finding heuristic in
+  // reviewIssueFindings was meant to catch real file:line citations such as
+  // `src/foo.ts:42`. It also matches port-bearing URLs that the agent always
+  // emits in the /addy-review proof block (for example
+  // `http://localhost:3031`). On a clean "No issues found" review this turned
+  // every proof line into a synthetic "unknown" finding with a deterministic
+  // fingerprint, so the second clean review fingerprint-matched the first and
+  // the auto loop falsely paused with `repeated-review-finding`.
+  const cwd = join(stateDir, 'auto-loop-review-localhost-proof-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const cleanReviewText = [
+    'No issues found.',
+    '',
+    'Checked scope:',
+    '- test/v3-converter-regression/fixture-graph.ts',
+    '- Slice 05 Task 1 plan/notes updates',
+    '',
+    'Fresh verification evidence:',
+    '- B2C live preflight passed against http://localhost:3031',
+    '- 37 tests passed',
+  ].join('\n');
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  // Pre-seed the stored fingerprint with the hash that the buggy heuristic
+  // produces for the localhost proof line. If the heuristic keeps treating
+  // that line as a finding, this current run will match the stored
+  // fingerprint and the loop will pause.
+  const storedFingerprint = reviewFingerprintForTest([
+    '- b2c live preflight passed against http://localhost:3031',
+  ]);
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-review-localhost-proof',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
+      autoReviewFixCount: 1,
+      autoReviewFindingFingerprint: storedFingerprint,
+      activePlan: planPath,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: cleanReviewText }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  const pauseNotice = notices.find(([message]) =>
+    /same review finding repeated/.test(message),
+  );
+  assert.equal(
+    pauseNotice,
+    undefined,
+    `auto loop must not pause on a clean review whose proof block mentions a localhost URL with port; saw notices: ${JSON.stringify(notices)}`,
+  );
+  assert.notEqual(ctx.state.autoPausedReason, 'repeated-review-finding');
+});
+
+test('auto loop still dispatches fix-all when a review line cites a file:line AND mentions a URL', async () => {
+  // Code-review medium #1: the previous fix rejected the entire line whenever
+  // it contained `://`, swallowing real `src/foo.ts:42` citations that happen
+  // to also mention a URL on the same line. That hides a genuine actionable
+  // finding and silently bypasses /addy-fix-all, stats counting, and the
+  // repeated-review-finding pause guard.
+  //
+  // The plan below has Task 1 fully checked but no commit record yet. With
+  // that shape, taskFrontier routes the next action to the auto task-commit
+  // prompt (not /addy-review), so `cleanReviewNeedsPlanSync` cannot fire.
+  // The ONLY remaining path that can dispatch /addy-fix-all is
+  // hasActionableFindings, i.e. the citation actually being detected.
+  const cwd = join(stateDir, 'auto-loop-review-mixed-citation-url-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-review-mixed-citation-url',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'fix src/server.ts:42 before review can pass — see http://localhost:3031 for repro',
+            },
+          ],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  const fixAllDispatch = sentMessages.find((message) =>
+    message.includes(`Invocation: \`/addy-fix-all ${planPath}\``),
+  );
+  assert.ok(
+    fixAllDispatch,
+    `expected /addy-fix-all dispatch because the review line cites src/server.ts:42; sentMessages=${JSON.stringify(sentMessages)}`,
+  );
+  assert.equal(ctx.state.autoReviewFixCount, 1);
+});
+
+test('auto loop does not pause when a clean review proof block contains a bare dotted host:port', async () => {
+  // Code-review medium #2: the previous fix accepted any `name.ext:N` prefix
+  // where `ext` started with a letter and was 1-8 chars long. That still
+  // matched real-world hostnames such as `api.example.com:443`,
+  // `service.local:8080`, `redis-cluster.internal:6379`, or
+  // `db.staging.example.org:5432`, so any clean proof block citing one of
+  // those would still produce a deterministic unknown finding and trip the
+  // repeated-review pause that this whole regression series is fixing.
+  const cwd = join(stateDir, 'auto-loop-review-host-port-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const cleanReviewText = [
+    'No issues found.',
+    '',
+    'Checked scope:',
+    '- test/v3-converter-regression/fixture-graph.ts',
+    '',
+    'Fresh verification evidence:',
+    '- API smoke check reached api.example.com:443',
+    '- Redis cluster reachable at redis-cluster.internal:6379',
+  ].join('\n');
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const notices: Array<[string, string | undefined]> = [];
+  const storedFingerprint = reviewFingerprintForTest([
+    '- api smoke check reached api.example.com:443',
+    '- redis cluster reachable at redis-cluster.internal:6379',
+  ]);
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-review-host-port',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewFixKey: `${planPath}\u001f1\u001fCurrent`,
+      autoReviewFixCount: 1,
+      autoReviewFindingFingerprint: storedFingerprint,
+      activePlan: planPath,
+    },
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: cleanReviewText }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  const pauseNotice = notices.find(([message]) =>
+    /same review finding repeated/.test(message),
+  );
+  assert.equal(
+    pauseNotice,
+    undefined,
+    `auto loop must not pause on a clean review whose proof block mentions bare host:port tokens; saw notices: ${JSON.stringify(notices)}`,
+  );
+  assert.notEqual(ctx.state.autoPausedReason, 'repeated-review-finding');
+  // sentMessages may legitimately include a /addy-fix-all dispatch via the
+  // cleanReviewNeedsPlanSync path because the plan still has `[ ] Reviewed`;
+  // we only assert the absence of the pause, not zero dispatches.
+});
+
 test('auto loop does not treat different warning bullets as repeated findings', async () => {
   const cwd = join(stateDir, 'auto-loop-review-different-warning-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
