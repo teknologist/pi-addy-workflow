@@ -110,15 +110,9 @@ const FRESH_CONTEXT_STEP_COMMANDS = new Set([
 ]);
 const consumedAutoFreshKeys = new Set<string>();
 const scheduledAutoFreshKeys = new Set<string>();
-const scheduledAutoFreshCompactionKeys = new Set<string>();
+const scheduledAutoFreshFallbackKeys = new Set<string>();
 const scheduledIdleUserMessageKeys = new Set<string>();
 const AUTO_SAME_PHASE_MAX_RETRIES = 12;
-
-type CompactOptions = {
-  customInstructions?: string;
-  onComplete?: (result: unknown) => void;
-  onError?: (error: Error) => void;
-};
 
 function isWorkflowPhase(value: string | undefined): value is WorkflowPhase {
   return WORKFLOW_PHASES.includes(value as WorkflowPhase);
@@ -1480,26 +1474,6 @@ function schedulePendingFreshPromptDelivery(
   setTimeout(() => attempt(0), 0);
 }
 
-function compactFallbackInstructions(
-  state: ReturnType<typeof getContextWorkflowState> & {
-    autoFreshPrompt: string;
-    autoFreshReason: FreshContextReason;
-  },
-): string {
-  return [
-    'Compact this session for an Addy auto fresh-context fallback.',
-    '',
-    'Preserve only durable context needed to continue the workflow safely:',
-    `- pending invocation: ${state.autoFreshPrompt}`,
-    `- fresh-context reason: ${state.autoFreshReason}`,
-    state.activePlan ? `- active plan: ${state.activePlan}` : undefined,
-    state.currentTask ? `- current task: ${state.currentTask}` : undefined,
-    'Drop stale chat, repetitive tool logs, and prior-step details that are not needed for the pending invocation.',
-  ]
-    .filter(Boolean)
-    .join('\n');
-}
-
 function currentSessionFallbackOptions(
   ctx: unknown,
   options: DispatchOptions,
@@ -1589,8 +1563,6 @@ function schedulePendingFreshPromptAfterCompaction(
   },
   options: DispatchOptions,
 ): boolean {
-  const compact = (ctx as { compact?: (options?: CompactOptions) => void })
-    .compact;
   const key = pendingFreshContinuationKey(state);
   const stateWithKey = { ...state, autoFreshDeliveryKey: key };
   setContextWorkflowState(
@@ -1599,94 +1571,21 @@ function schedulePendingFreshPromptAfterCompaction(
     options.appendEntry === false ? undefined : appendWorkflowEntry(pi),
   );
 
-  if (typeof compact !== 'function') {
-    notifyWorkflowWarning(
-      ctx,
-      'Addy auto could not start a fresh session and Pi compaction is unavailable; continuing in the current session.',
-    );
-    void deliverPendingFreshPromptInCurrentSession(
-      pi,
-      ctx,
-      stateWithKey,
-      options,
-    );
-    return true;
-  }
-  if (scheduledAutoFreshCompactionKeys.has(key)) return true;
-  scheduledAutoFreshCompactionKeys.add(key);
+  if (scheduledAutoFreshFallbackKeys.has(key)) return true;
+  scheduledAutoFreshFallbackKeys.add(key);
   notifyWorkflowWarning(
     ctx,
-    'Addy auto could not start a fresh session; compacting the current session before continuing instead of using dirty context.',
+    'Addy auto could not start a fresh session; continuing in the current session.',
   );
-
-  try {
-    compact.call(ctx, {
-      customInstructions: compactFallbackInstructions(stateWithKey),
-      onComplete: () => {
-        void (async () => {
-          try {
-            await deliverLatestPendingFreshPromptInCurrentSession(
-              pi,
-              ctx,
-              options,
-              key,
-            );
-          } catch (error) {
-            const message =
-              error instanceof Error ? error.message : String(error);
-            notifyWorkflowWarning(
-              ctx,
-              `Addy auto compacted but could not deliver the pending fresh continuation: ${message}`,
-            );
-          } finally {
-            scheduledAutoFreshCompactionKeys.delete(key);
-          }
-        })();
-      },
-      onError: (error) => {
-        scheduledAutoFreshCompactionKeys.delete(key);
-        notifyWorkflowWarning(
-          ctx,
-          `Addy auto could not compact the current session for fallback: ${error.message}. Continuing in the current session.`,
-        );
-        void deliverLatestPendingFreshPromptInCurrentSession(
-          pi,
-          ctx,
-          options,
-        ).catch((deliveryError) => {
-          const message =
-            deliveryError instanceof Error
-              ? deliveryError.message
-              : String(deliveryError);
-          notifyWorkflowWarning(
-            ctx,
-            `Addy auto could not continue after compaction error: ${message}`,
-          );
-        });
-      },
-    });
-  } catch (error) {
-    scheduledAutoFreshCompactionKeys.delete(key);
-    const message = error instanceof Error ? error.message : String(error);
-    notifyWorkflowWarning(
-      ctx,
-      `Addy auto could not compact the current session for fallback: ${message}. Continuing in the current session.`,
-    );
-    void deliverLatestPendingFreshPromptInCurrentSession(
-      pi,
-      ctx,
-      options,
-    ).catch((deliveryError) => {
-      const deliveryMessage =
-        deliveryError instanceof Error
-          ? deliveryError.message
-          : String(deliveryError);
+  void deliverLatestPendingFreshPromptInCurrentSession(pi, ctx, options, key)
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
       notifyWorkflowWarning(
         ctx,
-        `Addy auto could not continue after compaction error: ${deliveryMessage}`,
+        `Addy auto could not continue after fresh-session fallback: ${message}`,
       );
-    });
-  }
+    })
+    .finally(() => scheduledAutoFreshFallbackKeys.delete(key));
   return true;
 }
 
@@ -1910,7 +1809,7 @@ async function runFreshContextContinuation(
   });
   if (result?.cancelled) {
     notify(
-      'Addy auto fresh continuation was cancelled; compacting current session before fallback instead of using dirty context.',
+      'Addy auto fresh continuation was cancelled; continuing in the current session.',
       'warning',
     );
     const latestState = getContextWorkflowState(ctx as never);

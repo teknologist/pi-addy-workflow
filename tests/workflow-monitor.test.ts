@@ -3540,7 +3540,7 @@ test('auto mode starts finish in current session even when fresh before every st
   }
 });
 
-test('fresh context fallback compacts before dispatching pending review-fix prompt when newSession is unavailable', async () => {
+test('fresh context fallback dispatches pending review-fix prompt when newSession is unavailable', async () => {
   const previousEnv = process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP;
   process.env.PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP = 'true';
   try {
@@ -3583,9 +3583,9 @@ test('fresh context fallback compacts before dispatching pending review-fix prom
       },
       ui: { setWidget() {}, notify() {} },
       isIdle: () => true,
-      compact: (options: { onComplete?: () => void }) => {
+      compact: (_options: { onComplete?: () => void }) => {
         compactCalls += 1;
-        options.onComplete?.();
+        throw new Error('fallback must not compact');
       },
     };
 
@@ -3608,7 +3608,7 @@ test('fresh context fallback compacts before dispatching pending review-fix prom
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    assert.equal(compactCalls, 1);
+    assert.equal(compactCalls, 0);
     assertSentWorkflowPrompt(
       sentMessages.at(-1),
       `/addy-fix-all ${planPath}`,
@@ -5339,7 +5339,7 @@ test('missing fresh-session API falls back with default delivery', async () => {
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
-test('fresh-session compaction fallback continues when compact throws', async () => {
+test('fresh-session fallback ignores compact API and continues in current session', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const sent: Array<{
@@ -5369,7 +5369,7 @@ test('fresh-session compaction fallback continues when compact throws', async ()
       autoFreshDeliveryKey: 'compact-throws-key',
     },
     compact: () => {
-      throw new Error('compact failed');
+      throw new Error('compact must not be called');
     },
     sendUserMessage: (
       message: string,
@@ -5388,7 +5388,11 @@ test('fresh-session compaction fallback continues when compact throws', async ()
     ?.handler('--fresh before-review', ctx);
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.ok(notices.some(([message]) => /compact failed/.test(message)));
+  assert.ok(
+    notices.some(([message]) =>
+      /continuing in the current session/.test(message),
+    ),
+  );
   assertSentWorkflowPrompt(
     sent[0].message,
     '/addy-review docs/plans/current.md',
@@ -5401,7 +5405,7 @@ test('fresh-session compaction fallback continues when compact throws', async ()
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
-test('fresh-session compaction fallback continues when compact reports onError', async () => {
+test('fresh-session fallback does not wait for compact completion', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
   const sent: Array<{
@@ -5430,8 +5434,8 @@ test('fresh-session compaction fallback continues when compact reports onError',
       autoFreshReason: 'before-review',
       autoFreshDeliveryKey: 'compact-on-error-key',
     },
-    compact: (options: { onError?: (error: Error) => void }) => {
-      options.onError?.(new Error('compact rejected'));
+    compact: (_options: { onError?: (error: Error) => void }) => {
+      throw new Error('compact must not be called');
     },
     sendUserMessage: (
       message: string,
@@ -5450,7 +5454,11 @@ test('fresh-session compaction fallback continues when compact reports onError',
     ?.handler('--fresh before-review', ctx);
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  assert.ok(notices.some(([message]) => /compact rejected/.test(message)));
+  assert.ok(
+    notices.some(([message]) =>
+      /continuing in the current session/.test(message),
+    ),
+  );
   assertSentWorkflowPrompt(
     sent[0].message,
     '/addy-review docs/plans/current.md',
