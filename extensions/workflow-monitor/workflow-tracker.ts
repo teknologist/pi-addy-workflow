@@ -1175,6 +1175,12 @@ export function promptArtifactForPhase(
   return undefined;
 }
 
+function shouldRenderTaskFooter(state: WorkflowState): boolean {
+  return Boolean(
+    state.current && phaseIndex(state.current) > phaseIndex('plan'),
+  );
+}
+
 export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   return (
     _tui?: unknown,
@@ -1220,9 +1226,11 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
         baseCwd,
         styleLabel,
       );
-      const taskLine = currentTask
-        ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
-        : workflowTaskFooterLine(state.activePlan, baseCwd, theme, state);
+      const taskLine = shouldRenderTaskFooter(state)
+        ? currentTask
+          ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
+          : workflowTaskFooterLine(state.activePlan, baseCwd, theme, state)
+        : undefined;
       const lines = taskLine ? [line, taskLine] : [line];
       return width
         ? lines.map((value) =>

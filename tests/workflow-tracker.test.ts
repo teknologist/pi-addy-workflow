@@ -571,6 +571,32 @@ test('workflow widget renders spec or plan name footer', () => {
   ]);
 });
 
+test('workflow widget hides task progress while plan phase is active', () => {
+  const specPath = 'docs/specs/2026-05-11-better-workflow.md';
+  const planPath = 'docs/plans/2026-05-11-better-workflow.md';
+  const state = {
+    ...createInitialWorkflowState(),
+    current: 'plan' as const,
+    phases: {
+      ...createInitialWorkflowState().phases,
+      define: 'complete' as const,
+      plan: 'active' as const,
+    },
+    activeSpec: specPath,
+    activePlan: planPath,
+    currentTask: 'Add runtime modes',
+    nextTask: 'Document producer contract',
+    currentTaskIndex: 1,
+    taskCount: 3,
+    currentSliceIndex: 5,
+    sliceCount: 5,
+  };
+
+  assert.deepEqual(renderWorkflowWidget(state)().render(), [
+    `Addy Workflow: ✓define → [plan] => { build → simplify → verify → review → finish } | 2026-05-11-better-workflow.md`,
+  ]);
+});
+
 test('workflow widget renders current and next task from active plan', () => {
   const planPath = join(taskFooterDir, 'docs', 'plans', 'task-footer.md');
   mkdirSync(join(taskFooterDir, 'docs', 'plans'), { recursive: true });
