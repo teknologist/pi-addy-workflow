@@ -8,7 +8,7 @@ description: Governs the Addy workflow package lifecycle. Use at session start o
 Workflow commands:
 
 1. DEFINE with `/addy-define`: clarify goal, users, constraints, acceptance criteria. Optional; user may skip.
-2. PLAN with `/addy-plan`: create small vertical tasks and verification steps. Optional; user may skip or reuse an existing plan.
+2. PLAN with `/addy-plan`: create small vertical tasks and verification steps. Plans should be `/addy-auto` ready: each task must be autonomous, independently verifiable, and include proof requirements plus stop conditions. Optional; user may skip or reuse an existing plan.
 3. BUILD with `/addy-build`: implement incrementally, test first when useful, no auto-commit.
 4. SIMPLIFY with `/addy-code-simplify`: simplify code without behavior changes. Optional; user may skip.
 5. VERIFY with `/addy-verify`: prove behavior with tests or reproduction.

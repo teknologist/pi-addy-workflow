@@ -326,6 +326,29 @@ test('plan and build define lifecycle task completion semantics', async () => {
   assert.match(buildPrompt, /Legacy checklist-only plans remain supported/i);
 });
 
+test('plan guidance keeps auto-ready metadata durable and non-task audits', async () => {
+  const planPrompt = await readFile(join('prompts', 'addy-plan.md'), 'utf8');
+  const planningSkill = await readFile(
+    join('skills', 'planning-and-task-breakdown', 'SKILL.md'),
+    'utf8',
+  );
+
+  for (const content of [planPrompt, planningSkill]) {
+    assert.match(content, /persist (its )?findings/i);
+    assert.match(content, /linked durable artifact/i);
+    assert.match(
+      content,
+      /dependent tasks (?:to )?reference|make dependent tasks reference/i,
+    );
+    assert.match(
+      content,
+      /non-task `## Completion audit`|non-task completion audit/i,
+    );
+    assert.match(content, /not .*lifecycle task/i);
+    assert.doesNotMatch(content, /## Task N: Audit completed implementation/i);
+  }
+});
+
 test('ambiguous spec and plan selection uses structured questions', async () => {
   const planPrompt = await readFile(join('prompts', 'addy-plan.md'), 'utf8');
   const buildPrompt = await readFile(join('prompts', 'addy-build.md'), 'utf8');
