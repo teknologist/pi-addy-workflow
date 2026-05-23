@@ -16,28 +16,127 @@
   - type BootstrapToolAvailability
   - type BootstrapOptions
   - _...1 more_
+- `extensions/workflow-monitor/auto-action-keys.ts`
+  - function idleUserMessageKey: (ctx, message) => string
+  - function autoWorkflowActionKey: (prompt, details) => string
+  - function autoWorkflowActionKeyForAction: (state, action) => string | undefined
+  - function autoWorkflowActionKeyForPromptState: (prompt, state, target) => string
+  - function currentAutoWorkflowActionKey: (state, target?) => string | undefined
+- `extensions/workflow-monitor/auto-agent-end.ts` — function finishTextReportsComplete: (text) => boolean, function createAutoAgentEnd: (deps) => void
+- `extensions/workflow-monitor/auto-control.ts`
+  - function hasLiveAutoControl: (state) => boolean
+  - function explicitlyStoppedAuto: (state) => boolean
+  - function withProjectAutoControl: (state, projectState) => WorkflowState
+  - function sanitizedProjectFallbackAutoControl: (state) => WorkflowState
+  - function autoFreshContinuationKey: (prompt, reason, state) => string
+  - function validPendingFreshContinuation: (state) => state is WorkflowState &
+  - _...11 more_
+- `extensions/workflow-monitor/command-dispatch.ts`
+  - function stateAfterAutoPrompt: (prompt, state, updates, statsTarget?) => WorkflowState
+  - function freshContextReasonForPrompt: (prompt, state, options, freshContext) => AutoFreshReason | undefined
+  - function planAutoPromptDispatch: (input) => AutoPromptDispatchPlan
+  - function planPendingFreshDispatch: (input) => AutoPromptDispatchPlan
+  - function planManualStepDispatch: (input) => void
+  - type CommandDispatchOptions
+  - _...2 more_
+- `extensions/workflow-monitor/command-router.ts`
+  - function workflowTextFromInput: (text) => string
+  - function commandFromPrompt: (prompt) => string | undefined
+  - function commandNameFromText: (text) => string | undefined
+  - function phaseForWorkflowCommand: (command) => WorkflowPhase | undefined
+  - function phaseFromWorkflowPrompt: (prompt) => WorkflowPhase | undefined
+  - function commandForWorkflowPhase: (phase) => string
+  - _...6 more_
 - `extensions/workflow-monitor/config.ts`
   - function ensureGlobalAddyWorkflowConfig: (ctx, home) => void
   - function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig
   - type AddyWorkflowConfig
   - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
+- `extensions/workflow-monitor/fresh-continuation.ts`
+  - function createFreshContinuationCoordinator: (deps) => void
+  - function defaultFreshContinuationDeliveryOptions: () => UserMessageDeliveryOptions
+  - type FreshContinuationDispatchOptions
+  - type FreshContinuationCoordinator
+- `extensions/workflow-monitor/plan-task-lifecycle.ts`
+  - function planTasksFromMarkdown: (markdown) => PlanTask[]
+  - function workflowTaskCommitKey: (planPath, taskIndex, taskTitle, taskId?) => string
+  - function taskMatchesPlanTask: (task, index, candidate) => boolean
+  - function taskIsClosed: (committedTasks, planPath, task, index) => boolean
+  - function planTaskFrontier: ({...}, planPath, tasks, effectiveMissingStatuses, }, index) => void
+  - type PlanTaskStatus
+  - _...2 more_
+- `extensions/workflow-monitor/prompt-template.ts`
+  - function expandPackagedPromptTemplate: (prompt, deps) => string
+  - function parseTemplateArgs: (argsString) => string[]
+  - function stripFrontmatter: (markdown) => string
+  - function substituteTemplateArgs: (content, args) => string
+  - type PromptTemplateDeps
+- `extensions/workflow-monitor/repository-scope.ts` — function repositoryScopesForPlan: (planPath, baseCwd?) => string[], function repositoryScopeForPlan: (planPath, baseCwd?) => string | undefined
+- `extensions/workflow-monitor/review-control.ts`
+  - function clearReviewControlUpdates: () => Partial<WorkflowState>
+  - function clearReviewControl: (state) => WorkflowState
+  - function reviewFixKey: (state) => string
+  - function legacyReviewFixKey: (state) => string
+  - const REVIEW_CONTROL_FIELDS
+- `extensions/workflow-monitor/review-findings.ts`
+  - function reviewTextHasActionableFindings: (text) => boolean
+  - function reviewFindingsFingerprint: (text) => string
+  - function reviewIssueStatsFromText: (text) => WorkflowIssueStats
+  - function reviewIssueFindings: (text) => ReviewIssueFinding[]
+  - type ReviewIssueSeverity
+  - type ReviewIssueFinding
+- `extensions/workflow-monitor/task-commit-coordinator.ts`
+  - function agentTextReportsCommitComplete: (text) => boolean
+  - function commitShaFromAgentText: (text) => string
+  - function autoTaskCommitPrompt: (state, taskTitle?, baseCwd?) => string
+  - function withPlanTaskId: (target, baseCwd?) => WorkflowStatsTarget | undefined
+  - function actionCommitTarget: (state, action) => WorkflowStatsTarget | undefined
+  - function createTaskCommitCoordinator: (deps) => void
 - `extensions/workflow-monitor/warnings.ts` — function workflowWarningText: (state) => string | undefined
 - `extensions/workflow-monitor/workflow-handler.ts`
-  - function getContextWorkflowState: (ctx) => WorkflowState
-  - function setContextWorkflowState: (ctx, state, appendEntry?) => void
-  - function recordWorkflowTaskTurn: (state, target) => WorkflowState
-  - function recordWorkflowVerifyRun: (state, target) => WorkflowState
-  - function recordWorkflowReviewRun: (state, target) => WorkflowState
-  - function recordWorkflowReviewIssues: (state, issues) => WorkflowState
-  - _...7 more_
-- `extensions/workflow-monitor/workflow-tracker.ts`
-  - function createEmptyWorkflowStats: () => WorkflowStats
+  - function summarizeWorkflowTasks: (ctx, state) => Promise<WorkflowState>
+  - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
+  - function initializeWorkflowWidget: (ctx) => WorkflowState
+  - function resetWorkflow: (ctx, appendEntry?) => WorkflowState
+  - function openNextWorkflowPrompt: (ctx, phase, artifact?) => string
+- `extensions/workflow-monitor/workflow-plan-path.ts` — function resolveWorkflowPlanPath: (planPath, baseCwd?) => string, function resolveWorkflowPlanPathRelativeTo: (planPath, relativeTo, baseCwd?) => string
+- `extensions/workflow-monitor/workflow-runtime.ts`
+  - function createWorkflowRuntime: (pi, ctx) => WorkflowRuntime
+  - type UserMessageDeliveryOptions
+  - type WorkflowRuntime
+  - type WorkflowFreshSessionResult
+  - type WorkflowTimerRegistry
+- `extensions/workflow-monitor/workflow-state-codec.ts`
+  - function normalizeWorkflowState: (state) => WorkflowState
   - function serializeWorkflowState: (state) => string
   - function parseWorkflowState: (value) => WorkflowState
+  - function parsePersistedWorkflowState: (value) => WorkflowState | undefined
+  - function workflowStateFromEntry: (entry) => WorkflowState | undefined
+  - type WorkflowStateEntry
+  - _...1 more_
+- `extensions/workflow-monitor/workflow-state-store.ts`
+  - function getContextWorkflowState: (ctx) => WorkflowState
+  - function setContextWorkflowState: (ctx, state, appendEntry?) => void
+  - type WorkflowContext
+  - type AppendEntry
+  - const workflowStateStore
+- `extensions/workflow-monitor/workflow-stats.ts`
+  - function emptyIssueStats: () => WorkflowIssueStats
+  - function addIssueStats: (left, right) => WorkflowIssueStats
+  - function createEmptyWorkflowStats: () => WorkflowStats
+  - function normalizeWorkflowStats: (value) => WorkflowStats
+  - function recordWorkflowTaskTurn: (state, target) => WorkflowState
+  - function recordWorkflowVerifyRun: (state, target) => WorkflowState
+  - _...7 more_
+- `extensions/workflow-monitor/workflow-timer-loop.ts` — function runWhenIdle: (options) => boolean, type RunWhenIdleOptions
+- `extensions/workflow-monitor/workflow-tracker.ts`
   - function renderWorkflowStrip: (state, theme?, text) => void
   - function workflowArtifactForFooter: (state) => string | undefined
   - function workflowArtifactName: (path) => string
-  - _...17 more_
+  - function allTasksInCurrentPlanAreClosed: (state, baseCwd?) => boolean
+  - function nextUnfinishedSlicePlanPath: (state, baseCwd?) => string | undefined
+  - function unfinishedLifecycleStepsFromMarkdown: (markdown) => Array<
+  - _...9 more_
 - `extensions/workflow-monitor/workflow-transitions.ts`
   - function createInitialWorkflowState: () => WorkflowState
   - function phaseIndex: (phase) => number

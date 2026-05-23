@@ -35,6 +35,8 @@ Then read the relevant codebase sections and:
    ````md
    ## Task N: Short imperative task name
 
+   <!-- addy-task-id: task-<short-random> -->
+
    - [ ] Implemented
    - [ ] Verified
    - [ ] Reviewed
@@ -85,6 +87,8 @@ Then read the relevant codebase sections and:
    - `[ ] Implemented`
    - `[ ] Verified`
    - `[ ] Reviewed`
+
+   Generate a unique stable task id for every task using `task-<short-random>` (for example, `task-k7p4x9`). Keep the id in the `<!-- addy-task-id: ... -->` HTML comment directly under the task heading so commit evidence survives task title edits.
 
 7. Add checkpoints between phases
 8. End every plan or final split-plan slice with a non-task `## Completion audit` section, not a lifecycle task and not a heading with `Implemented`/`Verified`/`Reviewed` checkboxes. The audit checklist must verify all preceding implementation tasks have implementation, verification, and review evidence; all required commands pass; no unrelated files changed; and lifecycle checkboxes reflect real completed phases only.

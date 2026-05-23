@@ -6,18 +6,20 @@
 
 ## Scale
 
-7 library files · 6 environment variables
+25 library files · 6 environment variables
+
+**Libraries:** 25 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `extensions/workflow-monitor.ts` — imported by **2** files
-- `tests/helpers.ts` — imported by **2** files
-- `extensions/bootstrap/core.ts` — imported by **1** files
-- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **1** files
-- `extensions/workflow-monitor/warnings.ts` — imported by **1** files
-- `extensions/bootstrap.ts` — imported by **1** files
+- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **13** files
+- `extensions/workflow-monitor/command-router.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-stats.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-state-store.ts` — imported by **4** files
+- `extensions/workflow-monitor/config.ts` — imported by **3** files
+- `extensions/workflow-monitor/workflow-tracker.ts` — imported by **3** files
 
 ## Required Environment Variables
 
@@ -25,7 +27,7 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` — `tests/workflow-monitor.test.ts`
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` — `tests/workflow-monitor.test.ts`
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` — `tests/workflow-monitor.test.ts`
-- `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-handler.ts`
+- `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-state-store.ts`
 - `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor.ts`
 
 ---

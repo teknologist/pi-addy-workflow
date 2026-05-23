@@ -13,14 +13,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import addyWorkflowMonitor from '../extensions/workflow-monitor.ts';
 import { loadAddyWorkflowConfig } from '../extensions/workflow-monitor/config.ts';
+import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
 import {
-  getContextWorkflowState,
   handleWorkflowEvent,
   openNextWorkflowPrompt,
-  setContextWorkflowState,
 } from '../extensions/workflow-monitor/workflow-handler.ts';
+import { WORKFLOW_STATE_ENTRY_TYPE } from '../extensions/workflow-monitor/workflow-state-codec.ts';
 import {
-  WORKFLOW_STATE_ENTRY_TYPE,
+  getContextWorkflowState,
+  setContextWorkflowState,
+} from '../extensions/workflow-monitor/workflow-state-store.ts';
+import {
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
   workflowTaskCommitKey,
@@ -504,6 +507,212 @@ test('auto loop waits for idle before sending verify as a new turn', async () =>
     streamingBehavior: 'followUp',
   });
   assert.equal(ctx.state.autoPendingAction, undefined);
+});
+
+test('idle auto prompt reschedules when delivery preflight becomes busy', async () => {
+  const cwd = join(stateDir, 'auto-loop-verify-idle-race-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const idleSequence = [false, true, false, true, true];
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-verify-idle-race',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idleSequence.shift() ?? true,
+  };
+
+  await events.get('agent_end')?.({}, ctx);
+
+  assert.equal(sentMessages.length, 0);
+  assert.equal(ctx.state.autoPendingAction?.prompt, `/addy-verify ${planPath}`);
+
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
+  assert.equal(ctx.state.autoPendingAction, undefined);
+});
+
+test('duplicate idle auto prompt scheduling does not rewrite retry state', async () => {
+  const cwd = join(stateDir, 'auto-loop-duplicate-idle-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const retryStateEntries: Array<[string, unknown]> = [];
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-duplicate-idle',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+    sessionManager: {
+      appendCustomEntry: (type: string, data: unknown) =>
+        retryStateEntries.push([type, data]),
+    },
+  };
+
+  await events.get('agent_end')?.({}, ctx);
+  const pendingEntryCountAfterFirstSchedule = retryStateEntries.filter(
+    ([, data]) =>
+      (data as { autoPendingAction?: { prompt?: string } }).autoPendingAction
+        ?.prompt === `/addy-verify ${planPath}`,
+  ).length;
+
+  await events.get('agent_end')?.({}, ctx);
+
+  assert.equal(
+    retryStateEntries.filter(
+      ([, data]) =>
+        (data as { autoPendingAction?: { prompt?: string } }).autoPendingAction
+          ?.prompt === `/addy-verify ${planPath}`,
+    ).length,
+    pendingEntryCountAfterFirstSchedule,
+  );
+
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  assert.equal(sentMessages.length, 1);
+});
+
+test('idle auto prompt key survives task title edit by stable task id', async () => {
+  const cwd = join(stateDir, 'auto-loop-rename-idle-project');
+  const planPath = join('docs', 'plans', 'auto-loop-rename.md');
+  const taskId = 'task-rename-idle';
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Current',
+      `<!-- addy-task-id: ${taskId} -->`,
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  let idle = false;
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-rename-idle',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+        simplify: 'pending',
+        verify: 'pending',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'build',
+      currentTask: 'Current',
+      currentTaskId: taskId,
+      currentTaskIndex: 1,
+      taskCount: 1,
+      autoMode: true,
+      autoLastPrompt: `/addy-build ${planPath}`,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {}, notify() {} },
+    isIdle: () => idle,
+  };
+
+  await events.get('agent_end')?.({}, ctx);
+  const pendingKey = ctx.state.autoPendingAction?.key;
+  assert.equal(ctx.state.autoPendingAction?.taskId, taskId);
+
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Renamed',
+      `<!-- addy-task-id: ${taskId} -->`,
+      '- [x] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+  setContextWorkflowState(ctx, ctx.state);
+
+  assert.equal(ctx.state.currentTask, 'Renamed');
+  assert.equal(ctx.state.autoPendingAction?.key, pendingKey);
+
+  idle = true;
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-verify ${planPath}`,
+    'Addy Verify',
+  );
 });
 
 test('auto loop waits for idle before sending review as a new turn', async () => {
@@ -1349,10 +1558,12 @@ test('auto loop reviews again after post-fix verify even when plan is already re
     join(cwd, planPath),
     [
       '## Task 1: Current',
+      '<!-- addy-task-id: task-current -->',
       '- [x] Implemented',
       '- [x] Verified',
       '- [x] Reviewed',
       '## Task 2: Next',
+      '<!-- addy-task-id: task-next -->',
       '- [ ] Implemented',
       '- [ ] Verified',
       '- [ ] Reviewed',
@@ -1504,10 +1715,12 @@ test('auto loop waits for idle before sending task commit as a new turn', async 
     join(cwd, planPath),
     [
       '## Task 1: Current',
+      '<!-- addy-task-id: task-current -->',
       '- [x] Implemented',
       '- [x] Verified',
       '- [x] Reviewed',
       '## Task 2: Next',
+      '<!-- addy-task-id: task-next -->',
       '- [ ] Implemented',
       '- [ ] Verified',
       '- [ ] Reviewed',
@@ -2251,6 +2464,98 @@ test('auto loop commits reviewed task even when refreshed state already points a
   assert.doesNotMatch(sentMessages[0], /Completed task: Next/);
 });
 
+test('auto loop commits renamed reviewed task by stable task id', async () => {
+  const cwd = join(stateDir, 'auto-loop-renamed-reviewed-task-project');
+  const planPath = join('docs', 'plans', 'auto-loop.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Renamed',
+      '<!-- addy-task-id: task-current -->',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '## Task 2: Next',
+      '<!-- addy-task-id: task-next -->',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  const { pi, events, sentMessages } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const ctx: any = {
+    cwd,
+    id: 'auto-loop-renamed-reviewed-task',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'active',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      currentTask: 'Next',
+      currentTaskId: 'task-next',
+      currentTaskIndex: 2,
+      taskCount: 2,
+      autoMode: true,
+      autoLastPrompt: `/addy-review ${planPath}`,
+      autoReviewTask: 'Original',
+      autoReviewTaskId: 'task-current',
+      autoReviewTaskIndex: 1,
+      activePlan: planPath,
+    },
+    ui: { setWidget() {} },
+    isIdle: () => true,
+  };
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'No issues found. Marked Reviewed.' },
+          ],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  assert.equal(sentMessages.length, 1);
+  assert.match(sentMessages[0], /^# Addy Auto Commit/);
+  assert.match(sentMessages[0], /Completed task: Renamed/);
+  assert.doesNotMatch(sentMessages[0], /Completed task: Original/);
+
+  await events.get('agent_end')?.(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'COMMIT: abc1234' }],
+        },
+      ],
+    },
+    ctx,
+  );
+
+  const committed =
+    ctx.state.committedTasks?.[
+      workflowTaskCommitKey(planPath, 1, 'Renamed', 'task-current')
+    ];
+  assert.equal(committed?.commitSha, 'abc1234');
+  assert.equal(committed?.taskTitle, 'Renamed');
+  assert.equal(committed?.taskId, 'task-current');
+});
+
 test('auto loop preserves project auto state over stale non-auto branch state after review', async () => {
   const cwd = join(stateDir, 'auto-loop-stale-non-auto-review-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
@@ -2819,10 +3124,12 @@ test('agent_end auto loop continues next task in current session after task comm
     join(cwd, planPath),
     [
       '## Task 1: Current',
+      '<!-- addy-task-id: task-current -->',
       '- [x] Implemented',
       '- [x] Verified',
       '- [x] Reviewed',
       '## Task 2: Next',
+      '<!-- addy-task-id: task-next -->',
       '- [ ] Implemented',
       '- [ ] Verified',
       '- [ ] Reviewed',
@@ -2856,6 +3163,30 @@ test('agent_end auto loop continues next task in current session after task comm
         'Invocation: `__addy-auto-task-commit__`',
       ].join('\n'),
       activePlan: planPath,
+      currentTask: 'Current',
+      currentTaskIndex: 1,
+      stats: {
+        active: {
+          tasks: {
+            [`${planPath}\u001f\u001f1\u001fCurrent`]: {
+              plan: planPath,
+              taskIndex: 1,
+              taskTitle: 'Current',
+              turns: 3,
+              verifyRuns: 1,
+              reviewRuns: 1,
+              issues: {
+                critical: 0,
+                important: 0,
+                suggestion: 0,
+                unknown: 0,
+                total: 0,
+              },
+            },
+          },
+        },
+        history: [],
+      },
     },
     sessionManager: { getSessionFile: () => 'old-session.jsonl' },
     newSession: async (options: {
@@ -2898,10 +3229,13 @@ test('agent_end auto loop continues next task in current session after task comm
     'Addy Build',
   );
   const committed =
-    ctx.state.committedTasks?.[workflowTaskCommitKey(planPath, 1, 'Current')];
+    ctx.state.committedTasks?.[
+      workflowTaskCommitKey(planPath, 1, 'Current', 'task-current')
+    ];
   assert.equal(committed?.commitSha, 'abc1234');
+  assert.equal(committed?.taskId, 'task-current');
   assert.equal(ctx.state.autoFreshPrompt, undefined);
-  const nextStatsKey = `${planPath}2Next`;
+  const nextStatsKey = `${planPath}\u001ftask-id\u001ftask-next`;
   assert.equal(ctx.state.stats.active.tasks[nextStatsKey].turns, 1);
   assert.equal(ctx.state.stats.active.tasks[`${planPath}1Current`], undefined);
 });
@@ -6385,6 +6719,69 @@ test('missing fresh-session API falls back with default delivery', async () => {
   assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
 });
 
+test('fresh-session support disappearing before start falls back with default delivery', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const sent: Array<{
+    message: string;
+    options?: { deliverAs?: string; streamingBehavior?: string };
+  }> = [];
+  const notices: Array<[string, string | undefined]> = [];
+  let newSessionReads = 0;
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-continue-new-session-race-project'),
+    id: 'auto-continue-new-session-race',
+    state: {
+      phases: {
+        define: 'complete',
+        plan: 'complete',
+        build: 'complete',
+        simplify: 'pending',
+        verify: 'complete',
+        review: 'pending',
+        finish: 'pending',
+      },
+      warnings: [],
+      current: 'review',
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+      autoFreshPrompt: '/addy-review docs/plans/current.md',
+      autoFreshReason: 'before-review',
+      autoFreshDeliveryKey: 'new-session-race-key',
+    },
+    get newSession() {
+      newSessionReads += 1;
+      return newSessionReads === 1 ? async () => undefined : undefined;
+    },
+    sendUserMessage: (
+      message: string,
+      options?: { deliverAs?: string; streamingBehavior?: string },
+    ) => sent.push({ message, options }),
+    ui: {
+      setWidget() {},
+      notify: (message: string, level?: string) =>
+        notices.push([message, level]),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+
+  await commands
+    .get('addy-auto-continue')
+    ?.handler('--fresh before-review', ctx);
+
+  assert.match(notices.at(-1)?.[0] ?? '', /continuing in the current session/);
+  assertSentWorkflowPrompt(
+    sent[0].message,
+    '/addy-review docs/plans/current.md',
+    'Addy Review',
+  );
+  assert.deepEqual(sent[0].options, {
+    deliverAs: 'followUp',
+    streamingBehavior: 'followUp',
+  });
+  assert.equal(getContextWorkflowState(ctx).autoFreshPrompt, undefined);
+});
+
 test('fresh-session fallback ignores compact API and continues in current session', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
@@ -8665,6 +9062,71 @@ test('workflow state round-trips from persisted append entries', () => {
 
   assert.equal(getContextWorkflowState(nextCtx).current, 'verify');
   assert.deepEqual(verify.warnings, []);
+});
+
+test('workflow state round-trips stable task ids as lifecycle evidence', () => {
+  const planPath = 'docs/plans/stable-id.md';
+  const committedKey = workflowTaskCommitKey(
+    planPath,
+    1,
+    'Original title',
+    'task-k7p4x9',
+  );
+  const taskStatsKey = `${planPath}1Original title`;
+  const state = {
+    ...createInitialWorkflowState(),
+    current: 'review' as const,
+    phases: {
+      ...createInitialWorkflowState().phases,
+      define: 'complete' as const,
+      plan: 'complete' as const,
+      build: 'complete' as const,
+      verify: 'complete' as const,
+      review: 'active' as const,
+    },
+    activePlan: planPath,
+    committedTasks: {
+      [committedKey]: {
+        plan: planPath,
+        taskId: 'task-k7p4x9',
+        taskIndex: 1,
+        taskTitle: 'Original title',
+        commitSha: 'abc1234',
+        committedAt: '2026-05-22T00:00:00.000Z',
+      },
+    },
+    stats: {
+      active: {
+        tasks: {
+          [taskStatsKey]: {
+            plan: planPath,
+            taskId: 'task-k7p4x9',
+            taskIndex: 1,
+            taskTitle: 'Original title',
+            turns: 1,
+            verifyRuns: 1,
+            reviewRuns: 1,
+            issues: {
+              critical: 0,
+              important: 0,
+              suggestion: 0,
+              unknown: 0,
+              total: 0,
+            },
+          },
+        },
+      },
+      history: [],
+    },
+  };
+  const ctx: any = {
+    sessionManager: { getBranch: () => [[WORKFLOW_STATE_ENTRY_TYPE, state]] },
+  };
+
+  const parsed = getContextWorkflowState(ctx);
+
+  assert.equal(parsed.committedTasks?.[committedKey]?.taskId, 'task-k7p4x9');
+  assert.equal(parsed.stats?.active.tasks[taskStatsKey]?.taskId, 'task-k7p4x9');
 });
 
 test('workflow state backfills committed task ledger from legacy task-commit stats', () => {

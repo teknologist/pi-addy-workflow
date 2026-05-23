@@ -14,7 +14,6 @@ import {
   nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
   nextPromptForPhase,
-  parseWorkflowState,
   planTasksFromMarkdown,
   refreshWorkflowTasksFromPlan,
   renderWorkflowStrip,
@@ -22,6 +21,7 @@ import {
   unfinishedLifecycleStepsFromMarkdown,
   workflowTaskCommitKey,
 } from '../extensions/workflow-monitor/workflow-tracker.ts';
+import { parseWorkflowState } from '../extensions/workflow-monitor/workflow-state-codec.ts';
 import {
   handleWorkflowEvent,
   openNextWorkflowPrompt,
@@ -1708,6 +1708,57 @@ test('active plan lifecycle advances after reviewed task has commit ledger entry
       prompt: `/addy-build ${planPath}`,
       plan: planPath,
       taskTitle: 'Later task',
+      taskIndex: 2,
+      missingStatuses: ['Implemented', 'Verified', 'Reviewed'],
+    },
+  );
+});
+
+test('active plan lifecycle matches commit ledger by stable task id after title edit', () => {
+  const cwd = join(taskFooterDir, 'phase-evidence-stable-task-id-project');
+  const planPath = join('docs', 'plans', 'phase-evidence-stable-task-id.md');
+  mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
+  writeFileSync(
+    join(cwd, planPath),
+    [
+      '## Task 1: Renamed by reviewer',
+      '<!-- addy-task-id: task-k7p4x9 -->',
+      '- [x] Implemented',
+      '- [x] Verified',
+      '- [x] Reviewed',
+      '',
+      '## Task 2: Later task',
+      '<!-- addy-task-id: task-n8q2z4 -->',
+      '- [ ] Implemented',
+      '- [ ] Verified',
+      '- [ ] Reviewed',
+    ].join('\n'),
+  );
+
+  assert.deepEqual(
+    nextWorkflowActionForActivePlanLifecycle(
+      {
+        ...createInitialWorkflowState(),
+        activePlan: planPath,
+        committedTasks: {
+          [workflowTaskCommitKey(planPath, 1, 'Original title', 'task-k7p4x9')]:
+            {
+              plan: planPath,
+              taskId: 'task-k7p4x9',
+              taskIndex: 1,
+              taskTitle: 'Original title',
+              commitSha: 'abc1234',
+              committedAt: '2026-05-22T00:00:00.000Z',
+            },
+        },
+      },
+      cwd,
+    ),
+    {
+      prompt: `/addy-build ${planPath}`,
+      plan: planPath,
+      taskTitle: 'Later task',
+      taskId: 'task-n8q2z4',
       taskIndex: 2,
       missingStatuses: ['Implemented', 'Verified', 'Reviewed'],
     },

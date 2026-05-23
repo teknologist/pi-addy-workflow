@@ -1,3 +1,8 @@
+import {
+  commandNameFromText,
+  phaseForWorkflowCommand,
+} from './command-router.ts';
+
 export const WORKFLOW_PHASES = [
   'define',
   'plan',
@@ -22,6 +27,7 @@ export type WorkflowIssueStats = {
 
 export type WorkflowTaskStats = {
   plan?: string;
+  taskId?: string;
   sliceIndex?: number;
   taskIndex?: number;
   taskTitle?: string;
@@ -33,6 +39,7 @@ export type WorkflowTaskStats = {
 
 export type WorkflowTaskCommitRecord = {
   plan: string;
+  taskId?: string;
   sliceIndex?: number;
   taskIndex: number;
   taskTitle: string;
@@ -63,6 +70,7 @@ export type WorkflowAutoPendingAction = {
   prompt: string;
   expandedPrompt?: string;
   plan?: string;
+  taskId?: string;
   taskIndex?: number;
   taskTitle?: string;
   sliceIndex?: number;
@@ -88,7 +96,9 @@ export type WorkflowState = {
   activePlan?: string;
   activeSuitePlan?: string;
   currentTask?: string;
+  currentTaskId?: string;
   nextTask?: string;
+  nextTaskId?: string;
   currentTaskIndex?: number;
   taskCount?: number;
   currentSliceIndex?: number;
@@ -114,6 +124,7 @@ export type WorkflowState = {
   autoReviewFindingFingerprint?: string;
   autoReviewFixNeedsReview?: boolean;
   autoReviewTask?: string;
+  autoReviewTaskId?: string;
   autoReviewTaskIndex?: number;
   reviewStatsKey?: string;
   reviewStatsAgent?: string;
@@ -277,12 +288,6 @@ function isLikelySpecArgument(value: string): boolean {
   return !/\s/.test(unquoted);
 }
 
-function commandNameFromText(text: string | undefined): string | undefined {
-  if (!text) return undefined;
-  const [command] = text.trim().split(/\s+/, 1);
-  return command?.startsWith('/addy-') ? command : undefined;
-}
-
 function artifactFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const parts = text.trim().split(/\s+/);
@@ -338,6 +343,7 @@ function applyAutoModeEvent(
       autoReviewFindingFingerprint: undefined,
       autoReviewFixNeedsReview: undefined,
       autoReviewTask: undefined,
+      autoReviewTaskId: undefined,
       autoReviewTaskIndex: undefined,
       lastTrigger,
     };
@@ -373,6 +379,7 @@ function applyAutoModeEvent(
     autoReviewFindingFingerprint: undefined,
     autoReviewFixNeedsReview: undefined,
     autoReviewTask: undefined,
+    autoReviewTaskId: undefined,
     autoReviewTaskIndex: undefined,
     activePlan:
       validAutoModeArtifact(event.artifact) ??
@@ -402,6 +409,7 @@ function exitAutoMode(state: WorkflowState): WorkflowState {
     autoReviewFindingFingerprint: undefined,
     autoReviewFixNeedsReview: undefined,
     autoReviewTask: undefined,
+    autoReviewTaskId: undefined,
     autoReviewTaskIndex: undefined,
   };
 }
@@ -479,13 +487,8 @@ export function resolveTargetPhase(
       );
     if (workflowNext) return workflowNext[1] as WorkflowPhase;
     const commandName = commandNameFromText(text);
-    if (commandName === '/addy-code-simplify') return 'simplify';
-    if (commandName === '/addy-define') return 'define';
-    if (commandName === '/addy-plan') return 'plan';
-    if (commandName === '/addy-build') return 'build';
-    if (commandName === '/addy-verify') return 'verify';
-    if (commandName === '/addy-review') return 'review';
-    if (commandName === '/addy-finish') return 'finish';
+    const commandPhase = phaseForWorkflowCommand(commandName);
+    if (commandPhase) return commandPhase;
   }
 
   if (event.source === 'file-write' && event.artifact)
@@ -609,6 +612,7 @@ export function transitionWorkflow(
   next.autoReviewFindingFingerprint = baseState.autoReviewFindingFingerprint;
   next.autoReviewFixNeedsReview = baseState.autoReviewFixNeedsReview;
   next.autoReviewTask = baseState.autoReviewTask;
+  next.autoReviewTaskId = baseState.autoReviewTaskId;
   next.autoReviewTaskIndex = baseState.autoReviewTaskIndex;
   next.reviewStatsKey = baseState.reviewStatsKey;
   next.reviewStatsAgent = baseState.reviewStatsAgent;
