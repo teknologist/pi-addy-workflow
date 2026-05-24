@@ -1,11 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { commandFromPrompt } from './command-router.ts';
 import { expandPackagedPromptTemplate } from './prompt-template.ts';
-import {
-  resolvePlanTaskTarget,
-  resolvedPlanTaskMatchesTarget,
-} from './plan-task-resolution.ts';
-import { resolveWorkflowPlanPath } from './workflow-plan-path.ts';
+import { planTaskTargetIsComplete } from './plan-task-reader.ts';
 import { statsTargetFromTask } from './workflow-stats-target.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
 import { stateForNextSlicePlan } from './workflow-plan-continuation.ts';
@@ -15,7 +10,6 @@ import {
   nextPromptForPhase,
   nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
-  planTasksFromMarkdown,
 } from './workflow-tracker.ts';
 
 export type WorkflowAction = ReturnType<
@@ -51,19 +45,7 @@ export function planTaskIsComplete(
   target: WorkflowStatsTarget,
 ): boolean {
   if (!planPath || (!target.taskTitle && !target.taskId)) return false;
-
-  try {
-    const tasks = planTasksFromMarkdown(
-      readFileSync(resolveWorkflowPlanPath(planPath, baseCwd), 'utf8'),
-    );
-    const resolved = resolvePlanTaskTarget(tasks, target);
-    return Boolean(
-      resolved?.task.complete &&
-      resolvedPlanTaskMatchesTarget(resolved, target),
-    );
-  } catch {
-    return false;
-  }
+  return planTaskTargetIsComplete(planPath, baseCwd, target);
 }
 
 export function actionTargetsCompletePlanTask(

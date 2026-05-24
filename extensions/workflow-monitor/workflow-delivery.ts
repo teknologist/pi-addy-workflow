@@ -5,7 +5,8 @@ import {
   idleUserMessageKey,
 } from './auto-action-keys.ts';
 import { pendingAutoActionForPrompt } from './auto-control.ts';
-import { commandFromPrompt, workflowTextFromInput } from './command-router.ts';
+import { addAutoRecoveryGuidance } from './auto-recovery-prompt-policy.ts';
+import { workflowTextFromInput } from './command-router.ts';
 import { expandPackagedPromptTemplate } from './prompt-template.ts';
 import {
   createWorkflowRuntime,
@@ -45,25 +46,6 @@ function defaultDeliveryOptions(): UserMessageDeliveryOptions {
 
 function idleTurnDeliveryOptions(): UserMessageDeliveryOptions {
   return { streamingBehavior: 'followUp' };
-}
-
-function appendAutoUnblockGuidance(message: string, command?: string): string {
-  const fixAllGuidance =
-    command === '/addy-fix-all'
-      ? `
-
-## Addy Auto Fix-All Handoff
-
-This is an auto-dispatched fix pass. Fix only the surfaced review issues and run narrow validation for the changed scope. Do not invoke or perform \`/addy-verify\` or \`/addy-review\` inside this \`/addy-fix-all\` turn. When this turn ends, the Addy auto monitor will dispatch \`/addy-verify\` first, then \`/addy-review\`.`
-      : '';
-
-  return `${message}
-
-## Addy Auto Mode Recovery
-
-Addy Auto Mode is active. If this step blocks, repeats, or finds missing artifacts, use the Pi \`addy-auto-unblock\` skill before pausing. That skill must apply \`debugging-and-error-recovery\` to reproduce, classify, and safely fix scoped blockers.
-
-Critical rule: do not skip, weaken, or silently reinterpret acceptance criteria, verification, or review. Only mark lifecycle checkboxes when there is real evidence from this run.${fixAllGuidance}`;
 }
 
 export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
@@ -200,7 +182,7 @@ export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
   ): void | Promise<void> {
     const expandedMessage = expandPackagedPromptTemplate(message);
     const deliveredMessage = options.autoMode
-      ? appendAutoUnblockGuidance(expandedMessage, commandFromPrompt(message))
+      ? addAutoRecoveryGuidance(expandedMessage, message)
       : expandedMessage;
     const runtime = createWorkflowRuntime(pi, ctx);
     if (

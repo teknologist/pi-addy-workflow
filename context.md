@@ -32,6 +32,10 @@ _Avoid_: key helpers, retry hashes
 The Addy Auto Mode Module that carries pending workflow prompts across fresh sessions, consumes delivered pending prompts, and falls back to current-session delivery when session replacement is unavailable or cancelled.
 _Avoid_: compaction helper, new-session glue
 
+**Fresh Continuation Delivery**:
+The Fresh Continuation Module that owns pending prompt delivery, idle retry, busy fallback, consumed-key recording, and after-compaction current-session fallback.
+_Avoid_: pending delivery helper, retry blob
+
 **Fresh Continuation State**:
 The Addy Auto Mode Module that owns pure pending-fresh prompt consumption, input matching, and current-session fallback option planning.
 _Avoid_: pending prompt helper, fresh state utility
@@ -64,6 +68,10 @@ _Avoid_: timeout helper, scheduler callback
 The Runtime Shell Adapter Module that expands workflow prompts, adds Addy Auto Mode recovery handoff text, delivers or pre-fills user messages, waits for idle when needed, and preserves pending Auto Action Keys after delivery failures.
 _Avoid_: send helper, prompt plumbing
 
+**Auto Recovery Prompt Policy**:
+The Addy Auto Mode Module that owns recovery and fix-all handoff wording appended to auto-dispatched prompts.
+_Avoid_: delivery text helper, unblock string
+
 **Workflow Dispatch Options**:
 The Addy Workflow Interface for shared prompt delivery controls such as append-entry behavior, idle-turn delivery, fresh-session bypass, compaction bypass, and same-phase retry permission.
 _Avoid_: local options bag, handler flags
@@ -80,9 +88,25 @@ _Avoid_: task list, checklist, todo file
 The Slice Plan Module that reads Slice Plan markdown and Workflow State to produce one snapshot of the Task Frontier, Task Closure state, next workflow action, slice progress, and footer progress data.
 _Avoid_: tracker helpers, plan rendering logic
 
+**Slice Plan Action**:
+The Slice Plan Module that chooses the next Addy Workflow prompt or task commit action from Slice Plan task status and evidence.
+_Avoid_: next prompt helper, action switch
+
+**Slice Plan Snapshot**:
+The Slice Plan Module that refreshes current/next task fields and exposes footer progress data from one Slice Plan read.
+_Avoid_: task refresh helper, footer state helper
+
+**Slice Plan Evidence**:
+The Slice Plan Module that reconciles checked Lifecycle Statuses with Workflow Stats evidence so unverified or unreviewed work is not treated as closed.
+_Avoid_: stats check helper, evidence regex
+
 **Slice Plan Series**:
 The Slice Plan Module that understands how one Slice Plan belongs to an ordered suite: index-plan links, numeric sibling slices, current/next unfinished slice selection, slice count, and cumulative task progress.
 _Avoid_: index-plan helper, numbered file scan, suite path utility
+
+**Slice Plan Repository**:
+The Adapter that supplies Slice Plan markdown and sibling file facts to Slice Plan Modules without exposing raw filesystem calls at their Interface.
+_Avoid_: fs helper, plan file utility
 
 **Workflow Plan Continuation**:
 The Addy Workflow Module that shapes state when advancing from one Slice Plan to the next while clearing stale task context and preserving suite ownership.
@@ -108,6 +132,10 @@ _Avoid_: local key helper, task-id string convention
 The Addy Workflow Module that resolves a target task identity to the canonical Slice Plan task using Stable Task ID first, then legacy task index/title fallback.
 _Avoid_: task lookup helper, plan task matcher
 
+**Plan Task Reader**:
+The Slice Plan Module that combines Slice Plan markdown reads with Plan Task Resolution so callers ask for task completion or canonical task facts instead of parsing files themselves.
+_Avoid_: task read helper, markdown lookup
+
 **Task Closure**:
 The state where a Slice Plan task has all required Lifecycle Statuses and matching Commit Evidence.
 _Avoid_: done, complete
@@ -128,9 +156,25 @@ _Avoid_: commit regex helper, task commit parser
 The Addy Auto Mode Module that prompts for autonomous task commits, interprets commit results, records Commit Evidence, and chooses the post-commit continuation.
 _Avoid_: commit helper, git glue
 
+**Task Commit Prompt**:
+The Task Commit Coordinator Module that owns auto commit instruction text and Repository Scope wording.
+_Avoid_: commit string helper
+
+**Task Commit Target**:
+The Task Commit Coordinator Module that owns commit target resolution and Commit Evidence recording.
+_Avoid_: commit target helper, commit record helper
+
 **Auto Agent-End**:
 The Addy Auto Mode Module that coordinates agent completion branches such as finish completion, review-fix continuation, task commit handoff, and fallback frontier dispatch while preserving branch-specific state cleanup and continuation side effects behind a small Interface.
 _Avoid_: agent_end helper, completion callback glue
+
+**Auto Agent Finish**:
+The Auto Agent-End Module that recognizes finished/commit evidence and clears Addy Auto Mode when the finish branch is complete.
+_Avoid_: finish text helper, completion branch
+
+**Auto Review Fix Loop**:
+The Auto Agent-End Module that sequences review finding fixes through fix-all, verify, and review without weakening the review gate.
+_Avoid_: review fix branch, fix-all callback
 
 **Provider Transport Retry**:
 The Addy Auto Mode Module that detects provider transport failures at `agent_end`, preserves retryable workflow prompts as pending Auto Action Keys, and warns through the Runtime Shell.
@@ -167,6 +211,14 @@ _Avoid_: auto send helper, prompt dispatch glue
 **Auto Workflow Orchestrator**:
 The Addy Auto Mode Module that chooses and gates the next autonomous workflow prompt: refresh state, handle completed-plan continuation, run pending task commits, enforce same-phase retry limits, and pass selected prompts to Auto Prompt Dispatcher.
 _Avoid_: next prompt helper, auto-loop control blob
+
+**Auto Workflow Decision**:
+The pure Addy Auto Mode Module that plans whether the next auto step is prompt dispatch, task commit, pause, or no active plan.
+_Avoid_: orchestrator branch helper, auto switch
+
+**Auto Loop Dispatch Port**:
+The Composition Module seam used by Fresh Continuation, Task Commit Coordinator, Auto Agent-End, and Auto Watchdog to call the bound Auto Workflow Orchestrator without closure-based temporal coupling.
+_Avoid_: mutable orchestrator wrapper, callback bag
 
 **Session Start Handler**:
 The Runtime Shell Adapter Module that initializes Addy workflow config and widgets, clears stale pending fresh continuations, resumes valid parent-session fresh work, and falls through to Auto Watchdog on session start.
@@ -243,19 +295,19 @@ _Avoid_: state parser, JSON helper
 - **Addy Auto Command** is the command-level decision Interface for starting, stopping, and resuming Addy Auto Mode; **Command Registry** should delegate `/addy-auto` behavior to it instead of owning Auto Control policy.
 - **Workflow State Control** keeps Auto Control and Review Control field preservation local so transition Modules do not copy or clear raw Workflow State fields by hand.
 - **Auto Action Keys** give **Auto Control**, delayed prompt delivery, and watchdog retries a shared identity vocabulary for the same workflow action.
-- **Fresh Continuation** uses **Auto Control** pending-fresh state and the **Runtime Shell** fresh-session Adapter to preserve autonomous work across context clearing.
+- **Fresh Continuation** uses **Auto Control** pending-fresh state, **Fresh Continuation Delivery**, and the **Runtime Shell** fresh-session Adapter to preserve autonomous work across context clearing.
 - **Fresh Continuation State** keeps pure pending prompt matching and consumed-state planning outside **Fresh Continuation** delivery/session orchestration.
 - **Review Findings** keeps review text interpretation local so **Review Control** and **Workflow Stats** share the same actionable-finding vocabulary.
 - **Repository Scope** keeps cross-repo commit instructions grounded in **Slice Plan** metadata instead of fresh-session file-touch history.
 - **Runtime Shell** isolates side effects from workflow decision Modules and provides timer primitives consumed by the **Timer Loop**.
 - **Workflow Runtime Adapter** gives workflow Modules a narrow Interface for host append-entry, notification, and context-backed message delivery without exposing raw host context shape everywhere.
 - **Timer Loop** hides retry scheduling mechanics; workflow policy such as pending action preservation, fresh continuation validity, and notification wording stays outside the Module.
-- **Workflow Delivery** uses the **Runtime Shell**, **Timer Loop**, and **Auto Action Keys** to make prompt delivery retryable without leaking host transport details into workflow decision Modules.
+- **Workflow Delivery** uses the **Runtime Shell**, **Timer Loop**, **Auto Action Keys**, and **Auto Recovery Prompt Policy** to make prompt delivery retryable without leaking host transport details into workflow decision Modules.
 - **Workflow Dispatch Options** keeps auto/fresh delivery flags consistent across **Fresh Continuation**, **Auto Agent-End**, **Auto Watchdog**, **Session Start Handler**, and **Task Commit Coordinator**.
 - **Auto Prompt Dispatcher** consumes **Command Dispatch** plans and delegates side effects to **Workflow Delivery** or **Fresh Continuation**, keeping current-session versus fresh-session prompt routing out of the monitor entrypoint.
 - A **Slice Plan** contains one or more tasks with **Lifecycle Statuses**.
-- **Slice Plan Progress** is the domain-level read Interface for **Task Frontier**, **Task Closure**, next action, slice progress, and footer progress data; presentation Modules should render from this snapshot instead of recalculating plan traversal.
-- **Slice Plan Series** keeps suite and numbered-slice filesystem discovery local so **Slice Plan Progress**, **Auto Lifecycle**, and **Task Commit Coordinator** consume series facts instead of repeating path scanning rules.
+- **Slice Plan Progress** is the domain-level read Interface that re-exports **Slice Plan Action**, **Slice Plan Snapshot**, and **Slice Plan Evidence** facts for **Task Frontier**, **Task Closure**, next action, slice progress, and footer progress data; presentation Modules should render from this snapshot instead of recalculating plan traversal.
+- **Slice Plan Series** keeps suite and numbered-slice heuristics local and consumes **Slice Plan Repository** for filesystem facts so **Slice Plan Progress**, **Auto Lifecycle**, and **Task Commit Coordinator** consume series facts instead of repeating path scanning rules.
 - **Workflow Plan Continuation** owns the repeated Slice Plan handoff state shape so **Auto Lifecycle**, **Task Commit Coordinator**, and **Slice Plan Progress** do not duplicate stale task-context cleanup.
 - **Workflow Task Summary** keeps best-effort async footer label generation outside **Workflow Handler** so workflow event handling stays synchronous and state-focused.
 - A **Slice Plan** task should have a **Stable Task ID** written as an `addy-task-id` HTML comment.
@@ -263,16 +315,17 @@ _Avoid_: state parser, JSON helper
 - A task reaches **Task Closure** only when all **Lifecycle Statuses** are present and matching **Commit Evidence** exists.
 - **Commit Evidence** should match by **Stable Task ID** when present, and fall back to legacy plan path, task index, and title identity when absent.
 - **Commit Result** keeps commit/no-change/failure text interpretation local so **Task Commit Coordinator** and **Auto Agent-End** share one completion vocabulary.
-- **Plan Task Resolution** keeps canonical task lookup local so **Auto Lifecycle** and **Task Commit Coordinator** share the same task identity precedence.
-- **Task Commit Coordinator** creates and verifies **Commit Evidence** after a task reaches reviewed status, then either advances to the next **Task Frontier** or finishes the **Slice Plan**.
-- **Auto Agent-End** consumes final agent text and **Task Frontier** decisions to sequence completion-specific Addy Auto Mode branches without spreading finish cleanup, review-fix loop policy, task commit handoff, or fallback frontier dispatch across the monitor entrypoint.
+- **Plan Task Reader** combines Slice Plan markdown reads with **Plan Task Resolution** so **Auto Lifecycle** and **Task Commit Coordinator** share the same task identity precedence without duplicating file parsing.
+- **Task Commit Coordinator** uses **Task Commit Prompt** and **Task Commit Target** to create and verify **Commit Evidence** after a task reaches reviewed status, then either advances to the next **Task Frontier** or finishes the **Slice Plan**.
+- **Auto Agent-End** consumes **Auto Agent Finish**, **Auto Review Fix Loop**, final agent text, and **Task Frontier** decisions to sequence completion-specific Addy Auto Mode branches without spreading finish cleanup, review-fix loop policy, task commit handoff, or fallback frontier dispatch across the monitor entrypoint.
 - **Provider Transport Retry** consumes **Agent-End Event** failure signals and **Auto Action Keys** identity to preserve retryable Addy prompts without mixing transport recovery into agent completion branch selection.
 - **Agent-End Event** keeps host `agent_end` payload parsing local so **Auto Agent-End**, **Workflow Stats**, and provider-failure recovery consume stable text/failure signals instead of raw message shapes.
 - **Agent-End Review Stats** consumes **Agent-End Event** final text and **Review Findings** issue parsing so the monitor entrypoint does not mix review attribution with continuation control flow.
 - **Agent-End Handler** sequences **Agent-End Review Stats**, **Provider Transport Retry**, **Fresh Continuation**, **Task Commit Coordinator**, and **Auto Agent-End** so the monitor entrypoint only catches host stale-context failures.
 - **Workflow Host Events** keeps host payload normalization local so the monitor entrypoint routes normalized workflow facts instead of spreading command/input/tool/subagent shape checks across decision code.
 - **Auto Lifecycle** keeps same-phase retry limits, plan-derived lifecycle completion, completed task detection, and next-frontier continuation local so the monitor entrypoint dispatches decisions instead of rebuilding Slice Plan policy inline.
-- **Auto Workflow Orchestrator** consumes **Auto Lifecycle**, **Task Commit Coordinator**, and **Auto Prompt Dispatcher** so next-prompt selection is isolated from host event and command registration.
+- **Auto Workflow Orchestrator** consumes **Auto Workflow Decision**, **Auto Lifecycle**, **Task Commit Coordinator**, and **Auto Prompt Dispatcher** so next-prompt selection is isolated from host event and command registration.
+- **Auto Loop Dispatch Port** keeps composition-time auto dispatch cycles local to **Workflow Monitor Composition** instead of exposing closure-based temporal coupling to workflow Modules.
 - **Auto Watchdog** uses **Auto Action Keys**, pending **Fresh Continuation** state, and the Runtime Shell timer dedupe Interface to resume autonomous work without duplicating prompts across repeated lifecycle events.
 - **Session Start Handler** keeps session boot policy separate from event registration, delegating resumed autonomous work to **Fresh Continuation** or **Auto Watchdog** after Runtime Shell initialization.
 - The **Task Frontier** is derived from the first task that has not reached **Task Closure**.

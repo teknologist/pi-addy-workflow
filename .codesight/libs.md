@@ -32,7 +32,11 @@
   - function autoWorkflowActionKeyForAction: (state, action) => string | undefined
   - function autoWorkflowActionKeyForPromptState: (prompt, state, target) => string
   - function currentAutoWorkflowActionKey: (state, target?) => string | undefined
-- `extensions/workflow-monitor/auto-agent-end.ts` — function finishTextReportsComplete: (text) => boolean, function createAutoAgentEnd: (deps) => void
+- `extensions/workflow-monitor/auto-agent-end.ts` — function createAutoAgentEnd: (deps) => void
+- `extensions/workflow-monitor/auto-agent-finish.ts`
+  - function finishTextReportsComplete: (text) => boolean
+  - function maybeCompleteAutoFinish: (deps, pi, ctx, text, state, action) => boolean
+  - type AutoAgentFinishDeps
 - `extensions/workflow-monitor/auto-control.ts`
   - function hasLiveAutoControl: (state) => boolean
   - function explicitlyStoppedAuto: (state) => boolean
@@ -49,8 +53,12 @@
   - function latestCompletedActiveStatsTarget: (state, baseCwd?) => WorkflowStatsTarget | undefined
   - function autoPauseWarning: (prompt, action) => string
   - _...3 more_
+- `extensions/workflow-monitor/auto-loop.ts` — function createAutoLoopDispatchPort: () => void
 - `extensions/workflow-monitor/auto-prompt-dispatcher.ts` — function createAutoPromptDispatcher: (deps) => void
+- `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` — function addAutoRecoveryGuidance: (message, prompt) => string
+- `extensions/workflow-monitor/auto-review-fix-loop.ts` — function maybeDispatchReviewFixLoop: (deps, pi, ctx, reviewText, state, action, options) => Promise<boolean>, type AutoReviewFixLoopDeps
 - `extensions/workflow-monitor/auto-watchdog.ts` — function createAutoWatchdog: (deps) => void
+- `extensions/workflow-monitor/auto-workflow-decision.ts` — function planAutoWorkflowDecision: (input) => AutoWorkflowDecision, type AutoWorkflowDecision
 - `extensions/workflow-monitor/auto-workflow-orchestrator.ts` — function createAutoWorkflowOrchestrator: (deps) => void
 - `extensions/workflow-monitor/command-dispatch.ts`
   - function stateAfterAutoPrompt: (prompt, state, updates, statsTarget?) => WorkflowState
@@ -98,8 +106,17 @@
   - function planSubagentStartEvent: (event) => PlannedWorkflowEvent
   - type PlannedWorkflowEvent
 - `extensions/workflow-monitor/event-registry.ts` — function registerWorkflowEvents: (pi, deps) => void
+- `extensions/workflow-monitor/fresh-continuation-delivery.ts`
+  - function createPendingFreshDelivery: (deps, consumedAutoFreshKeys) => void
+  - type FreshContinuationDispatchOptions
+  - type PendingFreshWorkflowState
 - `extensions/workflow-monitor/fresh-continuation-pending-state.ts` — function pendingAutoFreshUpdates: (prompt, reason, state, updates, expandedPrompt) => Partial<WorkflowState>, function stateWithPendingFreshPrompt: (prompt, reason, state, updates, expandedPrompt) => WorkflowState
 - `extensions/workflow-monitor/fresh-continuation-plan.ts` — function planFreshContinuationStart: (input) => FreshContinuationStartPlan, type FreshContinuationStartPlan
+- `extensions/workflow-monitor/fresh-continuation-runtime.ts`
+  - function freshContextNotice: (reason) => string
+  - function showFreshContextNotice: (deps, ctx, reason) => Promise<void>
+  - function currentSessionFallbackOptions: (ctx, options) => FreshContinuationDispatchOptions
+  - type FreshContinuationNoticeDeps
 - `extensions/workflow-monitor/fresh-continuation-state.ts`
   - function consumeAutoFreshPromptUpdates: (state) => Partial<WorkflowState>
   - function consumedPendingFreshPromptState: (state) => WorkflowState | undefined
@@ -121,6 +138,11 @@
   - function planTaskFrontier: ({...}, planPath, tasks, effectiveMissingStatuses, }, index) => void
   - type PlanTaskStatus
   - _...2 more_
+- `extensions/workflow-monitor/plan-task-reader.ts`
+  - function readPlanTasks: (planPath, baseCwd?) => PlanTask[] | undefined
+  - function resolvePlanTaskTargetFromPlan: (planPath, baseCwd, target) => ResolvedPlanTaskTarget | undefined
+  - function planTaskTargetIsComplete: (planPath, baseCwd, target) => boolean
+  - function targetWithResolvedPlanTask: (target, baseCwd?) => WorkflowStatsTarget | undefined
 - `extensions/workflow-monitor/plan-task-resolution.ts`
   - function resolvePlanTaskTarget: (tasks, target) => ResolvedPlanTaskTarget | undefined
   - function resolvedPlanTaskMatchesTarget: (resolved, target) => boolean
@@ -143,27 +165,33 @@
   - type ReviewIssueSeverity
   - type ReviewIssueFinding
 - `extensions/workflow-monitor/session-start-handler.ts` — function createSessionStartHandler: (deps) => void
-- `extensions/workflow-monitor/slice-plan-progress.ts`
+- `extensions/workflow-monitor/slice-plan-action.ts`
   - function allTasksInCurrentPlanAreClosed: (state, baseCwd?) => boolean
   - function unfinishedLifecycleStepsFromMarkdown: (markdown) => Array<
-  - function refreshWorkflowTasksFromPlan: (state, baseCwd?) => WorkflowState
   - function nextPromptForPhase: (phase, artifact?) => string
   - function nextPromptForActivePlanLifecycle: (state, baseCwd?) => string | undefined
   - function nextWorkflowActionForActivePlanLifecycle: (state, baseCwd?) => |
-  - _...4 more_
+  - type WorkflowAction
+  - _...1 more_
+- `extensions/workflow-monitor/slice-plan-evidence.ts` — function effectiveTaskMissingStatuses: (state, planPath, task, index) => PlanTaskStatus[] | undefined
 - `extensions/workflow-monitor/slice-plan-series.ts`
-  - function readPlanMarkdown: (planPath, baseCwd?) => string | undefined
-  - function currentSlicePlanPathFromIndex: (planPath, markdown, baseCwd?, state?) => string | undefined
-  - function nextUnfinishedSlicePlanPath: (state, baseCwd?) => string | undefined
-  - function sliceProgressForPlanPath: (planPath, baseCwd?) => void
+  - function readPlanMarkdown: (planPath, baseCwd?, repository) => string | undefined
+  - function currentSlicePlanPathFromIndex: (planPath, markdown, baseCwd?, state?, repository) => string | undefined
+  - function nextUnfinishedSlicePlanPath: (state, baseCwd?, repository) => string | undefined
+  - function sliceProgressForPlanPath: (planPath, baseCwd?, repository) => void
   - function isValidProgress: (index, count) => index is number
-  - function totalTaskProgressForSlice: (planPath, currentTaskIndex, baseCwd?) => void
+  - function totalTaskProgressForSlice: (planPath, currentTaskIndex, baseCwd?, repository) => void
+- `extensions/workflow-monitor/slice-plan-snapshot.ts`
+  - function refreshWorkflowTasksFromPlan: (state, baseCwd?) => WorkflowState
+  - function readSlicePlanProgress: (state, baseCwd?) => SlicePlanProgress | undefined
+  - type SlicePlanProgress
 - `extensions/workflow-monitor/task-closure-continuation.ts` — function planTaskClosureContinuation: (input) => void, type TaskClosureContinuationPlan
-- `extensions/workflow-monitor/task-commit-coordinator.ts`
-  - function autoTaskCommitPrompt: (state, taskTitle?, baseCwd?) => string
+- `extensions/workflow-monitor/task-commit-coordinator.ts` — function createTaskCommitCoordinator: (deps) => void
+- `extensions/workflow-monitor/task-commit-prompt.ts` — function autoTaskCommitPrompt: (state, taskTitle?, baseCwd?) => string
+- `extensions/workflow-monitor/task-commit-target.ts`
   - function withPlanTaskId: (target, baseCwd?) => WorkflowStatsTarget | undefined
+  - function recordCommittedTask: (state, target, commitSha) => WorkflowState
   - function actionCommitTarget: (state, action) => WorkflowStatsTarget | undefined
-  - function createTaskCommitCoordinator: (deps) => void
 - `extensions/workflow-monitor/workflow-core.ts`
   - function createInitialWorkflowState: () => WorkflowState
   - type WorkflowIssueStats

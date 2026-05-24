@@ -1,19 +1,13 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
-  autoPauseWarning,
-  autoRecoveryPrompt,
   completedPlanAutoContinuation,
   latestCompletedActiveStatsTarget,
   planTaskIsComplete,
   reviewedTaskWasCompleted,
-  stateWithCompletedLifecyclePhasesFromPlan,
   type WorkflowAction,
 } from './auto-lifecycle.ts';
-import { autoRetryKey } from './auto-control.ts';
-import {
-  commandFromPrompt,
-  phaseFromWorkflowPrompt,
-} from './command-router.ts';
+import { planAutoWorkflowDecision } from './auto-workflow-decision.ts';
+import { commandFromPrompt } from './command-router.ts';
 import { reviewTextHasActionableFindings } from './review-findings.ts';
 import type { FreshContinuationDispatchOptions } from './fresh-continuation.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
@@ -184,123 +178,58 @@ export function createAutoWorkflowOrchestrator(
         options.appendEntry === false ? undefined : deps.appendEntry(pi),
       );
     }
-    const prompt = dispatchAction?.prompt;
-    if (!prompt) {
-      deps.notify(
-        ctx,
-        'Addy auto is active, but no active plan is available.',
-        'warning',
-      );
-      return;
-    }
-
     const actionPendingCommitTarget =
       deps.taskCommitCoordinator.actionCommitTarget(
         dispatchState,
         dispatchAction,
       );
-    if (actionPendingCommitTarget) {
-      await deps.taskCommitCoordinator.dispatchTaskCommitPrompt(
-        pi,
-        ctx,
-        dispatchState,
-        actionPendingCommitTarget,
-        options,
-      );
-      return;
-    }
-
     const pendingCommitTarget = latestCompletedActiveStatsTarget(
       dispatchState,
       deps.baseCwd(ctx),
     );
-    if (
-      pendingCommitTarget &&
-      commandFromPrompt(dispatchState.autoLastPrompt) !==
-        deps.autoTaskCommitPrompt
-    ) {
+    const decision = planAutoWorkflowDecision({
+      action: dispatchAction,
+      actionPendingCommitTarget,
+      allowSamePhase,
+      autoSamePhaseMaxRetries: deps.autoSamePhaseMaxRetries,
+      autoTaskCommitPrompt: deps.autoTaskCommitPrompt,
+      pendingCommitTarget,
+      state: dispatchState,
+    });
+
+    if (decision.kind === 'no-active-plan') {
+      deps.notify(ctx, decision.message, 'warning');
+      return;
+    }
+    if (decision.kind === 'task-commit') {
       await deps.taskCommitCoordinator.dispatchTaskCommitPrompt(
         pi,
         ctx,
         dispatchState,
-        pendingCommitTarget,
+        decision.target,
         options,
       );
       return;
     }
-
-    const lifecycleSyncedState = stateWithCompletedLifecyclePhasesFromPlan(
-      dispatchState,
-      dispatchAction,
-    );
-    const phase = phaseFromWorkflowPrompt(prompt);
-    const retryKey = autoRetryKey(lifecycleSyncedState, prompt);
-    const isSameIncompletePhase =
-      phase && phase === lifecycleSyncedState.current;
-    const retryCount =
-      lifecycleSyncedState.autoRetryKey === retryKey
-        ? (lifecycleSyncedState.autoRetryCount ?? 0)
-        : 0;
-    if (
-      !allowSamePhase &&
-      isSameIncompletePhase &&
-      retryCount >= deps.autoSamePhaseMaxRetries
-    ) {
+    if (decision.kind === 'pause') {
       deps.setState(
         ctx,
-        { ...lifecycleSyncedState, autoPausedReason: 'same-phase-retry-limit' },
+        decision.state,
         options.appendEntry === false ? undefined : deps.appendEntry(pi),
       );
-      deps.notify(ctx, autoPauseWarning(prompt, dispatchAction), 'warning');
+      deps.notify(ctx, decision.message, 'warning');
       return;
     }
 
-    const deliveryPrompt =
-      !allowSamePhase && isSameIncompletePhase && retryCount >= 1
-        ? autoRecoveryPrompt(prompt, dispatchAction, retryCount)
-        : undefined;
-
-    const reviewTask =
-      phase === 'review'
-        ? (dispatchAction?.taskTitle ?? lifecycleSyncedState.currentTask)
-        : undefined;
-    const finishTask =
-      phase === 'finish' ? lifecycleSyncedState.autoReviewTask : undefined;
-    const reviewTaskId =
-      phase === 'review'
-        ? (dispatchAction?.taskId ?? lifecycleSyncedState.currentTaskId)
-        : undefined;
-    const finishTaskId =
-      phase === 'finish' ? lifecycleSyncedState.autoReviewTaskId : undefined;
     await dispatchAutoPromptFreshAware(
       pi,
       ctx,
-      prompt,
-      lifecycleSyncedState,
-      {
-        autoRetryKey: retryKey,
-        autoRetryCount: isSameIncompletePhase ? retryCount + 1 : 0,
-        autoReviewTask: reviewTask ?? finishTask,
-        autoReviewTaskId: reviewTaskId ?? finishTaskId,
-        autoReviewTaskIndex:
-          phase === 'review'
-            ? lifecycleSyncedState.currentTaskIndex
-            : phase === 'finish'
-              ? lifecycleSyncedState.autoReviewTaskIndex
-              : undefined,
-      },
-      reviewTask || finishTask
-        ? {
-            taskId: reviewTaskId ?? finishTaskId,
-            taskIndex:
-              phase === 'review'
-                ? lifecycleSyncedState.currentTaskIndex
-                : lifecycleSyncedState.autoReviewTaskIndex,
-            taskTitle: reviewTask ?? finishTask,
-          }
-        : undefined,
+      decision.prompt,
+      decision.state,
+      decision.updates,
+      decision.statsTarget,
       options,
-      deliveryPrompt,
+      decision.deliveryPrompt,
     );
   }
 

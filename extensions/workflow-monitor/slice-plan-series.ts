@@ -1,10 +1,13 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import {
   planTasksFromMarkdown,
   taskIsClosed,
   type PlanTask,
 } from './plan-task-lifecycle.ts';
+import {
+  nodeSlicePlanRepository,
+  type SlicePlanRepository,
+} from './slice-plan-repository.ts';
 import { resolveWorkflowPlanPath } from './workflow-plan-path.ts';
 import {
   createInitialWorkflowState,
@@ -14,22 +17,16 @@ import {
 export function readPlanMarkdown(
   planPath: string,
   baseCwd?: string,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): string | undefined {
-  try {
-    const resolved = resolveWorkflowPlanPath(planPath, baseCwd);
-    if (!statSync(resolved).isFile()) return undefined;
-    return readFileSync(resolved, 'utf8');
-  } catch {
-    return undefined;
-  }
+  return repository.readMarkdown(planPath, baseCwd);
 }
 
-function readablePlanFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
+function readablePlanFile(
+  path: string,
+  repository: SlicePlanRepository,
+): boolean {
+  return repository.isFile(path);
 }
 
 function planPathForDisplay(
@@ -67,12 +64,13 @@ function slicePlanPathFromIndexCandidate(
   rawPath: string,
   indexPlanPath: string,
   baseCwd?: string,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): string | undefined {
   const path = rawPath.replace(/^@/, '');
   const direct = isAbsolute(path)
     ? path
     : resolve(baseCwd ?? process.cwd(), path);
-  if (readablePlanFile(direct))
+  if (readablePlanFile(direct, repository))
     return planPathForDisplay(direct, indexPlanPath, baseCwd);
 
   if (!isAbsolute(path)) {
@@ -80,7 +78,7 @@ function slicePlanPathFromIndexCandidate(
       dirname(resolveWorkflowPlanPath(indexPlanPath, baseCwd)),
       path,
     );
-    if (readablePlanFile(sibling))
+    if (readablePlanFile(sibling, repository))
       return planPathForDisplay(sibling, indexPlanPath, baseCwd);
   }
 
@@ -91,6 +89,7 @@ function slicePlanPathsFromIndexMarkdown(
   markdown: string,
   indexPlanPath: string,
   baseCwd?: string,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): string[] {
   const candidates =
     markdown.match(
@@ -104,6 +103,7 @@ function slicePlanPathsFromIndexMarkdown(
       candidate,
       indexPlanPath,
       baseCwd,
+      repository,
     );
     if (!path || path === indexPlanPath || seen.has(path)) continue;
     seen.add(path);
@@ -118,15 +118,17 @@ export function currentSlicePlanPathFromIndex(
   markdown: string,
   baseCwd?: string,
   state?: WorkflowState,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): string | undefined {
   const slicePaths = slicePlanPathsFromIndexMarkdown(
     markdown,
     planPath,
     baseCwd,
+    repository,
   );
   let lastTaskSlice: string | undefined;
   for (const slicePath of slicePaths) {
-    const sliceMarkdown = readPlanMarkdown(slicePath, baseCwd);
+    const sliceMarkdown = readPlanMarkdown(slicePath, baseCwd, repository);
     if (!sliceMarkdown) continue;
     const tasks = planTasksFromMarkdown(sliceMarkdown);
     if (tasks.length === 0) continue;
@@ -148,9 +150,10 @@ export function currentSlicePlanPathFromIndex(
 export function nextUnfinishedSlicePlanPath(
   state: WorkflowState,
   baseCwd?: string,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): string | undefined {
   if (!state.activePlan) return undefined;
-  const markdown = readPlanMarkdown(state.activePlan, baseCwd);
+  const markdown = readPlanMarkdown(state.activePlan, baseCwd, repository);
   if (!markdown) return undefined;
   const tasks = planTasksFromMarkdown(markdown);
   if (tasks.length === 0) {
@@ -159,6 +162,7 @@ export function nextUnfinishedSlicePlanPath(
       markdown,
       baseCwd,
       state,
+      repository,
     );
     return slicePlan && slicePlan !== state.activePlan ? slicePlan : undefined;
   }
@@ -176,14 +180,11 @@ export function nextUnfinishedSlicePlanPath(
   const currentPrefix = current.prefix.toLowerCase();
   const currentNumber = current.number;
 
-  let candidates: string[];
-  try {
-    candidates = readdirSync(dirname(resolvedPlanPath))
-      .map((entry) => resolve(dirname(resolvedPlanPath), entry))
-      .filter((candidate) => readablePlanFile(candidate));
-  } catch {
-    return undefined;
-  }
+  const candidates = repository
+    .listFiles(dirname(resolvedPlanPath))
+    ?.map((entry) => resolve(dirname(resolvedPlanPath), entry))
+    .filter((candidate) => readablePlanFile(candidate, repository));
+  if (!candidates) return undefined;
 
   const nextCandidates = candidates
     .map((candidate) => {
@@ -209,7 +210,11 @@ export function nextUnfinishedSlicePlanPath(
     .sort((left, right) => left.number - right.number);
 
   for (const candidate of nextCandidates) {
-    const candidateMarkdown = readPlanMarkdown(candidate.path, baseCwd);
+    const candidateMarkdown = readPlanMarkdown(
+      candidate.path,
+      baseCwd,
+      repository,
+    );
     if (!candidateMarkdown) continue;
     const candidateTasks = planTasksFromMarkdown(candidateMarkdown);
     const candidatePlanPath = planPathForDisplay(
@@ -239,19 +244,16 @@ export function nextUnfinishedSlicePlanPath(
 export function sliceProgressForPlanPath(
   planPath: string,
   baseCwd?: string,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): { currentSliceIndex: number; sliceCount: number } | undefined {
   const resolved = resolveWorkflowPlanPath(planPath, baseCwd);
   const current = numberedSliceParts(resolved);
   if (!current || current.number <= 0) return undefined;
 
-  let candidates: string[];
-  try {
-    candidates = readdirSync(dirname(resolved)).filter((entry) =>
-      entry.endsWith('.md'),
-    );
-  } catch {
-    return undefined;
-  }
+  const candidates = repository
+    .listFiles(dirname(resolved))
+    ?.filter((entry) => entry.endsWith('.md'));
+  if (!candidates) return undefined;
 
   const sliceNumbers = candidates
     .map((candidate) => numberedSliceParts(candidate))
@@ -285,6 +287,7 @@ export function totalTaskProgressForSlice(
   planPath: string | undefined,
   currentTaskIndex: number | undefined,
   baseCwd?: string,
+  repository: SlicePlanRepository = nodeSlicePlanRepository,
 ): { currentTaskIndex: number; taskCount: number } | undefined {
   if (
     !planPath ||
@@ -296,14 +299,11 @@ export function totalTaskProgressForSlice(
   const current = numberedSliceParts(resolved);
   if (!current || current.number <= 0) return undefined;
 
-  let candidates: string[];
-  try {
-    candidates = readdirSync(dirname(resolved))
-      .map((entry) => resolve(dirname(resolved), entry))
-      .filter((candidate) => readablePlanFile(candidate));
-  } catch {
-    return undefined;
-  }
+  const candidates = repository
+    .listFiles(dirname(resolved))
+    ?.map((entry) => resolve(dirname(resolved), entry))
+    .filter((candidate) => readablePlanFile(candidate, repository));
+  if (!candidates) return undefined;
 
   const sliceTasks = candidates
     .map((candidate) => {
@@ -311,7 +311,7 @@ export function totalTaskProgressForSlice(
       if (!parts || parts.number <= 0) return undefined;
       if (parts.prefix.toLowerCase() !== current.prefix.toLowerCase())
         return undefined;
-      const markdown = readPlanMarkdown(candidate, baseCwd);
+      const markdown = readPlanMarkdown(candidate, baseCwd, repository);
       if (!markdown) return undefined;
       const tasks = planTasksFromMarkdown(markdown);
       return tasks.length > 0

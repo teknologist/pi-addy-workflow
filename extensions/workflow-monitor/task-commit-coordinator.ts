@@ -1,16 +1,18 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { readFileSync } from 'node:fs';
 import { loadAddyWorkflowConfig } from './config.ts';
 import { commandFromPrompt } from './command-router.ts';
 import {
   agentTextReportsCommitComplete,
   commitShaFromAgentText,
 } from './commit-result.ts';
-import { resolvePlanTaskTarget } from './plan-task-resolution.ts';
-import { repositoryScopeForPlan } from './repository-scope.ts';
 import { planTaskClosureContinuation } from './task-closure-continuation.ts';
+import { autoTaskCommitPrompt } from './task-commit-prompt.ts';
+import {
+  actionCommitTarget,
+  recordCommittedTask,
+  withPlanTaskId,
+} from './task-commit-target.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
-import { resolveWorkflowPlanPath } from './workflow-plan-path.ts';
 import type { WorkflowDispatchOptions } from './workflow-dispatch-options.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
 import type { AutoFreshReason, WorkflowState } from './workflow-transitions.ts';
@@ -18,8 +20,6 @@ import {
   ADDY_AUTO_TASK_COMMIT_PROMPT,
   nextUnfinishedSlicePlanPath,
   nextWorkflowActionForActivePlanLifecycle,
-  planTasksFromMarkdown,
-  workflowTaskCommitKey,
 } from './workflow-tracker.ts';
 
 type TaskCommitDispatchOptions = WorkflowDispatchOptions;
@@ -72,117 +72,8 @@ export {
   agentTextReportsCommitComplete,
   commitShaFromAgentText,
 } from './commit-result.ts';
-
-export function autoTaskCommitPrompt(
-  state: WorkflowState,
-  taskTitle?: string,
-  baseCwd?: string,
-): string {
-  const task =
-    taskTitle ??
-    (state.currentTask && state.currentTask !== 'none'
-      ? state.currentTask
-      : 'the completed task');
-  const plan = state.activePlan
-    ? `Plan: ${state.activePlan}`
-    : 'Plan: active Addy workflow plan';
-  const repositoryScope = repositoryScopeForPlan(state.activePlan, baseCwd);
-  const repositoryLine = repositoryScope
-    ? `Repository scope: ${repositoryScope}`
-    : 'Repository scope: current repository';
-  return [
-    '# Addy Auto Commit',
-    '',
-    'The current task has Implemented, Verified, and Reviewed checked. Commit the completed task work now, without asking the user for confirmation.',
-    '',
-    plan,
-    repositoryLine,
-    `Completed task: ${task}`,
-    '',
-    'Required steps:',
-    '1. Do not try to invoke, search for, or print a `/commit` slash command; this auto prompt is the commit instruction.',
-    '2. Use the full repository scope above instead of relying on fresh-session file-touch history.',
-    '3. With the available shell/git tools, inspect each repo in scope (for example, `git -C <repo> status --short`).',
-    '4. Before staging, run the project formatter for the changed scope when one is available, then run the project lint/format check for the changed scope. If formatting or lint changes files, include those changes; if lint/format still fails, fix safe scoped issues and rerun before committing.',
-    '5. Stage all current changed files in each repo in scope, including tracked, unstaged, untracked, and plan checkbox changes. Do not leave relevant dirty worktree changes behind.',
-    '6. Review the staged diff, then create a concise commit in each repo that has staged task changes.',
-    '7. If there are no changes in any relevant repo, say `No changes to commit` and stop.',
-    '8. Report each commit hash in the form `COMMIT: <hash>`.',
-    '',
-    'Do not call ask_user_question. Do not start the next task yourself; Addy auto will continue after this commit turn ends.',
-  ].join('\n');
-}
-
-export function withPlanTaskId(
-  target: WorkflowStatsTarget | undefined,
-  baseCwd?: string,
-): WorkflowStatsTarget | undefined {
-  if (!target?.plan || (!target.taskId && !target.taskTitle)) return target;
-  try {
-    const tasks = planTasksFromMarkdown(
-      readFileSync(resolveWorkflowPlanPath(target.plan, baseCwd), 'utf8'),
-    );
-    const resolved = resolvePlanTaskTarget(tasks, target);
-    if (!resolved?.task.taskId) return target;
-    if (
-      !target.taskId &&
-      target.taskTitle &&
-      resolved.task.title !== target.taskTitle
-    )
-      return target;
-    return {
-      ...target,
-      taskId: resolved.task.taskId,
-      taskIndex: resolved.taskIndex,
-      taskTitle: resolved.task.title,
-    };
-  } catch {
-    return target;
-  }
-}
-
-function recordCommittedTask(
-  state: WorkflowState,
-  target: WorkflowStatsTarget | undefined,
-  commitSha: string,
-): WorkflowState {
-  const plan = target?.plan ?? state.activePlan;
-  const taskId = target?.taskId;
-  const taskIndex = target?.taskIndex ?? state.currentTaskIndex;
-  const taskTitle = target?.taskTitle ?? state.currentTask;
-  if (!plan || !taskIndex || !taskTitle || taskTitle === 'none') return state;
-
-  const key = workflowTaskCommitKey(plan, taskIndex, taskTitle, taskId);
-  return {
-    ...state,
-    committedTasks: {
-      ...state.committedTasks,
-      [key]: {
-        plan,
-        ...(taskId ? { taskId } : {}),
-        sliceIndex: target?.sliceIndex ?? state.currentSliceIndex,
-        taskIndex,
-        taskTitle,
-        commitSha,
-        committedAt: new Date().toISOString(),
-      },
-    },
-  };
-}
-
-export function actionCommitTarget(
-  state: WorkflowState,
-  action: WorkflowAction,
-): WorkflowStatsTarget | undefined {
-  if (!action?.requiresCommit || !action.taskTitle) return undefined;
-  return {
-    plan: action.plan ?? state.activePlan,
-    taskId: action.taskId,
-    sliceIndex: action.currentSliceIndex ?? state.currentSliceIndex,
-    taskIndex: action.taskIndex ?? state.currentTaskIndex,
-    taskTitle: action.taskTitle,
-  };
-}
+export { autoTaskCommitPrompt } from './task-commit-prompt.ts';
+export { actionCommitTarget, withPlanTaskId } from './task-commit-target.ts';
 
 export function createTaskCommitCoordinator(deps: TaskCommitCoordinatorDeps) {
   async function dispatchTaskCommitPrompt(

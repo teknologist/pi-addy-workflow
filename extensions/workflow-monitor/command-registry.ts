@@ -16,13 +16,8 @@ import { handleAddyAutoCommand } from './addy-auto-command.ts';
 
 type ContinueResult = { action: 'continue' };
 
-type CommandRegistryDeps = {
+type FreshStepCommandDeps = {
   appendEntry(pi: ExtensionAPI): AppendEntry;
-  resumePendingFreshContinuation(
-    pi: ExtensionAPI,
-    ctx: unknown,
-    options: FreshContinuationDispatchOptions,
-  ): Promise<'none' | 'stale-cleared' | 'delivered'>;
   dispatchManualFrontierGuard(
     pi: ExtensionAPI,
     input: string,
@@ -46,6 +41,30 @@ type CommandRegistryDeps = {
     event: unknown,
     appendEntry?: AppendEntry,
   ): void;
+  sendUserMessage(pi: ExtensionAPI, ctx: unknown, input: string): void;
+  shouldFreshContextBeforeStep(input: string, ctx: unknown): boolean;
+};
+
+type AutoCommandDeps = {
+  appendEntry(pi: ExtensionAPI): AppendEntry;
+  resumePendingFreshContinuation(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    options: FreshContinuationDispatchOptions,
+  ): Promise<'none' | 'stale-cleared' | 'delivered'>;
+  dispatchTaskCommitPrompt(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    target: NonNullable<ReturnType<typeof latestActiveStatsTarget>>,
+    options: FreshContinuationDispatchOptions,
+  ): Promise<void>;
+  getState(ctx: unknown): WorkflowState;
+  handleWorkflowEvent(
+    ctx: unknown,
+    event: unknown,
+    appendEntry?: AppendEntry,
+  ): void;
   maybeRunAutoWatchdog(
     pi: ExtensionAPI,
     ctx: unknown,
@@ -53,20 +72,7 @@ type CommandRegistryDeps = {
     options: FreshContinuationDispatchOptions & { allowSamePhase?: boolean },
   ): Promise<unknown>;
   notify(ctx: unknown, message: string, level: string): void;
-  openNextWorkflowPrompt(
-    ctx: unknown,
-    phase: WorkflowPhase,
-    artifact?: string,
-  ): void;
-  resetWorkflow(ctx: unknown, appendEntry?: AppendEntry): void;
-  runFreshContextContinuation(
-    pi: ExtensionAPI,
-    ctx: unknown,
-    reason: NonNullable<WorkflowState['autoFreshReason']>,
-  ): Promise<void>;
-  sendUserMessage(pi: ExtensionAPI, ctx: unknown, input: string): void;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
-  shouldFreshContextBeforeStep(input: string, ctx: unknown): boolean;
   showWorkflowStats(
     pi: ExtensionAPI,
     ctx: unknown,
@@ -74,6 +80,47 @@ type CommandRegistryDeps = {
     options?: { heading?: string; planPath?: string },
   ): void;
 };
+
+type AutoContinueCommandDeps = {
+  notify(ctx: unknown, message: string, level: string): void;
+  runFreshContextContinuation(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    reason: NonNullable<WorkflowState['autoFreshReason']>,
+  ): Promise<void>;
+};
+
+type StatsCommandDeps = {
+  getState(ctx: unknown): WorkflowState;
+  showWorkflowStats(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    options?: { heading?: string; planPath?: string },
+  ): void;
+};
+
+type WorkflowControlCommandDeps = {
+  appendEntry(pi: ExtensionAPI): AppendEntry;
+  handleWorkflowEvent(
+    ctx: unknown,
+    event: unknown,
+    appendEntry?: AppendEntry,
+  ): void;
+  notify(ctx: unknown, message: string, level: string): void;
+  openNextWorkflowPrompt(
+    ctx: unknown,
+    phase: WorkflowPhase,
+    artifact?: string,
+  ): void;
+  resetWorkflow(ctx: unknown, appendEntry?: AppendEntry): void;
+};
+
+type CommandRegistryDeps = FreshStepCommandDeps &
+  AutoCommandDeps &
+  AutoContinueCommandDeps &
+  StatsCommandDeps &
+  WorkflowControlCommandDeps;
 
 export function registerWorkflowCommands(
   pi: ExtensionAPI,

@@ -18,14 +18,8 @@ import {
   isSubagentChildSession,
 } from './workflow-host-events.ts';
 import { expandPackagedPromptTemplate } from './prompt-template.ts';
-import {
-  createFreshContinuationCoordinator,
-  type FreshContinuationDispatchOptions,
-} from './fresh-continuation.ts';
-import {
-  archiveWorkflowStats,
-  type WorkflowStatsTarget,
-} from './workflow-stats.ts';
+import { createFreshContinuationCoordinator } from './fresh-continuation.ts';
+import { archiveWorkflowStats } from './workflow-stats.ts';
 import { latestActiveStatsTarget } from './workflow-stats-target.ts';
 import {
   registerWorkflowRenderers,
@@ -37,12 +31,13 @@ import { createManualFreshStepDispatcher } from './manual-fresh-step.ts';
 import { createManualFrontierGuard } from './manual-frontier-guard.ts';
 import { createAutoWatchdog } from './auto-watchdog.ts';
 import { createAutoPromptDispatcher } from './auto-prompt-dispatcher.ts';
+import { createAutoLoopDispatchPort } from './auto-loop.ts';
 import { createAutoWorkflowOrchestrator } from './auto-workflow-orchestrator.ts';
 import { createSessionStartHandler } from './session-start-handler.ts';
 import { createAgentEndHandler } from './agent-end-handler.ts';
 import { createInputHandler } from './input-handler.ts';
-import { registerWorkflowCommands } from './command-registry.ts';
-import { registerWorkflowEvents } from './event-registry.ts';
+import { registerWorkflowCommands } from './commands.ts';
+import { registerWorkflowEvents } from './events.ts';
 import {
   baseCwd,
   ensureWorkflowConfig,
@@ -62,8 +57,6 @@ import {
   nextWorkflowActionForActivePlanLifecycle,
 } from './workflow-tracker.ts';
 
-type DispatchOptions = FreshContinuationDispatchOptions;
-
 const AUTO_TASK_COMMIT_PROMPT = ADDY_AUTO_TASK_COMMIT_PROMPT;
 const AUTO_FRESH_IDLE_RETRY_MS = 50;
 const AUTO_FRESH_IDLE_MAX_ATTEMPTS = 1200;
@@ -71,6 +64,7 @@ const AUTO_SAME_PHASE_MAX_RETRIES = 12;
 
 const getWorkflowState = getWorkflowStateFromContext;
 const setWorkflowState = setWorkflowStateFromContext;
+const autoLoop = createAutoLoopDispatchPort();
 
 const workflowDelivery = createWorkflowDelivery({
   getState: getWorkflowState,
@@ -91,7 +85,7 @@ const freshContinuation = createFreshContinuationCoordinator({
   notify: notifyWorkflow,
   notifyWarning: notifyWorkflowWarning,
   sendUserMessage: workflowDelivery.sendUserMessage,
-  dispatchNextAutoWorkflowPrompt,
+  dispatchNextAutoWorkflowPrompt: autoLoop.dispatchNextAutoWorkflowPrompt,
   retryMs: AUTO_FRESH_IDLE_RETRY_MS,
   maxAttempts: AUTO_FRESH_IDLE_MAX_ATTEMPTS,
 });
@@ -105,13 +99,11 @@ const autoPromptDispatcher = createAutoPromptDispatcher({
   setState: setWorkflowState,
 });
 
-let autoWorkflowOrchestrator: ReturnType<typeof createAutoWorkflowOrchestrator>;
-
 const taskCommitCoordinator = createTaskCommitCoordinator({
   appendEntry: appendWorkflowEntry,
   archiveWorkflowStats,
-  dispatchAutoPromptFreshAware,
-  dispatchNextAutoWorkflowPrompt,
+  dispatchAutoPromptFreshAware: autoLoop.dispatchAutoPromptFreshAware,
+  dispatchNextAutoWorkflowPrompt: autoLoop.dispatchNextAutoWorkflowPrompt,
   expandPackagedPromptTemplate,
   freshContinuation,
   latestActiveStatsTarget,
@@ -119,7 +111,7 @@ const taskCommitCoordinator = createTaskCommitCoordinator({
   setState: setWorkflowState,
 });
 
-autoWorkflowOrchestrator = createAutoWorkflowOrchestrator({
+const autoWorkflowOrchestrator = createAutoWorkflowOrchestrator({
   appendEntry: appendWorkflowEntry,
   autoPromptDispatcher,
   autoSamePhaseMaxRetries: AUTO_SAME_PHASE_MAX_RETRIES,
@@ -131,13 +123,14 @@ autoWorkflowOrchestrator = createAutoWorkflowOrchestrator({
   setState: setWorkflowState,
   taskCommitCoordinator,
 });
+autoLoop.bind(autoWorkflowOrchestrator);
 
 const autoWatchdog = createAutoWatchdog({
   actionKeyForAction: autoWorkflowActionKeyForAction,
   appendEntry: appendWorkflowEntry,
   baseCwd,
   createRuntime: createWorkflowRuntime,
-  dispatchNextAutoWorkflowPrompt,
+  dispatchNextAutoWorkflowPrompt: autoLoop.dispatchNextAutoWorkflowPrompt,
   getState: getWorkflowState,
   isChildSession: isSubagentChildSession,
   nextActionForState: nextWorkflowActionForActivePlanLifecycle,
@@ -160,7 +153,7 @@ const manualFrontierGuard = createManualFrontierGuard({
   actionCommitTarget: (state, action) =>
     taskCommitCoordinator.actionCommitTarget(state, action),
   baseCwd,
-  dispatchAutoPrompt: dispatchAutoPromptFreshAware,
+  dispatchAutoPrompt: autoLoop.dispatchAutoPromptFreshAware,
   dispatchTaskCommitPrompt: (pi, ctx, state, target, options) =>
     taskCommitCoordinator.dispatchTaskCommitPrompt(
       pi,
@@ -193,10 +186,10 @@ const autoAgentEnd = createAutoAgentEnd({
   appendEntry: appendWorkflowEntry,
   archiveWorkflowStats,
   actionTargetsCompletePlanTask,
-  dispatchAutoPromptFreshAware,
-  dispatchNextAutoWorkflowPrompt,
+  dispatchAutoPromptFreshAware: autoLoop.dispatchAutoPromptFreshAware,
+  dispatchNextAutoWorkflowPrompt: autoLoop.dispatchNextAutoWorkflowPrompt,
   maxReviewFixLoops,
-  maybeDispatchTaskCommit,
+  maybeDispatchTaskCommit: autoLoop.maybeDispatchTaskCommit,
   notifyWarning: (ctx, message) => notifyWorkflow(ctx, message, 'warning'),
   setState: setWorkflowState,
   showWorkflowStats,
@@ -267,62 +260,6 @@ function showWorkflowStats(
   options: { heading?: string; planPath?: string } = {},
 ): void {
   showWorkflowStatsRenderer(pi, ctx, state, options, notifyWorkflow);
-}
-
-async function dispatchAutoPromptFreshAware(
-  pi: ExtensionAPI,
-  ctx: unknown,
-  prompt: string,
-  state: WorkflowState,
-  updates: Partial<WorkflowState> = {},
-  statsTarget?: WorkflowStatsTarget,
-  options: DispatchOptions = {},
-  deliveryPrompt?: string,
-): Promise<void> {
-  await autoWorkflowOrchestrator.dispatchAutoPromptFreshAware(
-    pi,
-    ctx,
-    prompt,
-    state,
-    updates,
-    statsTarget,
-    options,
-    deliveryPrompt,
-  );
-}
-
-async function maybeDispatchTaskCommit(
-  pi: ExtensionAPI,
-  ctx: unknown,
-  reviewText: string,
-  previousState: WorkflowState,
-  state: WorkflowState,
-  action: ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
-  options: DispatchOptions = {},
-): Promise<boolean> {
-  return autoWorkflowOrchestrator.maybeDispatchTaskCommit(
-    pi,
-    ctx,
-    reviewText,
-    previousState,
-    state,
-    action,
-    options,
-  );
-}
-
-async function dispatchNextAutoWorkflowPrompt(
-  pi: ExtensionAPI,
-  ctx: unknown,
-  allowSamePhase = false,
-  options: DispatchOptions = {},
-): Promise<void> {
-  await autoWorkflowOrchestrator.dispatchNextAutoWorkflowPrompt(
-    pi,
-    ctx,
-    allowSamePhase,
-    options,
-  );
 }
 
 export function registerAddyWorkflowMonitor(pi: ExtensionAPI) {
