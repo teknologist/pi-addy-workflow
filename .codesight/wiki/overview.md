@@ -14,7 +14,7 @@
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **70** files
+- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **71** files
 - `extensions/workflow-monitor/workflow-stats.ts` — imported by **21** files
 - `extensions/workflow-monitor/command-router.ts` — imported by **20** files
 - `extensions/workflow-monitor/workflow-state-store.ts` — imported by **18** files
@@ -24,9 +24,9 @@ Changes to these files have the widest blast radius across the codebase:
 ## Required Environment Variables
 
 - `HOME` — `extensions/agent-installer/core.ts`
-- `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` — `tests/workflow-monitor.test.ts`
-- `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` — `tests/workflow-monitor.test.ts`
-- `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` — `tests/workflow-monitor.test.ts`
+- `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` — `tests/addy-auto-fixture-loop.test.ts`
+- `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` — `tests/addy-auto-fixture-loop.test.ts`
+- `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` — `tests/addy-auto-fixture-loop.test.ts`
 - `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-state-store-scope.ts`
 - `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor/workflow-host-events.ts`
 

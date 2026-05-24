@@ -3,8 +3,8 @@
 > **Stack:** raw-http | none | unknown | typescript
 
 > 0 routes | 0 models | 0 components | 96 lib files | 6 env vars | 2 middleware | 0% test coverage
-> **Token savings:** this file is ~8,600 tokens. Without it, AI exploration would cost ~35,400 tokens. **Saves ~26,700 tokens per conversation.**
-> **Last scanned:** 2026-05-24 21:09 — re-run after significant changes
+> **Token savings:** this file is ~8,700 tokens. Without it, AI exploration would cost ~35,400 tokens. **Saves ~26,700 tokens per conversation.**
+> **Last scanned:** 2026-05-24 21:35 — re-run after significant changes
 
 ---
 
@@ -361,9 +361,9 @@
 ## Environment Variables
 
 - `HOME` **required** — extensions/agent-installer/core.ts
-- `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` **required** — tests/workflow-monitor.test.ts
-- `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/workflow-monitor.test.ts
-- `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/workflow-monitor.test.ts
+- `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` **required** — tests/addy-auto-fixture-loop.test.ts
+- `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/addy-auto-fixture-loop.test.ts
+- `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_WORKFLOW_STATE_DIR` **required** — extensions/workflow-monitor/workflow-state-store-scope.ts
 - `PI_SUBAGENT_CHILD` **required** — extensions/workflow-monitor/workflow-host-events.ts
 
@@ -387,7 +387,7 @@
 
 ## Most Imported Files (change these carefully)
 
-- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **70** files
+- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **71** files
 - `extensions/workflow-monitor/workflow-stats.ts` — imported by **21** files
 - `extensions/workflow-monitor/command-router.ts` — imported by **20** files
 - `extensions/workflow-monitor/workflow-state-store.ts` — imported by **18** files
@@ -410,7 +410,7 @@
 
 ## Import Map (who imports what)
 
-- `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts` +65 more
+- `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts` +66 more
 - `extensions/workflow-monitor/workflow-stats.ts` ← `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-loop.ts` +16 more
 - `extensions/workflow-monitor/command-router.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-finish.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` +15 more
 - `extensions/workflow-monitor/workflow-state-store.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-agent-finish.ts`, `extensions/workflow-monitor/auto-prompt-dispatcher.ts` +13 more
@@ -426,7 +426,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 74 test files found
+> 77 test files found
 
 ---
 
