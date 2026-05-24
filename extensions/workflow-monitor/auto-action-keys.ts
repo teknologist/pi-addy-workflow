@@ -6,44 +6,15 @@ import {
 } from './workflow-tracker.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
+import {
+  taskIdentityKeyParts,
+  taskIdForIdentity,
+  type WorkflowTaskIdentity,
+} from './workflow-task-identity.ts';
 
 type AutoWorkflowAction = ReturnType<
   typeof nextWorkflowActionForActivePlanLifecycle
 >;
-
-type TaskIdentity = {
-  taskId?: string;
-  taskIndex?: number;
-  taskTitle?: string;
-};
-
-function hasLegacyTaskIdentity(identity: TaskIdentity): boolean {
-  return identity.taskIndex !== undefined || identity.taskTitle !== undefined;
-}
-
-function legacyTaskIdentityMatches(
-  identity: TaskIdentity,
-  candidate: TaskIdentity,
-): boolean {
-  if (!hasLegacyTaskIdentity(identity)) return true;
-  return (
-    (identity.taskIndex === undefined ||
-      identity.taskIndex === candidate.taskIndex) &&
-    (identity.taskTitle === undefined ||
-      identity.taskTitle === candidate.taskTitle)
-  );
-}
-
-function taskIdForIdentity(
-  identity: TaskIdentity,
-  candidates: TaskIdentity[],
-): string | undefined {
-  if (identity.taskId) return identity.taskId;
-  return candidates.find(
-    (candidate) =>
-      candidate.taskId && legacyTaskIdentityMatches(identity, candidate),
-  )?.taskId;
-}
 
 export function idleUserMessageKey(ctx: unknown, message: string): string {
   const contextId = (ctx as { id?: unknown }).id;
@@ -67,9 +38,7 @@ export function autoWorkflowActionKey(
     requiresCommit?: boolean;
   } = {},
 ): string {
-  const taskIdentity = details.taskId
-    ? ['task-id', details.taskId]
-    : [details.taskIndex ?? '', details.taskTitle ?? ''];
+  const taskIdentity = taskIdentityKeyParts(details);
   return [
     commandFromPrompt(prompt) ?? prompt,
     details.plan ?? '',
@@ -84,7 +53,7 @@ export function autoWorkflowActionKeyForAction(
   action: AutoWorkflowAction,
 ): string | undefined {
   if (!action?.prompt) return undefined;
-  const actionIdentity = {
+  const actionIdentity: WorkflowTaskIdentity = {
     taskId: action.taskId,
     taskIndex: action.taskIndex,
     taskTitle: action.taskTitle,
@@ -110,7 +79,7 @@ export function autoWorkflowActionKeyForPromptState(
   state: WorkflowState,
   target: WorkflowStatsTarget | undefined,
 ): string {
-  const targetIdentity = {
+  const targetIdentity: WorkflowTaskIdentity = {
     taskId: target?.taskId,
     taskIndex: target?.taskIndex,
     taskTitle: target?.taskTitle,

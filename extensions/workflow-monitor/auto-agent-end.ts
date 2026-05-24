@@ -9,7 +9,8 @@ import {
   legacyReviewFixKey,
   reviewFixKey,
 } from './review-control.ts';
-import { agentTextReportsCommitComplete } from './task-commit-coordinator.ts';
+import { agentTextReportsCommitComplete } from './commit-result.ts';
+import type { WorkflowDispatchOptions } from './workflow-dispatch-options.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
@@ -23,15 +24,7 @@ type WorkflowAction =
     }
   | undefined;
 
-type AutoAgentEndDispatchOptions = {
-  freshContextBypassReason?: string;
-  appendEntry?: boolean;
-  useDefaultDelivery?: boolean;
-  idleTurnDelivery?: boolean;
-  disableFreshSession?: boolean;
-  disableCompaction?: boolean;
-  allowSamePhase?: boolean;
-};
+type AutoAgentEndDispatchOptions = WorkflowDispatchOptions;
 
 type AutoAgentEndDeps = {
   appendEntry(pi: ExtensionAPI): AppendEntry;

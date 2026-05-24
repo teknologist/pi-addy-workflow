@@ -5,10 +5,8 @@ export type UserMessageDeliveryOptions = {
   streamingBehavior?: 'steer' | 'followUp';
 };
 
-export type WorkflowRuntime = {
+export type WorkflowPromptRuntime = {
   canSendUserMessage(): boolean;
-  hasIdleSignal(): boolean;
-  isBusy(): boolean;
   sendUserMessage(
     content: string,
     options?: UserMessageDeliveryOptions,
@@ -16,18 +14,33 @@ export type WorkflowRuntime = {
   setEditorText(content: string): void;
   notify(message: string, level?: string): void;
   notifyWarning(message: string): void;
+};
+
+export type WorkflowIdleRuntime = {
+  hasIdleSignal(): boolean;
+  isBusy(): boolean;
+};
+
+export type WorkflowTimerRuntime = WorkflowIdleRuntime & {
   schedule(callback: () => void, delayMs: number): void;
   runOnce(
     registry: WorkflowTimerRegistry,
     key: string,
     callback: (release: () => void) => void,
   ): boolean;
+};
+
+export type WorkflowFreshSessionRuntime = {
   getParentSession(): string | undefined;
   canStartFreshSession(): boolean;
   startFreshSession(options: {
     withSession: (ctx: unknown) => Promise<void> | void;
   }): Promise<WorkflowFreshSessionResult>;
 };
+
+export type WorkflowRuntime = WorkflowPromptRuntime &
+  WorkflowTimerRuntime &
+  WorkflowFreshSessionRuntime;
 
 export type WorkflowFreshSessionResult =
   | { status: 'started' }

@@ -6,20 +6,20 @@
 
 ## Scale
 
-25 library files · 6 environment variables
+84 library files · 2 middleware layers · 6 environment variables
 
-**Libraries:** 25 files — see [libraries.md](./libraries.md)
+**Libraries:** 84 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
 Changes to these files have the widest blast radius across the codebase:
 
-- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **13** files
-- `extensions/workflow-monitor/command-router.ts` — imported by **5** files
-- `extensions/workflow-monitor/workflow-stats.ts` — imported by **5** files
-- `extensions/workflow-monitor/workflow-state-store.ts` — imported by **4** files
-- `extensions/workflow-monitor/config.ts` — imported by **3** files
-- `extensions/workflow-monitor/workflow-tracker.ts` — imported by **3** files
+- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **59** files
+- `extensions/workflow-monitor/command-router.ts` — imported by **15** files
+- `extensions/workflow-monitor/workflow-state-store.ts` — imported by **15** files
+- `extensions/workflow-monitor/workflow-stats.ts` — imported by **15** files
+- `extensions/workflow-monitor/workflow-core.ts` — imported by **14** files
+- `extensions/workflow-monitor/workflow-stats-target.ts` — imported by **7** files
 
 ## Required Environment Variables
 
@@ -27,8 +27,8 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` — `tests/workflow-monitor.test.ts`
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` — `tests/workflow-monitor.test.ts`
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` — `tests/workflow-monitor.test.ts`
-- `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-state-store.ts`
-- `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor.ts`
+- `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-state-store-scope.ts`
+- `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor/workflow-host-events.ts`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-05-23_
+_Back to [index.md](./index.md) · Generated 2026-05-24_

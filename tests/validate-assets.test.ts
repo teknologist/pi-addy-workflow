@@ -562,6 +562,10 @@ test('auto workflow end-to-end validation evidence is recorded', async () => {
     join('tests', 'workflow-tracker.test.ts'),
     'utf8',
   );
+  const widgetPresenterTests = await readFile(
+    join('tests', 'workflow-widget-presenter.test.ts'),
+    'utf8',
+  );
   const plan = await readFile(
     join('docs', 'plans', '2026-05-12-addy-auto-command.md'),
     'utf8',
@@ -573,7 +577,7 @@ test('auto workflow end-to-end validation evidence is recorded', async () => {
     /finish prompt keeps auto-mode commit paths non-interactive/,
   );
   assert.match(
-    trackerTests,
+    widgetPresenterTests,
     /auto mode toggles without changing lifecycle phase/,
   );
   assert.match(

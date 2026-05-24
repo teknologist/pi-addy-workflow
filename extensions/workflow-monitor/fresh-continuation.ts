@@ -1,17 +1,22 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   autoFreshContinuationKey,
-  clearAutoFreshUpdates,
   pendingFreshContinuationKey,
   pendingFreshContinuationKeyMatches,
   staleAutoFreshUpdates,
   validPendingFreshContinuation,
 } from './auto-control.ts';
-import { stateAfterAutoPrompt } from './command-dispatch.ts';
 import {
   createWorkflowRuntime,
   type UserMessageDeliveryOptions,
 } from './workflow-runtime.ts';
+import {
+  consumedPendingFreshPromptState,
+  currentSessionFallbackOptions as fallbackOptionsForIdleSignal,
+  pendingFreshInputMatches,
+} from './fresh-continuation-state.ts';
+import { planFreshContinuationStart } from './fresh-continuation-plan.ts';
+import type { WorkflowDispatchOptions } from './workflow-dispatch-options.ts';
 import type { AppendEntry, WorkflowContext } from './workflow-state-store.ts';
 import { runWhenIdle } from './workflow-timer-loop.ts';
 import {
@@ -19,15 +24,7 @@ import {
   type WorkflowState,
 } from './workflow-transitions.ts';
 
-export type FreshContinuationDispatchOptions = {
-  freshContextBypassReason?: AutoFreshReason;
-  appendEntry?: boolean;
-  useDefaultDelivery?: boolean;
-  idleTurnDelivery?: boolean;
-  disableFreshSession?: boolean;
-  disableCompaction?: boolean;
-  allowSamePhase?: boolean;
-};
+export type FreshContinuationDispatchOptions = WorkflowDispatchOptions;
 
 type PendingFreshWorkflowState = WorkflowState & {
   autoFreshPrompt: string;
@@ -60,6 +57,10 @@ type FreshContinuationCoordinatorDeps = {
   retryMs: number;
   maxAttempts: number;
 };
+
+type PendingFreshResumeMode = 'current-session' | 'after-compaction';
+
+type PendingFreshResumeResult = 'none' | 'stale-cleared' | 'delivered';
 
 export type FreshContinuationCoordinator = ReturnType<
   typeof createFreshContinuationCoordinator
@@ -100,52 +101,14 @@ async function showFreshContextNotice(
   );
 }
 
-function consumeAutoFreshPromptUpdates(
-  state: WorkflowState,
-): Partial<WorkflowState> {
-  return {
-    ...clearAutoFreshUpdates(state),
-    autoRetryKey: state.autoRetryKey,
-    autoRetryCount: state.autoRetryCount,
-  };
-}
-
-function consumedPendingFreshPromptState(
-  state: WorkflowState,
-): WorkflowState | undefined {
-  if (!validPendingFreshContinuation(state)) return undefined;
-  const key = pendingFreshContinuationKey(state);
-  return stateAfterAutoPrompt(state.autoFreshPrompt, state, {
-    ...consumeAutoFreshPromptUpdates({ ...state, autoFreshDeliveryKey: key }),
-    autoFreshConsumedKey: key,
-  });
-}
-
-function pendingFreshInputMatches(
-  input: string,
-  state: WorkflowState,
-): boolean {
-  if (!validPendingFreshContinuation(state)) return false;
-  const invocation = input.match(/^Invocation:\s+`([^`]+)`\s*$/m)?.[1];
-  return (
-    invocation === state.autoFreshPrompt ||
-    input === state.autoFreshExpandedPrompt
-  );
-}
-
 function currentSessionFallbackOptions(
   ctx: unknown,
   options: FreshContinuationDispatchOptions,
 ): FreshContinuationDispatchOptions {
-  return {
-    ...options,
-    useDefaultDelivery: createWorkflowRuntime(
-      {} as ExtensionAPI,
-      ctx,
-    ).hasIdleSignal()
-      ? options.useDefaultDelivery
-      : false,
-  };
+  return fallbackOptionsForIdleSignal(
+    options,
+    createWorkflowRuntime({} as ExtensionAPI, ctx).hasIdleSignal(),
+  );
 }
 
 export function createFreshContinuationCoordinator(
@@ -322,6 +285,46 @@ export function createFreshContinuationCoordinator(
     );
   }
 
+  async function resumePendingFreshContinuation(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    options: FreshContinuationDispatchOptions = {},
+    mode: PendingFreshResumeMode = 'current-session',
+  ): Promise<PendingFreshResumeResult> {
+    const state = deps.getState(ctx);
+    if (state.autoFreshPrompt && !state.autoFreshReason) {
+      deps.notify(
+        ctx,
+        'Ignoring stale Addy auto fresh continuation without a recorded reason.',
+        'warning',
+      );
+      deps.setState(
+        ctx,
+        { ...state, ...staleAutoFreshUpdates() },
+        options.appendEntry === false ? undefined : deps.appendEntry(pi),
+      );
+      return 'stale-cleared';
+    }
+    if (!validPendingFreshContinuation(state)) return 'none';
+
+    const resumeOptions = {
+      ...options,
+      freshContextBypassReason:
+        options.freshContextBypassReason ?? state.autoFreshReason,
+    };
+    if (mode === 'after-compaction') {
+      schedulePendingFreshPromptAfterCompaction(pi, ctx, state, resumeOptions);
+    } else {
+      await deliverPendingFreshPromptInCurrentSession(
+        pi,
+        ctx,
+        state,
+        resumeOptions,
+      );
+    }
+    return 'delivered';
+  }
+
   function schedulePendingFreshPromptAfterCompaction(
     pi: ExtensionAPI,
     ctx: unknown,
@@ -368,28 +371,20 @@ export function createFreshContinuationCoordinator(
     const runtime = createWorkflowRuntime(pi, ctx);
     const notify = (msg: string, level: string) => deps.notify(ctx, msg, level);
     const initialState = deps.getState(ctx);
-    if (initialState.autoFreshPrompt && !initialState.autoFreshReason) {
-      notify(
-        'Ignoring stale Addy auto fresh continuation without a recorded reason.',
-        'warning',
-      );
-      deps.setState(
-        ctx,
-        { ...initialState, ...staleAutoFreshUpdates() },
-        deps.appendEntry(pi),
-      );
+    const plan = planFreshContinuationStart({
+      state: initialState,
+      requestedReason,
+      canStartFreshSession: runtime.canStartFreshSession(),
+      consumedKeys: consumedAutoFreshKeys,
+    });
+    if (plan.kind === 'clear-stale') {
+      notify(plan.message, 'warning');
+      deps.setState(ctx, plan.state, deps.appendEntry(pi));
       return;
     }
-    if (!initialState.autoFreshPrompt && initialState.autoFreshConsumedKey)
+    if (plan.kind === 'already-consumed' || plan.kind === 'already-delivered')
       return;
-    if (
-      initialState.autoFreshDeliveryKey &&
-      consumedAutoFreshKeys.has(initialState.autoFreshDeliveryKey)
-    )
-      return;
-    const reason = validPendingFreshContinuation(initialState)
-      ? initialState.autoFreshReason
-      : requestedReason;
+    const reason = plan.reason;
     const continueInCurrentSession = async () => {
       if (validPendingFreshContinuation(initialState)) {
         schedulePendingFreshPromptAfterCompaction(pi, ctx, initialState, {
@@ -413,7 +408,7 @@ export function createFreshContinuationCoordinator(
       );
     };
 
-    if (!runtime.canStartFreshSession()) {
+    if (plan.kind === 'continue-current-session') {
       await continueInCurrentSession();
       return;
     }
@@ -508,6 +503,7 @@ export function createFreshContinuationCoordinator(
     pendingFreshInputMatches,
     runFreshContextContinuation,
     schedulePendingFreshPromptAfterCompaction,
+    resumePendingFreshContinuation,
   };
 }
 

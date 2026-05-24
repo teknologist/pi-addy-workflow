@@ -5,7 +5,7 @@ import {
   isManualTurnCommand,
   phaseFromWorkflowPrompt,
 } from './command-router.ts';
-import { stateWithPendingFreshPrompt as stateWithPendingFreshPromptControl } from './auto-control.ts';
+import { stateWithPendingFreshPrompt } from './fresh-continuation-pending-state.ts';
 import { ADDY_AUTO_TASK_COMMIT_PROMPT } from './workflow-tracker.ts';
 import {
   recordWorkflowReviewRun,
@@ -160,7 +160,7 @@ export function planPendingFreshDispatch(input: {
   return {
     kind: 'pending-fresh',
     reason: input.reason,
-    state: stateWithPendingFreshPromptControl(
+    state: stateWithPendingFreshPrompt(
       input.prompt,
       input.reason,
       input.state,

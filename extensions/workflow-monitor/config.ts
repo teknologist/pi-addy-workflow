@@ -35,24 +35,6 @@ export const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig = {
   },
 };
 
-function cloneDefaultConfig(): AddyWorkflowConfig {
-  return {
-    auto: {
-      freshContext: {
-        beforeEveryStep:
-          DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeEveryStep,
-        betweenTasks:
-          DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.betweenTasks,
-        beforeReview:
-          DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeReview,
-      },
-      review: {
-        maxFixLoops: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.review.maxFixLoops,
-      },
-    },
-  };
-}
-
 function coerceBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   if (typeof value !== 'string') return undefined;
@@ -225,7 +207,7 @@ export function loadAddyWorkflowConfig(
   env: ConfigEnv = process.env,
 ): AddyWorkflowConfig {
   const notify = ctx.ui?.notify;
-  let config = cloneDefaultConfig();
+  let config = structuredClone(DEFAULT_ADDY_WORKFLOW_CONFIG);
   config = readConfigFile(globalConfigPath(), config, notify);
   if (ctx.cwd)
     config = readConfigFile(

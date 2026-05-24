@@ -2,36 +2,36 @@
 
 ## Most Imported Files (change these carefully)
 
-- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **13** files
-- `extensions/workflow-monitor/command-router.ts` — imported by **5** files
-- `extensions/workflow-monitor/workflow-stats.ts` — imported by **5** files
-- `extensions/workflow-monitor/workflow-state-store.ts` — imported by **4** files
-- `extensions/workflow-monitor/config.ts` — imported by **3** files
-- `extensions/workflow-monitor/workflow-tracker.ts` — imported by **3** files
-- `extensions/workflow-monitor/workflow-timer-loop.ts` — imported by **3** files
-- `extensions/workflow-monitor/workflow-plan-path.ts` — imported by **3** files
-- `extensions/workflow-monitor/task-commit-coordinator.ts` — imported by **2** files
-- `extensions/workflow-monitor/command-dispatch.ts` — imported by **2** files
-- `extensions/workflow-monitor.ts` — imported by **2** files
-- `extensions/workflow-monitor/workflow-state-codec.ts` — imported by **2** files
-- `tests/helpers.ts` — imported by **2** files
-- `extensions/workflow-monitor/workflow-runtime.ts` — imported by **2** files
-- `extensions/bootstrap/core.ts` — imported by **1** files
-- `extensions/workflow-monitor/review-control.ts` — imported by **1** files
-- `extensions/workflow-monitor/auto-control.ts` — imported by **1** files
-- `extensions/workflow-monitor/repository-scope.ts` — imported by **1** files
-- `extensions/workflow-monitor/plan-task-lifecycle.ts` — imported by **1** files
-- `extensions/workflow-monitor/warnings.ts` — imported by **1** files
+- `extensions/workflow-monitor/workflow-transitions.ts` — imported by **59** files
+- `extensions/workflow-monitor/command-router.ts` — imported by **15** files
+- `extensions/workflow-monitor/workflow-state-store.ts` — imported by **15** files
+- `extensions/workflow-monitor/workflow-stats.ts` — imported by **15** files
+- `extensions/workflow-monitor/workflow-core.ts` — imported by **14** files
+- `extensions/workflow-monitor/workflow-stats-target.ts` — imported by **7** files
+- `extensions/workflow-monitor/workflow-dispatch-options.ts` — imported by **7** files
+- `extensions/workflow-monitor/workflow-tracker.ts` — imported by **6** files
+- `extensions/workflow-monitor/plan-task-lifecycle.ts` — imported by **6** files
+- `extensions/workflow-monitor/auto-lifecycle.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-task-identity.ts` — imported by **5** files
+- `extensions/workflow-monitor/prompt-template.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-runtime.ts` — imported by **5** files
+- `extensions/workflow-monitor/auto-control.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-phases.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-state-normalizer.ts` — imported by **5** files
+- `extensions/workflow-monitor/workflow-state-codec.ts` — imported by **5** files
+- `extensions/workflow-monitor/fresh-continuation.ts` — imported by **4** files
+- `extensions/workflow-monitor/workflow-plan-continuation.ts` — imported by **4** files
+- `extensions/workflow-monitor/command-dispatch.ts` — imported by **4** files
 
 ## Import Map (who imports what)
 
-- `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/command-router.ts`, `extensions/workflow-monitor/review-control.ts`, `extensions/workflow-monitor/review-findings.ts` +8 more
-- `extensions/workflow-monitor/command-router.ts` ← `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/prompt-template.ts`, `extensions/workflow-monitor/task-commit-coordinator.ts`, `extensions/workflow-monitor/workflow-stats.ts`
-- `extensions/workflow-monitor/workflow-stats.ts` ← `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/task-commit-coordinator.ts`, `extensions/workflow-monitor/workflow-state-codec.ts`, `tests/auto-agent-end.test.ts`
-- `extensions/workflow-monitor/workflow-state-store.ts` ← `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/fresh-continuation.ts`, `extensions/workflow-monitor/task-commit-coordinator.ts`, `tests/workflow-state-store.test.ts`
-- `extensions/workflow-monitor/config.ts` ← `extensions/workflow-monitor/command-dispatch.ts`, `extensions/workflow-monitor/task-commit-coordinator.ts`, `tests/workflow-monitor.test.ts`
-- `extensions/workflow-monitor/workflow-tracker.ts` ← `extensions/workflow-monitor/command-dispatch.ts`, `tests/auto-action-keys.test.ts`, `tests/workflow-state-codec.test.ts`
-- `extensions/workflow-monitor/workflow-timer-loop.ts` ← `extensions/workflow-monitor/fresh-continuation.ts`, `extensions/workflow-monitor.ts`, `tests/workflow-timer-loop.test.ts`
-- `extensions/workflow-monitor/workflow-plan-path.ts` ← `extensions/workflow-monitor/task-commit-coordinator.ts`, `extensions/workflow-monitor/workflow-tracker.ts`, `extensions/workflow-monitor.ts`
-- `extensions/workflow-monitor/task-commit-coordinator.ts` ← `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor.ts`
-- `extensions/workflow-monitor/command-dispatch.ts` ← `extensions/workflow-monitor/fresh-continuation.ts`, `extensions/workflow-monitor/task-commit-coordinator.ts`
+- `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts` +54 more
+- `extensions/workflow-monitor/command-router.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/command-intake.ts` +10 more
+- `extensions/workflow-monitor/workflow-state-store.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-prompt-dispatcher.ts`, `extensions/workflow-monitor/auto-watchdog.ts` +10 more
+- `extensions/workflow-monitor/workflow-stats.ts` ← `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-prompt-dispatcher.ts` +10 more
+- `extensions/workflow-monitor/workflow-core.ts` ← `extensions/workflow-monitor/renderers.ts`, `extensions/workflow-monitor/workflow-state-codec-auto-control.ts`, `extensions/workflow-monitor/workflow-state-codec-auto.ts`, `extensions/workflow-monitor/workflow-state-codec-metadata.ts`, `extensions/workflow-monitor/workflow-state-codec-review.ts` +9 more
+- `extensions/workflow-monitor/workflow-stats-target.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/command-registry.ts`, `extensions/workflow-monitor/composition.ts` +2 more
+- `extensions/workflow-monitor/workflow-dispatch-options.ts` ← `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-watchdog.ts`, `extensions/workflow-monitor/fresh-continuation-state.ts`, `extensions/workflow-monitor/fresh-continuation.ts` +2 more
+- `extensions/workflow-monitor/workflow-tracker.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/command-dispatch.ts`, `extensions/workflow-monitor/workflow-state-store.ts`, `tests/addy-auto-command.test.ts`, `tests/auto-action-keys.test.ts` +1 more
+- `extensions/workflow-monitor/plan-task-lifecycle.ts` ← `extensions/workflow-monitor/plan-task-resolution.ts`, `extensions/workflow-monitor/workflow-state-codec-commits.ts`, `tests/auto-lifecycle.test.ts`, `tests/plan-task-resolution.test.ts`, `tests/slice-plan-series.test.ts` +1 more
+- `extensions/workflow-monitor/auto-lifecycle.ts` ← `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-watchdog.ts`, `extensions/workflow-monitor/command-registry.ts`, `extensions/workflow-monitor/composition.ts`, `extensions/workflow-monitor/manual-frontier-guard.ts`

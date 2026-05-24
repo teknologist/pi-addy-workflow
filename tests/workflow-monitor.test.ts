@@ -9006,7 +9006,9 @@ test('late task summaries do not overwrite newer workflow state', async () => {
     ].join('\n'),
   );
 
-  let releaseFirstSummary: (() => void) | undefined;
+  const authResolvers: Array<
+    (value: { ok: boolean; apiKey?: string }) => void
+  > = [];
   const ctx: any = {
     cwd,
     id: 'task-summary-race-session',
@@ -9015,7 +9017,7 @@ test('late task summaries do not overwrite newer workflow state', async () => {
     modelRegistry: {
       getApiKeyAndHeaders: () =>
         new Promise((resolve) => {
-          releaseFirstSummary = () => resolve({ ok: true, apiKey: 'test-key' });
+          authResolvers.push(resolve);
         }),
     },
   };
@@ -9028,11 +9030,14 @@ test('late task summaries do not overwrite newer workflow state', async () => {
     source: 'user-input',
     text: `/addy-build ${secondPlan}`,
   });
-  releaseFirstSummary?.();
+  assert.equal(authResolvers.length, 2);
+  authResolvers[0]({ ok: false });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.equal(ctx.state.activePlan, secondPlan);
   assert.equal(ctx.state.currentTask, 'Second long task name that must win');
+  assert.equal(ctx.state.currentTaskSummary, undefined);
+  assert.equal(ctx.state.nextTaskSummary, undefined);
 });
 
 test('workflow state round-trips from persisted append entries', () => {

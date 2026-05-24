@@ -1,4 +1,4 @@
-import type { WorkflowPhase } from './workflow-transitions.ts';
+import type { WorkflowPhase } from './workflow-phases.ts';
 
 export const WORKFLOW_COMMAND_BY_PHASE: Record<WorkflowPhase, string> = {
   define: '/addy-define',

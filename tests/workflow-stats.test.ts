@@ -14,9 +14,11 @@ import {
   recordWorkflowReviewIssues,
   recordWorkflowReviewRun,
   recordWorkflowVerifyRun,
+} from '../extensions/workflow-monitor/workflow-stats.ts';
+import {
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
-} from '../extensions/workflow-monitor/workflow-stats.ts';
+} from '../extensions/workflow-monitor/workflow-stats-report.ts';
 
 const stateDir = mkdtempSync(join(tmpdir(), 'pi-addy-workflow-stats-test-'));
 

@@ -1,10 +1,10 @@
 import type {
-  WorkflowRuntime,
+  WorkflowTimerRuntime,
   WorkflowTimerRegistry,
 } from './workflow-runtime.ts';
 
 export type RunWhenIdleOptions = {
-  runtime: Pick<WorkflowRuntime, 'isBusy' | 'runOnce' | 'schedule'>;
+  runtime: Pick<WorkflowTimerRuntime, 'isBusy' | 'runOnce' | 'schedule'>;
   registry: WorkflowTimerRegistry;
   key: string;
   retryMs: number;

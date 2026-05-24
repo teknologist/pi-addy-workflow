@@ -1,10 +1,14 @@
-import { clearReviewControl, REVIEW_CONTROL_FIELDS } from './review-control.ts';
 import {
-  transitionWorkflow,
-  type AutoFreshReason,
-  type AutoPendingActionReason,
-  type WorkflowAutoPendingAction,
-  type WorkflowState,
+  AUTO_CONTROL_FIELDS,
+  clearReviewControl,
+  PROJECT_FALLBACK_CONTROL_FIELDS,
+} from './workflow-state-control.ts';
+import { taskIdentityKeyParts } from './workflow-task-identity.ts';
+import type {
+  AutoFreshReason,
+  AutoPendingActionReason,
+  WorkflowAutoPendingAction,
+  WorkflowState,
 } from './workflow-transitions.ts';
 
 export type AutoControlTarget = {
@@ -15,23 +19,7 @@ export type AutoControlTarget = {
   taskTitle?: string;
 };
 
-export const AUTO_CONTROL_FIELDS = [
-  'autoLastPrompt',
-  'autoPendingAction',
-  'autoPausedReason',
-  'autoRetryKey',
-  'autoRetryCount',
-  'autoFreshPrompt',
-  'autoFreshExpandedPrompt',
-  'autoFreshReason',
-  'autoFreshDeliveryKey',
-  'autoFreshConsumedKey',
-] as const satisfies readonly (keyof WorkflowState)[];
-
-const PROJECT_FALLBACK_CONTROL_FIELDS = [
-  ...AUTO_CONTROL_FIELDS,
-  ...REVIEW_CONTROL_FIELDS,
-] as const satisfies readonly (keyof WorkflowState)[];
+export { AUTO_CONTROL_FIELDS } from './workflow-state-control.ts';
 
 export function hasLiveAutoControl(state: WorkflowState | undefined): boolean {
   return Boolean(
@@ -176,52 +164,12 @@ export function staleAutoFreshUpdates(): Partial<WorkflowState> {
   };
 }
 
-export function pendingAutoFreshUpdates(
-  prompt: string,
-  reason: AutoFreshReason,
-  state: WorkflowState,
-  updates: Partial<WorkflowState> = {},
-  expandedPrompt: string,
-): Partial<WorkflowState> {
-  const pendingState = { ...state, ...updates };
-  return {
-    autoRetryKey: undefined,
-    autoRetryCount: undefined,
-    ...updates,
-    autoFreshPrompt: prompt,
-    autoFreshExpandedPrompt: expandedPrompt,
-    autoFreshReason: reason,
-    autoFreshDeliveryKey: autoFreshContinuationKey(
-      prompt,
-      reason,
-      pendingState,
-    ),
-    autoFreshConsumedKey: undefined,
-  };
-}
-
-export function stateWithPendingFreshPrompt(
-  prompt: string,
-  reason: AutoFreshReason,
-  state: WorkflowState,
-  updates: Partial<WorkflowState> = {},
-  expandedPrompt: string,
-): WorkflowState {
-  const pendingState = {
-    ...state,
-    ...pendingAutoFreshUpdates(prompt, reason, state, updates, expandedPrompt),
-  };
-  return transitionWorkflow(pendingState, {
-    source: 'user-input',
-    text: prompt,
-    manualAddyCommand: false,
-  });
-}
-
 export function autoRetryKey(state: WorkflowState, prompt: string): string {
-  const taskIdentity = state.currentTaskId
-    ? ['task-id', state.currentTaskId]
-    : [state.currentTaskIndex ?? '', state.currentTask ?? ''];
+  const taskIdentity = taskIdentityKeyParts({
+    taskId: state.currentTaskId,
+    taskIndex: state.currentTaskIndex,
+    taskTitle: state.currentTask,
+  });
   return [
     prompt,
     state.activePlan ?? '',

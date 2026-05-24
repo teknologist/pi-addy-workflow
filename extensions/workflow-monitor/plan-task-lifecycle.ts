@@ -2,6 +2,7 @@ import type {
   WorkflowState,
   WorkflowTaskCommitRecord,
 } from './workflow-transitions.ts';
+import { workflowTaskIdentityKey } from './workflow-task-identity.ts';
 
 export type PlanTaskStatus = 'Implemented' | 'Verified' | 'Reviewed';
 
@@ -127,9 +128,12 @@ export function workflowTaskCommitKey(
   taskTitle: string,
   taskId?: string,
 ): string {
-  return taskId
-    ? [planPath, 'task-id', taskId].join('\u001f')
-    : [planPath, taskIndex, taskTitle].join('\u001f');
+  return workflowTaskIdentityKey({
+    plan: planPath,
+    taskIndex,
+    taskTitle,
+    taskId,
+  });
 }
 
 export function taskMatchesPlanTask(
