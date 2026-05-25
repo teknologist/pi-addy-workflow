@@ -27,10 +27,12 @@ export function coerceWorkflowAutoControl(
   candidate: Partial<WorkflowAutoControlFields>,
 ): WorkflowAutoControlFields | undefined {
   if (!isOptionalBoolean(candidate.autoMode)) return undefined;
-  if (
-    candidate.autoPausedReason !== undefined &&
-    !isAutoPausedReason(candidate.autoPausedReason)
-  )
+  const candidateAutoPausedReason = candidate.autoPausedReason as unknown;
+  const autoPausedReason =
+    candidateAutoPausedReason === 'unclear-commit-result'
+      ? undefined
+      : candidateAutoPausedReason;
+  if (autoPausedReason !== undefined && !isAutoPausedReason(autoPausedReason))
     return undefined;
   if (!isOptionalString(candidate.autoLastPrompt)) return undefined;
   if (!isOptionalString(candidate.autoFreshPrompt)) return undefined;
@@ -51,7 +53,7 @@ export function coerceWorkflowAutoControl(
 
   return {
     autoMode: candidate.autoMode,
-    autoPausedReason: candidate.autoPausedReason,
+    autoPausedReason,
     autoLastPrompt: candidate.autoLastPrompt,
     autoFreshPrompt: candidate.autoFreshPrompt,
     autoFreshExpandedPrompt: candidate.autoFreshExpandedPrompt,

@@ -21,6 +21,17 @@ test('state coercer migrates legacy current ship phase', () => {
   assert.equal(state?.current, 'finish');
 });
 
+test('state coercer drops legacy unclear commit pause reason', () => {
+  const state = coerceWorkflowState({
+    ...initialState,
+    autoMode: true,
+    autoPausedReason: 'unclear-commit-result',
+  });
+
+  assert.equal(state?.autoMode, true);
+  assert.equal(state?.autoPausedReason, undefined);
+});
+
 test('state coercer fails closed for invalid subdomain fields', () => {
   assert.equal(
     coerceWorkflowState({ ...initialState, current: 'nope' }),

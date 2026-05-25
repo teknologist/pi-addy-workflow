@@ -46,6 +46,28 @@ test('auto control codec accepts omitted optional auto fields', () => {
   });
 });
 
+test('auto control codec drops legacy unclear commit pause reason', () => {
+  assert.deepEqual(
+    coerceWorkflowAutoControl({
+      autoMode: true,
+      autoPausedReason: 'unclear-commit-result' as never,
+      autoLastPrompt: '__addy-auto-task-commit__',
+    }),
+    {
+      autoMode: true,
+      autoPausedReason: undefined,
+      autoLastPrompt: '__addy-auto-task-commit__',
+      autoFreshPrompt: undefined,
+      autoFreshExpandedPrompt: undefined,
+      autoFreshReason: undefined,
+      autoFreshDeliveryKey: undefined,
+      autoFreshConsumedKey: undefined,
+      autoRetryKey: undefined,
+      autoRetryCount: undefined,
+    },
+  );
+});
+
 test('auto control codec rejects invalid persisted auto fields', () => {
   assert.equal(
     coerceWorkflowAutoControl({ autoMode: 'yes' as never }),

@@ -16,7 +16,6 @@ export function isAutoPausedReason(
   value: unknown,
 ): value is WorkflowAutoPausedReason {
   return (
-    value === 'unclear-commit-result' ||
     value === 'max-review-fix-loops' ||
     value === 'repeated-review-finding' ||
     value === 'same-phase-retry-limit' ||

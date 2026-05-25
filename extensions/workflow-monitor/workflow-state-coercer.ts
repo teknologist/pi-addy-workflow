@@ -44,7 +44,8 @@ export function coerceWorkflowState(value: unknown): WorkflowState | undefined {
     candidate,
     committedTasks,
   );
-  if (!coerceWorkflowAutoControl(candidate)) return undefined;
+  const autoControl = coerceWorkflowAutoControl(candidate);
+  if (!autoControl) return undefined;
   const autoPendingAction = coerceAutoPendingAction(
     candidate.autoPendingAction,
   );
@@ -57,6 +58,7 @@ export function coerceWorkflowState(value: unknown): WorkflowState | undefined {
 
   return {
     ...candidate,
+    ...autoControl,
     committedTasks: migratedCommittedTasks,
     autoPendingAction,
     current,
