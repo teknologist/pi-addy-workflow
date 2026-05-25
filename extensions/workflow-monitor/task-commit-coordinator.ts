@@ -28,6 +28,8 @@ type WorkflowAction = ReturnType<
   typeof nextWorkflowActionForActivePlanLifecycle
 >;
 
+const UNCONFIRMED_TASK_COMMIT_SHA = 'unconfirmed';
+
 type TaskCommitCoordinatorDeps = {
   appendEntry(pi: ExtensionAPI): AppendEntry;
   archiveWorkflowStats(state: WorkflowState, reason: string): WorkflowState;
@@ -118,20 +120,6 @@ export function createTaskCommitCoordinator(deps: TaskCommitCoordinatorDeps) {
     )
       return false;
 
-    if (!agentTextReportsCommitComplete(text)) {
-      deps.setState(
-        ctx,
-        { ...state, autoPausedReason: 'unclear-commit-result' },
-        deps.appendEntry(pi),
-      );
-      deps.notify(
-        ctx,
-        'Addy auto paused after the task commit step; the commit result was unclear. Commit or clean the worktree, then rerun /addy-auto.',
-        'warning',
-      );
-      return true;
-    }
-
     const cwd = (ctx as { cwd?: string }).cwd;
     const actionTarget = actionCommitTarget(
       state,
@@ -146,7 +134,9 @@ export function createTaskCommitCoordinator(deps: TaskCommitCoordinatorDeps) {
         recordCommittedTask(
           state,
           targetWithTaskId,
-          commitShaFromAgentText(text),
+          agentTextReportsCommitComplete(text)
+            ? commitShaFromAgentText(text)
+            : UNCONFIRMED_TASK_COMMIT_SHA,
         ),
         'task-commit',
       ),

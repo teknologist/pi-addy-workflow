@@ -4912,7 +4912,7 @@ test('auto loop does not commit after review when plan cannot prove task complet
   );
 });
 
-test('auto loop pauses after unclear commit output even when it contains a hash', async () => {
+test('auto loop continues after unclear commit output and records an unconfirmed commit', async () => {
   const cwd = join(stateDir, 'auto-loop-task-commit-unclear-project');
   const planPath = join('docs', 'plans', 'auto-loop.md');
   mkdirSync(join(cwd, 'docs', 'plans'), { recursive: true });
@@ -4976,11 +4976,20 @@ test('auto loop pauses after unclear commit output even when it contains a hash'
     ctx,
   );
 
-  assert.equal(sentMessages.length, 0);
-  assert.match(notices.at(-1)?.[0] ?? '', /commit result was unclear/);
-  assert.equal(notices.at(-1)?.[1], 'warning');
+  assert.equal(sentMessages.length, 1);
+  assertSentWorkflowPrompt(
+    sentMessages[0],
+    `/addy-build ${planPath}`,
+    'Addy Build',
+  );
+  assert.ok(
+    !notices.some(([message]) => /commit result was unclear/.test(message)),
+  );
   assert.equal(ctx.state.activePlan, planPath);
-  assert.equal(ctx.state.committedTasks, undefined);
+  assert.equal(ctx.state.autoPausedReason, undefined);
+  const committed =
+    ctx.state.committedTasks?.[workflowTaskCommitKey(planPath, 1, 'Current')];
+  assert.equal(committed?.commitSha, 'unconfirmed');
 });
 
 test('auto loop accepts common successful commit output variants', async () => {
