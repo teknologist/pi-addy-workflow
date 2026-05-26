@@ -4,7 +4,7 @@
 
 > 0 routes | 0 models | 0 components | 97 lib files | 6 env vars | 2 middleware | 0% test coverage
 > **Token savings:** this file is ~8,800 tokens. Without it, AI exploration would cost ~35,600 tokens. **Saves ~26,800 tokens per conversation.**
-> **Last scanned:** 2026-05-26 22:12 — re-run after significant changes
+> **Last scanned:** 2026-05-26 22:33 — re-run after significant changes
 
 ---
 
@@ -108,10 +108,10 @@
   - function hostContext: (ctx) => HostContext
   - function baseCwd: (ctx) => string | undefined
   - function getWorkflowStateFromContext: (ctx) => WorkflowState
+  - function getProjectWorkflowStateFromContext: (ctx) => WorkflowState | undefined
   - function setWorkflowStateFromContext: (ctx, state, appendEntry?) => void
   - function loadWorkflowConfig: (ctx) => AddyWorkflowConfig
-  - function freshContextConfig: (ctx) => AddyWorkflowConfig['auto']['freshContext']
-  - _...7 more_
+  - _...8 more_
 - `extensions/workflow-monitor/composition.ts` — function registerAddyWorkflowMonitor: (pi) => void
 - `extensions/workflow-monitor/config.ts`
   - function ensureGlobalAddyWorkflowConfig: (ctx, home) => void
@@ -321,6 +321,7 @@
   - function workflowStatePath: (key, ctx?) => string
   - type WorkflowStateScopeContext
 - `extensions/workflow-monitor/workflow-state-store.ts`
+  - function getProjectWorkflowState: (ctx) => WorkflowState | undefined
   - function getContextWorkflowState: (ctx) => WorkflowState
   - function setContextWorkflowState: (ctx, state, appendEntry?) => void
   - type WorkflowContext

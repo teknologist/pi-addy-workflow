@@ -11,6 +11,7 @@ import {
 } from './workflow-handler.ts';
 import {
   getContextWorkflowState,
+  getProjectWorkflowState,
   setContextWorkflowState,
   type AppendEntry,
 } from './workflow-state-store.ts';
@@ -35,6 +36,12 @@ export function baseCwd(ctx: unknown): string | undefined {
 
 export function getWorkflowStateFromContext(ctx: unknown): WorkflowState {
   return getContextWorkflowState(ctx as never);
+}
+
+export function getProjectWorkflowStateFromContext(
+  ctx: unknown,
+): WorkflowState | undefined {
+  return getProjectWorkflowState(ctx as never);
 }
 
 export function setWorkflowStateFromContext(

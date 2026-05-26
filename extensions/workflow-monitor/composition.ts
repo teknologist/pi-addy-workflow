@@ -58,6 +58,7 @@ import {
   baseCwd,
   ensureWorkflowConfig,
   freshContextConfig,
+  getProjectWorkflowStateFromContext,
   getWorkflowStateFromContext,
   handleWorkflowEventFromContext,
   initializeWorkflowWidgetFromContext,
@@ -78,6 +79,7 @@ const AUTO_TASK_COMMIT_PROMPT = ADDY_AUTO_TASK_COMMIT_PROMPT;
 const AUTO_FRESH_IDLE_RETRY_MS = 50;
 const AUTO_FRESH_IDLE_MAX_ATTEMPTS = 1200;
 const AUTO_SAME_PHASE_MAX_RETRIES = 12;
+const PASSIVE_WIDGET_REFRESH_MS = 15_000;
 
 const getWorkflowState = getWorkflowStateFromContext;
 const rawSetWorkflowState = setWorkflowStateFromContext;
@@ -102,16 +104,34 @@ function showAutoRunnerPassiveWidget(
   };
   host.ui?.setWidget?.(
     WORKFLOW_WIDGET_KEY,
-    (_tui?: unknown, theme?: unknown) => {
-      const workflowWidget = renderWorkflowWidget(state, host.cwd)(
-        _tui,
-        theme as Parameters<ReturnType<typeof renderWorkflowWidget>>[1],
-      );
+    (tui?: unknown, theme?: unknown) => {
+      const timer = setInterval(() => {
+        (tui as { requestRender?: () => void } | undefined)?.requestRender?.();
+      }, PASSIVE_WIDGET_REFRESH_MS);
+      timer.unref?.();
+
+      let workflowWidget = renderPassiveWorkflowWidget(
+        ctx,
+        state,
+        host.cwd,
+      )(tui, theme as Parameters<ReturnType<typeof renderWorkflowWidget>>[1]);
+      const refreshWorkflowWidget = () => {
+        workflowWidget = renderPassiveWorkflowWidget(
+          ctx,
+          state,
+          host.cwd,
+        )(tui, theme as Parameters<ReturnType<typeof renderWorkflowWidget>>[1]);
+      };
       return {
+        dispose() {
+          clearInterval(timer);
+        },
         invalidate() {
+          refreshWorkflowWidget();
           workflowWidget.invalidate();
         },
         render(width?: number) {
+          refreshWorkflowWidget();
           return [
             ...workflowWidget.render(width),
             width
@@ -121,6 +141,17 @@ function showAutoRunnerPassiveWidget(
         },
       };
     },
+  );
+}
+
+function renderPassiveWorkflowWidget(
+  ctx: unknown,
+  fallbackState: WorkflowState,
+  cwd?: string,
+): ReturnType<typeof renderWorkflowWidget> {
+  return renderWorkflowWidget(
+    getProjectWorkflowStateFromContext(ctx) ?? fallbackState,
+    cwd,
   );
 }
 

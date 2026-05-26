@@ -98,10 +98,10 @@
   - function hostContext: (ctx) => HostContext
   - function baseCwd: (ctx) => string | undefined
   - function getWorkflowStateFromContext: (ctx) => WorkflowState
+  - function getProjectWorkflowStateFromContext: (ctx) => WorkflowState | undefined
   - function setWorkflowStateFromContext: (ctx, state, appendEntry?) => void
   - function loadWorkflowConfig: (ctx) => AddyWorkflowConfig
-  - function freshContextConfig: (ctx) => AddyWorkflowConfig['auto']['freshContext']
-  - _...7 more_
+  - _...8 more_
 - `extensions/workflow-monitor/composition.ts` — function registerAddyWorkflowMonitor: (pi) => void
 - `extensions/workflow-monitor/config.ts`
   - function ensureGlobalAddyWorkflowConfig: (ctx, home) => void
@@ -311,6 +311,7 @@
   - function workflowStatePath: (key, ctx?) => string
   - type WorkflowStateScopeContext
 - `extensions/workflow-monitor/workflow-state-store.ts`
+  - function getProjectWorkflowState: (ctx) => WorkflowState | undefined
   - function getContextWorkflowState: (ctx) => WorkflowState
   - function setContextWorkflowState: (ctx, state, appendEntry?) => void
   - type WorkflowContext

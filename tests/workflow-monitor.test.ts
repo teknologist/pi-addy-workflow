@@ -6366,7 +6366,14 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
   addyWorkflowMonitor(pi as never);
   const widgets = new Map<
     string,
-    () => { invalidate: () => void; render: (width?: number) => string[] }
+    (
+      tui?: unknown,
+      theme?: unknown,
+    ) => {
+      dispose?: () => void;
+      invalidate: () => void;
+      render: (width?: number) => string[];
+    }
   >();
   const notices: string[] = [];
   const ctx: any = {
@@ -6380,7 +6387,11 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
     ui: {
       setWidget: (
         key: string,
-        value: () => {
+        value: (
+          tui?: unknown,
+          theme?: unknown,
+        ) => {
+          dispose?: () => void;
           invalidate: () => void;
           render: (width?: number) => string[];
         },
@@ -6418,6 +6429,52 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
   assert.match(passiveWidget, /🔁 Addy Workflow:/);
   assert.match(passiveWidget, /docs\/plans\/current\.md/);
   assert.match(passiveWidget, /Addy auto passive/);
+
+  const previousSetInterval = globalThis.setInterval;
+  let requestedRenderCount = 0;
+  let refreshMs: number | undefined;
+  let refreshCallback: (() => void) | undefined;
+  (globalThis as any).setInterval = (callback: () => void, ms?: number) => {
+    refreshCallback = callback;
+    refreshMs = ms;
+    return { unref() {} };
+  };
+  try {
+    const livePassiveWidget = widgets.get('pi-addy-workflow')?.({
+      requestRender: () => {
+        requestedRenderCount += 1;
+      },
+    });
+    assert.equal(refreshMs, 15_000);
+    refreshCallback?.();
+    assert.equal(requestedRenderCount, 1);
+    livePassiveWidget?.dispose?.();
+  } finally {
+    globalThis.setInterval = previousSetInterval;
+  }
+
+  setContextWorkflowState(
+    { cwd: ctx.cwd, id: 'auto-passive-widget-owner', ui: { setWidget() {} } },
+    {
+      ...createInitialWorkflowState(),
+      current: 'build',
+      phases: {
+        ...createInitialWorkflowState().phases,
+        define: 'complete',
+        plan: 'complete',
+        build: 'active',
+      },
+      autoMode: true,
+      activePlan: 'docs/plans/updated.md',
+      currentTask: 'Owner advanced task',
+      nextTask: 'Owner next task',
+    },
+  );
+
+  const refreshedPassiveWidget =
+    widgets.get('pi-addy-workflow')?.().render().join('\n') ?? '';
+  assert.match(refreshedPassiveWidget, /updated\.md/);
+  assert.match(refreshedPassiveWidget, /Owner advanced task/);
   const passiveWidgetLinesAtWidth =
     widgets.get('pi-addy-workflow')?.().render(80) ?? [];
   assert.equal(
@@ -6432,7 +6489,14 @@ test('session start passive owner conflict renders workflow footer immediately',
   addyWorkflowMonitor(pi as never);
   const widgets = new Map<
     string,
-    () => { invalidate: () => void; render: (width?: number) => string[] }
+    (
+      tui?: unknown,
+      theme?: unknown,
+    ) => {
+      dispose?: () => void;
+      invalidate: () => void;
+      render: (width?: number) => string[];
+    }
   >();
   const notices: string[] = [];
   const ctx: any = {
@@ -6446,7 +6510,11 @@ test('session start passive owner conflict renders workflow footer immediately',
     ui: {
       setWidget: (
         key: string,
-        value: () => {
+        value: (
+          tui?: unknown,
+          theme?: unknown,
+        ) => {
+          dispose?: () => void;
           invalidate: () => void;
           render: (width?: number) => string[];
         },

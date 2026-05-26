@@ -62,9 +62,22 @@ function projectFallbackWorkflowState(
   key: string,
   ctx: WorkflowContext,
 ): WorkflowState | undefined {
-  const state =
-    readWorkflowMemoryState(key) ?? readStoredWorkflowState(key, ctx);
-  return sanitizedProjectFallbackWorkflowState(state);
+  return sanitizedProjectFallbackWorkflowState(
+    getProjectWorkflowStateByKey(key, ctx),
+  );
+}
+
+function getProjectWorkflowStateByKey(
+  key: string,
+  ctx: WorkflowContext,
+): WorkflowState | undefined {
+  return readWorkflowMemoryState(key) ?? readStoredWorkflowState(key, ctx);
+}
+
+export function getProjectWorkflowState(
+  ctx: WorkflowContext,
+): WorkflowState | undefined {
+  return getProjectWorkflowStateByKey(projectWorkflowStateKey(ctx), ctx);
 }
 
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {
