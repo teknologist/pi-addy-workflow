@@ -23,6 +23,7 @@ import {
   getContextWorkflowState,
   setContextWorkflowState,
 } from '../extensions/workflow-monitor/workflow-state-store.ts';
+import { autoRunnerLockDir } from '../extensions/workflow-monitor/auto-runner-lock.ts';
 import {
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
@@ -6307,6 +6308,55 @@ test('plain addy-auto resumes after explicit stop pause', async () => {
     'Addy Build',
   );
   assert.equal(getContextWorkflowState(ctx).autoPausedReason, undefined);
+});
+
+test('addy-auto passive owner conflict renders passive widget', async () => {
+  const { pi, commands } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const widgets = new Map<string, { render: () => string[] }>();
+  const notices: string[] = [];
+  const ctx: any = {
+    cwd: join(stateDir, 'auto-passive-widget-project'),
+    id: 'auto-passive-widget',
+    state: {
+      ...createInitialWorkflowState(),
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+    },
+    ui: {
+      setWidget: (key: string, value: { render: () => string[] }) =>
+        widgets.set(key, value),
+      notify: (message: string) => notices.push(message),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+  const lockDir = autoRunnerLockDir(ctx);
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(
+    join(lockDir, 'owner.json'),
+    `${JSON.stringify({
+      version: 1,
+      projectKey: 'test-project-key',
+      instanceId: 'another-pi-instance',
+      runnerId: 'another-runner',
+      fencingToken: 'other-token',
+      pid: process.pid,
+      cwd: '/other/repo',
+      activePlan: 'docs/plans/current.md',
+      acquiredAt: '2026-05-26T00:00:00.000Z',
+      heartbeatAt: '2026-05-26T00:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    })}\n`,
+    'utf8',
+  );
+
+  await commands.get('addy-auto')?.handler('docs/plans/current.md', ctx);
+
+  assert.match(notices.at(-1) ?? '', /running in another Pi instance/);
+  assert.match(
+    widgets.get('pi-addy-workflow')?.render().join('\n') ?? '',
+    /Addy auto passive/,
+  );
 });
 
 test('session start ignores reasonless pending fresh state', async () => {

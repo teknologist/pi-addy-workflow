@@ -14,6 +14,12 @@ type SessionStartDeps = {
   ): Promise<'none' | 'stale-cleared' | 'delivered'>;
   ensureConfig(ctx: unknown): void;
   initializeWidget(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   isChildSession(): boolean;
   maybeRunAutoWatchdog(
     pi: ExtensionAPI,
@@ -29,8 +35,14 @@ export function createSessionStartHandler(deps: SessionStartDeps) {
     ctx: unknown,
   ): Promise<void> {
     deps.ensureConfig(ctx);
-    deps.initializeWidget(ctx);
+    const state = deps.initializeWidget(ctx);
     if (!deps.isChildSession()) {
+      if (
+        state.autoMode &&
+        deps.ensureAutoRunnerOwnership &&
+        !(await deps.ensureAutoRunnerOwnership(pi, ctx, state, 'session-start'))
+      )
+        return;
       const pendingFresh = await deps.resumePendingFreshContinuation(pi, ctx, {
         useDefaultDelivery: true,
       });

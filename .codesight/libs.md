@@ -57,6 +57,14 @@
 - `extensions/workflow-monitor/auto-prompt-dispatcher.ts` — function createAutoPromptDispatcher: (deps) => void
 - `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` — function addAutoRecoveryGuidance: (message, prompt) => string
 - `extensions/workflow-monitor/auto-review-fix-loop.ts` — function maybeDispatchReviewFixLoop: (deps, pi, ctx, reviewText, state, action, options) => Promise<boolean>, type AutoReviewFixLoopDeps
+- `extensions/workflow-monitor/auto-runner-lock.ts`
+  - function getAutoRunnerInstanceId: () => string
+  - function autoRunnerLockDir: (ctx) => string
+  - function acquireAutoRunnerLock: (ctx, options) => Promise<AutoRunnerLockResult>
+  - function verifyAutoRunnerLock: (ctx, options) => AutoRunnerLockResult
+  - function renewAutoRunnerLock: (ctx, options) => AutoRunnerLockResult
+  - function releaseAutoRunnerLock: (ctx, options) => AutoRunnerLockResult
+  - _...11 more_
 - `extensions/workflow-monitor/auto-watchdog.ts` — function createAutoWatchdog: (deps) => void
 - `extensions/workflow-monitor/auto-workflow-decision.ts` — function planAutoWorkflowDecision: (input) => AutoWorkflowDecision, type AutoWorkflowDecision
 - `extensions/workflow-monitor/auto-workflow-orchestrator.ts` — function createAutoWorkflowOrchestrator: (deps) => void

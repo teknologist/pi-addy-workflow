@@ -25,6 +25,13 @@ export type AddyAutoCommandDeps = {
     options: FreshContinuationDispatchOptions,
   ): Promise<void>;
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+    activePlan?: string,
+  ): boolean | Promise<boolean>;
   handleWorkflowEvent(
     ctx: unknown,
     event: unknown,
@@ -37,6 +44,10 @@ export type AddyAutoCommandDeps = {
     options: FreshContinuationDispatchOptions & { allowSamePhase?: boolean },
   ): Promise<unknown>;
   notify(ctx: unknown, message: string, level: string): void;
+  recordAutoRunnerStopIntent?(
+    ctx: unknown,
+  ): 'owned' | 'recorded' | 'no-owner' | 'passive-child';
+  releaseAutoRunnerLock?(ctx: unknown): void;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
   showWorkflowStats(
     pi: ExtensionAPI,
@@ -84,9 +95,55 @@ export async function handleAddyAutoCommand(
   deps: AddyAutoCommandDeps,
 ): Promise<ContinueResult> {
   const args = parseCommandArgs(event);
+  const desiredPlan =
+    args[0] === 'stop' ? undefined : args.join(' ') || undefined;
+
+  if (args[0] === 'stop') {
+    const stopIntent = deps.recordAutoRunnerStopIntent?.(ctx);
+    if (stopIntent === 'recorded') {
+      deps.notify(
+        ctx,
+        'Addy auto stop requested; the owning Pi instance will stop before its next auto dispatch.',
+        'warning',
+      );
+      return { action: 'continue' };
+    }
+    if (stopIntent === 'passive-child') {
+      deps.notify(
+        ctx,
+        'Addy auto stop can only be requested from a top-level Pi instance.',
+        'warning',
+      );
+      return { action: 'continue' };
+    }
+  }
 
   if (args[0] !== 'stop') {
     const pending = deps.getState(ctx);
+    if (
+      desiredPlan &&
+      pending.autoMode &&
+      pending.activePlan &&
+      pending.activePlan !== desiredPlan
+    ) {
+      deps.notify(
+        ctx,
+        `Addy auto is already running for ${pending.activePlan}. Run /addy-auto stop or reset before starting ${desiredPlan}.`,
+        'warning',
+      );
+      return { action: 'continue' };
+    }
+    if (
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(
+        pi,
+        ctx,
+        pending,
+        'addy-auto-command',
+        desiredPlan,
+      ))
+    )
+      return { action: 'continue' };
     const pendingFreshResult = await resumePendingFreshContinuation(
       pi,
       ctx,
@@ -123,6 +180,7 @@ export async function handleAddyAutoCommand(
     deps.showWorkflowStats(pi, ctx, deps.getState(ctx), {
       heading: 'Addy auto stopped.',
     });
+  if (args[0] === 'stop') deps.releaseAutoRunnerLock?.(ctx);
 
   return { action: 'continue' };
 }

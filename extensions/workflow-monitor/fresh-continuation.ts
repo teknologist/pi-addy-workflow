@@ -21,6 +21,12 @@ export type FreshContinuationDispatchOptions = WorkflowDispatchOptions;
 
 type FreshContinuationCoordinatorDeps = {
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
   appendEntry(pi: ExtensionAPI): AppendEntry;
   extensionApiFromContext(ctx: unknown): ExtensionAPI;
@@ -67,6 +73,17 @@ export function createFreshContinuationCoordinator(
     const runtime = createWorkflowRuntime(pi, ctx);
     const notify = (msg: string, level: string) => deps.notify(ctx, msg, level);
     const initialState = deps.getState(ctx);
+    if (
+      initialState.autoMode &&
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(
+        pi,
+        ctx,
+        initialState,
+        `fresh-continuation:${requestedReason}`,
+      ))
+    )
+      return;
     const plan = planFreshContinuationStart({
       state: initialState,
       requestedReason,

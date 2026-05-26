@@ -10,7 +10,13 @@ import {
 } from '../extensions/workflow-monitor/workflow-transitions.ts';
 import { ADDY_AUTO_TASK_COMMIT_PROMPT } from '../extensions/workflow-monitor/workflow-tracker.ts';
 
-function createHarness(initial = createInitialWorkflowState()) {
+function createHarness(
+  initial = createInitialWorkflowState(),
+  options: {
+    ensureAutoRunnerOwnership?: AddyAutoCommandDeps['ensureAutoRunnerOwnership'];
+    recordAutoRunnerStopIntent?: AddyAutoCommandDeps['recordAutoRunnerStopIntent'];
+  } = {},
+) {
   let state = initial;
   const events: unknown[] = [];
   const notifications: string[] = [];
@@ -36,11 +42,14 @@ function createHarness(initial = createInitialWorkflowState()) {
       taskCommits.push(target.taskTitle ?? 'unknown');
     },
     getState: () => state,
+    ensureAutoRunnerOwnership: options.ensureAutoRunnerOwnership,
     handleWorkflowEvent: (_ctx, event) => events.push(event),
     maybeRunAutoWatchdog: async (_pi, _ctx, source, options) => {
       watchdogs.push({ source, options });
     },
     notify: (_ctx, message) => notifications.push(message),
+    recordAutoRunnerStopIntent: options.recordAutoRunnerStopIntent,
+    releaseAutoRunnerLock: () => {},
     setState: (_ctx, next: WorkflowState) => {
       state = next;
     },
@@ -86,6 +95,67 @@ test('addy auto command clears stale pending fresh state before watchdog dispatc
     { source: 'command', text: '/addy-auto PLAN.md', artifact: 'PLAN.md' },
   ]);
   assert.equal(harness.watchdogs.length, 1);
+});
+
+test('addy auto command stays passive when another auto runner owns the lock', async () => {
+  const harness = createHarness(createInitialWorkflowState(), {
+    ensureAutoRunnerOwnership: async () => false,
+  });
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['PLAN.md'] },
+    {},
+    harness.deps,
+  );
+
+  assert.deepEqual(harness.events, []);
+  assert.deepEqual(harness.watchdogs, []);
+});
+
+test('addy auto command refuses to retarget an owned active run', async () => {
+  let ownershipChecks = 0;
+  const harness = createHarness(
+    {
+      ...createInitialWorkflowState(),
+      autoMode: true,
+      activePlan: 'PLAN-A.md',
+    },
+    {
+      ensureAutoRunnerOwnership: async () => {
+        ownershipChecks += 1;
+        return true;
+      },
+    },
+  );
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['PLAN-B.md'] },
+    {},
+    harness.deps,
+  );
+
+  assert.deepEqual(harness.events, []);
+  assert.equal(ownershipChecks, 0);
+  assert.match(harness.notifications[0], /already running for PLAN-A\.md/);
+});
+
+test('addy auto stop from a non-owner records stop intent without mutating workflow state', async () => {
+  const harness = createHarness(createInitialWorkflowState(), {
+    recordAutoRunnerStopIntent: () => 'recorded',
+  });
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['stop'] },
+    {},
+    harness.deps,
+  );
+
+  assert.deepEqual(harness.events, []);
+  assert.match(harness.notifications[0], /stop requested/);
+  assert.equal(harness.statsHeading, undefined);
 });
 
 test('addy auto command does not resume task commit from stale fresh state snapshot', async () => {

@@ -12,6 +12,10 @@ _Avoid_: pipeline, process
 The autonomous Addy Workflow runner that dispatches lifecycle prompts, retries blocked steps, and carries work across fresh sessions.
 _Avoid_: autopilot, daemon
 
+**Addy Auto Runner Lock**:
+The ownership boundary that allows exactly one top-level Pi process to dispatch Addy Auto Mode prompts for a repository while its fresh sessions continue the same run.
+_Avoid_: session lock, repository lock, process dedupe
+
 **Addy Auto Command**:
 The Addy Auto Mode Module that handles `/addy-auto` command decisions: stale Fresh Continuation cleanup, pending Fresh Continuation delivery, pending task commit restart, stop handling, and Auto Watchdog startup.
 _Avoid_: auto command callback, command registry branch
@@ -19,6 +23,10 @@ _Avoid_: auto command callback, command registry branch
 **Auto Control**:
 The Addy Auto Mode state that decides whether autonomous dispatch should continue, pause, retry, or resume in another session.
 _Avoid_: auto flags, scheduler state
+
+**Auto Stop Intent**:
+A request visible to the owning Addy Auto Mode runner to exit before its next prompt dispatch.
+_Avoid_: remote kill, force unlock
 
 **Workflow State Control**:
 The Workflow State Module that owns preserving, clearing, and entering/exiting Auto Control and Review Control fields during workflow state transitions.
@@ -292,6 +300,9 @@ _Avoid_: state parser, JSON helper
 
 - An **Addy Workflow** may run against one active **Slice Plan**.
 - **Addy Auto Mode** uses **Auto Control** to preserve pending work across sessions and uses **Review Control** for review-fix safety.
+- An **Addy Auto Runner Lock** belongs to one top-level Pi process and permits that process's **Fresh Continuation** sessions to continue dispatching the same **Addy Auto Mode** run.
+- An **Addy Auto Runner Lock** governs Addy Auto Mode prompt dispatch only; non-owning sessions may still observe workflow state and **Workflow Stats**.
+- An **Auto Stop Intent** may be recorded by a non-owning session, but only the owning **Addy Auto Runner Lock** process exits Addy Auto Mode and releases ownership before dispatching another prompt.
 - **Addy Auto Command** is the command-level decision Interface for starting, stopping, and resuming Addy Auto Mode; **Command Registry** should delegate `/addy-auto` behavior to it instead of owning Auto Control policy.
 - **Workflow State Control** keeps Auto Control and Review Control field preservation local so transition Modules do not copy or clear raw Workflow State fields by hand.
 - **Auto Action Keys** give **Auto Control**, delayed prompt delivery, and watchdog retries a shared identity vocabulary for the same workflow action.

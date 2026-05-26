@@ -21,6 +21,12 @@ type AgentEndHandlerDeps = {
   ): Promise<void>;
   baseCwd(ctx: unknown): string | undefined;
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   isChildSession(): boolean;
   maybeContinueAfterTaskCommit(
     pi: ExtensionAPI,
@@ -97,6 +103,16 @@ export function createAgentEndHandler(deps: AgentEndHandlerDeps) {
     if (stateWithReviewIssues !== state)
       deps.setState(ctx, stateWithReviewIssues, deps.appendEntry(pi));
     if (!stateWithReviewIssues.autoMode) return;
+    if (
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(
+        pi,
+        ctx,
+        stateWithReviewIssues,
+        'agent-end',
+      ))
+    )
+      return;
     if (
       deps.preserveProviderTransportRetry(pi, ctx, event, stateWithReviewIssues)
     )

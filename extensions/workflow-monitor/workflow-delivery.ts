@@ -25,6 +25,12 @@ export type WorkflowDeliveryOptions = {
 
 type WorkflowDeliveryDeps = {
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
   appendEntryFromContext(ctx: unknown): AppendEntry;
   latestActiveStatsTarget(
@@ -137,8 +143,19 @@ export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
           'Addy auto is still busy; the next workflow prompt was preserved for retry.',
         );
       },
-      onReady: () => {
+      onReady: async () => {
         const latestState = deps.getState(ctx);
+        if (
+          options.autoMode &&
+          deps.ensureAutoRunnerOwnership &&
+          !(await deps.ensureAutoRunnerOwnership(
+            pi,
+            ctx,
+            latestState,
+            scheduledActionKey ?? message,
+          ))
+        )
+          return;
         if (options.idleTurnDelivery && scheduledActionKey) {
           const latestActionKey = currentAutoWorkflowActionKey(
             latestState,
@@ -174,7 +191,7 @@ export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
     });
   }
 
-  function sendUserMessage(
+  function sendVerifiedUserMessage(
     pi: ExtensionAPI,
     ctx: unknown,
     message: string,
@@ -220,6 +237,25 @@ export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
           : defaultDeliveryOptions()
         : followUpDeliveryOptions(),
     );
+  }
+
+  function sendUserMessage(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    message: string,
+    options: WorkflowDeliveryOptions = {},
+  ): void | Promise<void> {
+    const state = deps.getState(ctx);
+    if (options.autoMode && deps.ensureAutoRunnerOwnership) {
+      const owned = deps.ensureAutoRunnerOwnership(pi, ctx, state, message);
+      if (typeof (owned as Promise<boolean>).then === 'function')
+        return (owned as Promise<boolean>).then((isOwned) => {
+          if (!isOwned) return;
+          return sendVerifiedUserMessage(pi, ctx, message, options);
+        });
+      if (!owned) return;
+    }
+    return sendVerifiedUserMessage(pi, ctx, message, options);
   }
 
   return {

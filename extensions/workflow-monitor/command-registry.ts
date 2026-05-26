@@ -36,6 +36,13 @@ type FreshStepCommandDeps = {
     options: FreshContinuationDispatchOptions,
   ): Promise<void>;
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+    activePlan?: string,
+  ): boolean | Promise<boolean>;
   handleWorkflowEvent(
     ctx: unknown,
     event: unknown,
@@ -72,6 +79,10 @@ type AutoCommandDeps = {
     options: FreshContinuationDispatchOptions & { allowSamePhase?: boolean },
   ): Promise<unknown>;
   notify(ctx: unknown, message: string, level: string): void;
+  recordAutoRunnerStopIntent?(
+    ctx: unknown,
+  ): 'owned' | 'recorded' | 'no-owner' | 'passive-child';
+  releaseAutoRunnerLock?(ctx: unknown): void;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
   showWorkflowStats(
     pi: ExtensionAPI,

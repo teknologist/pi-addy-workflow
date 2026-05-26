@@ -29,6 +29,12 @@ type PendingFreshResumeResult = 'none' | 'stale-cleared' | 'delivered';
 
 type PendingFreshDeliveryDeps = {
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
   appendEntry(pi: ExtensionAPI): AppendEntry;
   notify(ctx: unknown, message: string, level?: string): void;
@@ -134,6 +140,16 @@ export function createPendingFreshDelivery(
     options: FreshContinuationDispatchOptions = {},
   ): Promise<boolean> {
     if (!validPendingFreshContinuation(state)) return false;
+    if (
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(
+        pi,
+        ctx,
+        state,
+        state.autoFreshDeliveryKey ?? state.autoFreshPrompt,
+      ))
+    )
+      return false;
     const runtime = createWorkflowRuntime(pi, ctx);
     if (
       options.useDefaultDelivery &&

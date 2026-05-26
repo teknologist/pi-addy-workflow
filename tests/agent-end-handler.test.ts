@@ -8,7 +8,10 @@ import {
 
 function createHarness(
   initial: WorkflowState,
-  options: { providerRetry?: boolean } = {},
+  options: {
+    providerRetry?: boolean;
+    ensureAutoRunnerOwnership?: () => boolean | Promise<boolean>;
+  } = {},
 ) {
   let state = initial;
   let appends = 0;
@@ -25,6 +28,7 @@ function createHarness(
     },
     baseCwd: () => '/repo',
     getState: () => state,
+    ensureAutoRunnerOwnership: options.ensureAutoRunnerOwnership,
     isChildSession: () => false,
     maybeContinueAfterTaskCommit: async () => {
       taskCommitContinuations += 1;
@@ -119,6 +123,23 @@ test('agent-end handler records matching review stats and stops when auto mode i
     1,
   );
   assert.equal(harness.appends, 1);
+  assert.equal(harness.autoContinuations, 0);
+});
+
+test('agent-end handler stays passive when another runner owns auto mode', async () => {
+  const harness = createHarness(
+    { ...createInitialWorkflowState(), autoMode: true },
+    { ensureAutoRunnerOwnership: () => false },
+  );
+
+  await harness.handler.handleAgentEnd(
+    {} as never,
+    {},
+    { message: { content: 'done' } },
+  );
+
+  assert.equal(harness.providerRetries, 0);
+  assert.equal(harness.taskCommitContinuations, 0);
   assert.equal(harness.autoContinuations, 0);
 });
 

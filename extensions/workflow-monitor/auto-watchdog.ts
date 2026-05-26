@@ -22,6 +22,12 @@ type AutoWatchdogDeps = {
     options?: AutoWatchdogOptions,
   ): Promise<void>;
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   isChildSession(): boolean;
   nextActionForState(state: WorkflowState, baseCwd?: string): WorkflowAction;
   resumePendingFreshContinuation(
@@ -53,6 +59,11 @@ export function createAutoWatchdog(deps: AutoWatchdogDeps) {
     const action = deps.nextActionForState(state, deps.baseCwd(ctx));
     const actionKey = deps.actionKeyForAction(state, action);
     if (!actionKey) return false;
+    if (
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(pi, ctx, state, actionKey))
+    )
+      return false;
 
     if (state.autoPendingAction && state.autoPendingAction.key !== actionKey) {
       deps.setState(

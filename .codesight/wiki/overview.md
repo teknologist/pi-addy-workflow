@@ -6,9 +6,9 @@
 
 ## Scale
 
-96 library files · 2 middleware layers · 6 environment variables
+97 library files · 2 middleware layers · 6 environment variables
 
-**Libraries:** 96 files — see [libraries.md](./libraries.md)
+**Libraries:** 97 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
@@ -28,7 +28,7 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` — `tests/addy-auto-fixture-loop.test.ts`
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` — `tests/addy-auto-fixture-loop.test.ts`
 - `PI_ADDY_WORKFLOW_STATE_DIR` — `extensions/workflow-monitor/workflow-state-store-scope.ts`
-- `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor/workflow-host-events.ts`
+- `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor/auto-runner-lock.ts`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-05-25_
+_Back to [index.md](./index.md) · Generated 2026-05-26_

@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 0 routes | 0 models | 0 components | 96 lib files | 6 env vars | 2 middleware | 0% test coverage
-> **Token savings:** this file is ~8,700 tokens. Without it, AI exploration would cost ~35,400 tokens. **Saves ~26,700 tokens per conversation.**
-> **Last scanned:** 2026-05-25 19:32 — re-run after significant changes
+> 0 routes | 0 models | 0 components | 97 lib files | 6 env vars | 2 middleware | 0% test coverage
+> **Token savings:** this file is ~8,800 tokens. Without it, AI exploration would cost ~35,600 tokens. **Saves ~26,800 tokens per conversation.**
+> **Last scanned:** 2026-05-26 21:38 — re-run after significant changes
 
 ---
 
@@ -67,6 +67,14 @@
 - `extensions/workflow-monitor/auto-prompt-dispatcher.ts` — function createAutoPromptDispatcher: (deps) => void
 - `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` — function addAutoRecoveryGuidance: (message, prompt) => string
 - `extensions/workflow-monitor/auto-review-fix-loop.ts` — function maybeDispatchReviewFixLoop: (deps, pi, ctx, reviewText, state, action, options) => Promise<boolean>, type AutoReviewFixLoopDeps
+- `extensions/workflow-monitor/auto-runner-lock.ts`
+  - function getAutoRunnerInstanceId: () => string
+  - function autoRunnerLockDir: (ctx) => string
+  - function acquireAutoRunnerLock: (ctx, options) => Promise<AutoRunnerLockResult>
+  - function verifyAutoRunnerLock: (ctx, options) => AutoRunnerLockResult
+  - function renewAutoRunnerLock: (ctx, options) => AutoRunnerLockResult
+  - function releaseAutoRunnerLock: (ctx, options) => AutoRunnerLockResult
+  - _...11 more_
 - `extensions/workflow-monitor/auto-watchdog.ts` — function createAutoWatchdog: (deps) => void
 - `extensions/workflow-monitor/auto-workflow-decision.ts` — function planAutoWorkflowDecision: (input) => AutoWorkflowDecision, type AutoWorkflowDecision
 - `extensions/workflow-monitor/auto-workflow-orchestrator.ts` — function createAutoWorkflowOrchestrator: (deps) => void
@@ -365,7 +373,7 @@
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_WORKFLOW_STATE_DIR` **required** — extensions/workflow-monitor/workflow-state-store-scope.ts
-- `PI_SUBAGENT_CHILD` **required** — extensions/workflow-monitor/workflow-host-events.ts
+- `PI_SUBAGENT_CHILD` **required** — extensions/workflow-monitor/auto-runner-lock.ts
 
 ## Config Files
 
@@ -426,7 +434,7 @@
 # Test Coverage
 
 > **0%** of routes and models are covered by tests
-> 77 test files found
+> 78 test files found
 
 ---
 

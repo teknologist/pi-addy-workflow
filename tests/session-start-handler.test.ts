@@ -6,7 +6,13 @@ import {
   type WorkflowState,
 } from '../extensions/workflow-monitor/workflow-transitions.ts';
 
-function createHarness(initial: WorkflowState, child = false) {
+function createHarness(
+  initial: WorkflowState,
+  child = false,
+  options: {
+    ensureAutoRunnerOwnership?: () => boolean | Promise<boolean>;
+  } = {},
+) {
   let state = initial;
   let ensured = 0;
   let initialized = 0;
@@ -35,6 +41,7 @@ function createHarness(initial: WorkflowState, child = false) {
       initialized += 1;
       return state;
     },
+    ensureAutoRunnerOwnership: options.ensureAutoRunnerOwnership,
     isChildSession: () => child,
     maybeRunAutoWatchdog: async () => {
       watchdogRuns += 1;
@@ -79,6 +86,24 @@ test('session start clears stale pending fresh continuation without reason', asy
   assert.equal(harness.state.autoFreshPrompt, undefined);
   assert.equal(harness.appends, 1);
   assert.match(harness.warnings[0], /without a recorded reason/);
+});
+
+test('session start stays passive when another runner owns auto mode', async () => {
+  const harness = createHarness(
+    {
+      ...createInitialWorkflowState(),
+      autoMode: true,
+      autoFreshPrompt: '/addy-build PLAN.md',
+      autoFreshReason: 'between-tasks',
+    },
+    false,
+    { ensureAutoRunnerOwnership: () => false },
+  );
+
+  await harness.handler.handleSessionStart({} as never, {});
+
+  assert.equal(harness.freshDeliveries, 0);
+  assert.equal(harness.watchdogRuns, 0);
 });
 
 test('session start delivers valid pending fresh continuation in parent sessions', async () => {

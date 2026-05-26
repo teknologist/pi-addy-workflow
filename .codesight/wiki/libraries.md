@@ -2,10 +2,11 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**96 library files** across 1 module
+**97 library files** across 1 module
 
-## Extensions (96 files)
+## Extensions (97 files)
 
+- `extensions/workflow-monitor/auto-runner-lock.ts` — getAutoRunnerInstanceId, autoRunnerLockDir, acquireAutoRunnerLock, verifyAutoRunnerLock, renewAutoRunnerLock, releaseAutoRunnerLock, …
 - `extensions/workflow-monitor/auto-control.ts` — hasLiveAutoControl, explicitlyStoppedAuto, withProjectAutoControl, sanitizedProjectFallbackAutoControl, autoFreshContinuationKey, validPendingFreshContinuation, …
 - `extensions/workflow-monitor/composition-adapter.ts` — hostContext, baseCwd, getWorkflowStateFromContext, setWorkflowStateFromContext, loadWorkflowConfig, freshContextConfig, …
 - `extensions/workflow-monitor/command-router.ts` — workflowTextFromInput, commandFromPrompt, commandNameFromText, phaseForWorkflowCommand, phaseFromWorkflowPrompt, commandForWorkflowPhase, …
@@ -30,8 +31,7 @@
 - `extensions/workflow-monitor/prompt-template.ts` — expandPackagedPromptTemplate, parseTemplateArgs, stripFrontmatter, substituteTemplateArgs, PromptTemplateDeps
 - `extensions/workflow-monitor/workflow-phases.ts` — phaseIndex, WorkflowPhase, PhaseStatus, WORKFLOW_PHASES, ENFORCED_WORKFLOW_PHASES
 - `extensions/workflow-monitor/workflow-runtime-adapter.ts` — appendWorkflowEntry, appendWorkflowEntryFromContext, extensionApiFromContext, notifyWorkflow, notifyWorkflowWarning
-- `extensions/workflow-monitor/workflow-state-codec-primitives.ts` — isPositiveSafeInteger, isNonNegativeSafeInteger, isOptionalString, isOptionalBoolean, isStringArray
-- _…and 71 more files_
+- _…and 72 more files_
 
 ---
 _Back to [overview.md](./overview.md)_

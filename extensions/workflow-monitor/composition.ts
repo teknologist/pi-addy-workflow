@@ -35,9 +35,21 @@ import { createAutoLoopDispatchPort } from './auto-loop.ts';
 import { createAutoWorkflowOrchestrator } from './auto-workflow-orchestrator.ts';
 import { createSessionStartHandler } from './session-start-handler.ts';
 import { createAgentEndHandler } from './agent-end-handler.ts';
+import {
+  acquireAutoRunnerLock,
+  autoRunnerLockOwnerSummary,
+  consumeAutoRunnerStopIntent,
+  recordAutoRunnerStopIntent,
+  releaseAutoRunnerLock,
+  renewAutoRunnerLock,
+  startAutoRunnerHeartbeat,
+  verifyAutoRunnerLock,
+  type AutoRunnerLockResult,
+} from './auto-runner-lock.ts';
 import { createInputHandler } from './input-handler.ts';
 import { registerWorkflowCommands } from './commands.ts';
 import { registerWorkflowEvents } from './events.ts';
+import { WORKFLOW_WIDGET_KEY } from './workflow-widget-presenter.ts';
 import {
   baseCwd,
   ensureWorkflowConfig,
@@ -52,6 +64,7 @@ import {
   shouldFreshContextBeforeEveryStep,
 } from './composition-adapter.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
+import { stopAutoModeControlUpdates } from './workflow-state-control.ts';
 import {
   ADDY_AUTO_TASK_COMMIT_PROMPT,
   nextWorkflowActionForActivePlanLifecycle,
@@ -63,11 +76,144 @@ const AUTO_FRESH_IDLE_MAX_ATTEMPTS = 1200;
 const AUTO_SAME_PHASE_MAX_RETRIES = 12;
 
 const getWorkflowState = getWorkflowStateFromContext;
-const setWorkflowState = setWorkflowStateFromContext;
+const rawSetWorkflowState = setWorkflowStateFromContext;
 const autoLoop = createAutoLoopDispatchPort();
+
+function autoRunnerPassiveMessage(
+  result: Exclude<AutoRunnerLockResult, { status: 'owned' | 'reclaimed' }>,
+): string {
+  if (result.status === 'passive-child')
+    return 'Addy auto passive — subagent child processes cannot drive auto mode.';
+  return `Addy auto passive — running in another Pi instance. ${autoRunnerLockOwnerSummary(result.owner)}. Run /addy-auto stop here to request the owner stop.`;
+}
+
+function showAutoRunnerPassiveWidget(ctx: unknown, message: string): void {
+  (
+    ctx as { ui?: { setWidget?: (key: string, value: unknown) => void } }
+  ).ui?.setWidget?.(WORKFLOW_WIDGET_KEY, {
+    invalidate() {},
+    render() {
+      return [message];
+    },
+  });
+}
+
+function releaseOwnedAutoRunnerLock(ctx: unknown): void {
+  try {
+    releaseAutoRunnerLock(ctx as never);
+  } catch (error) {
+    notifyWorkflowWarning(
+      ctx,
+      `Addy auto could not release the runner lock: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function setWorkflowState(
+  ctx: unknown,
+  state: WorkflowState,
+  appendEntry?: Parameters<typeof setWorkflowStateFromContext>[2],
+): void {
+  const previous = getWorkflowState(ctx);
+  rawSetWorkflowState(ctx, state, appendEntry);
+  if (previous.autoMode && !state.autoMode) releaseOwnedAutoRunnerLock(ctx);
+}
+
+function acceptOwnedAutoRunnerLock(
+  pi: ExtensionAPI,
+  ctx: unknown,
+  state: WorkflowState,
+  result: Extract<AutoRunnerLockResult, { status: 'owned' | 'reclaimed' }>,
+  actionKey?: string,
+  activePlan?: string,
+): boolean {
+  startAutoRunnerHeartbeat(ctx as never, {
+    activePlan: activePlan ?? state.activePlan,
+    lastActionKey: actionKey,
+  });
+  if (consumeAutoRunnerStopIntent(ctx as never, result.lock)) {
+    setWorkflowState(
+      ctx,
+      {
+        ...state,
+        ...stopAutoModeControlUpdates(),
+        lastTrigger: '/addy-auto stop',
+      },
+      appendWorkflowEntry(pi),
+    );
+    showWorkflowStats(pi, ctx, getWorkflowState(ctx), {
+      heading: 'Addy auto stopped by request from another Pi instance.',
+    });
+    return false;
+  }
+  return true;
+}
+
+function ensureAutoRunnerOwnership(
+  pi: ExtensionAPI,
+  ctx: unknown,
+  state: WorkflowState,
+  actionKey?: string,
+  activePlan?: string,
+): boolean | Promise<boolean> {
+  const verifyResult = verifyAutoRunnerLock(ctx as never, {
+    activePlan: activePlan ?? state.activePlan,
+    lastActionKey: actionKey,
+  });
+  if (verifyResult.status === 'owned') {
+    const renewed = renewAutoRunnerLock(ctx as never, {
+      activePlan: activePlan ?? state.activePlan,
+      lastActionKey: actionKey,
+    });
+    if (renewed.status === 'owned')
+      return acceptOwnedAutoRunnerLock(
+        pi,
+        ctx,
+        state,
+        renewed as Extract<AutoRunnerLockResult, { status: 'owned' }>,
+        actionKey,
+        activePlan,
+      );
+  }
+
+  return acquireAutoRunnerLock(ctx as never, {
+    activePlan: activePlan ?? state.activePlan,
+    lastActionKey: actionKey,
+  }).then((result) => {
+    if (result.status === 'owned' || result.status === 'reclaimed') {
+      return acceptOwnedAutoRunnerLock(
+        pi,
+        ctx,
+        state,
+        result as Extract<
+          AutoRunnerLockResult,
+          { status: 'owned' | 'reclaimed' }
+        >,
+        actionKey,
+        activePlan,
+      );
+    }
+    const passiveMessage = autoRunnerPassiveMessage(
+      result as Exclude<
+        AutoRunnerLockResult,
+        { status: 'owned' | 'reclaimed' }
+      >,
+    );
+    showAutoRunnerPassiveWidget(ctx, passiveMessage);
+    notifyWorkflowWarning(ctx, passiveMessage);
+    return false;
+  });
+}
+
+function recordAutoRunnerStopRequest(
+  ctx: unknown,
+): 'owned' | 'recorded' | 'no-owner' | 'passive-child' {
+  return recordAutoRunnerStopIntent(ctx as never).status;
+}
 
 const workflowDelivery = createWorkflowDelivery({
   getState: getWorkflowState,
+  ensureAutoRunnerOwnership,
   setState: setWorkflowState,
   appendEntryFromContext: appendWorkflowEntryFromContext,
   latestActiveStatsTarget,
@@ -79,6 +225,7 @@ const workflowDelivery = createWorkflowDelivery({
 
 const freshContinuation = createFreshContinuationCoordinator({
   getState: getWorkflowState,
+  ensureAutoRunnerOwnership,
   setState: setWorkflowState,
   appendEntry: appendWorkflowEntry,
   extensionApiFromContext,
@@ -96,6 +243,7 @@ const autoPromptDispatcher = createAutoPromptDispatcher({
   freshContinuation,
   freshContext: freshContextConfig,
   getState: getWorkflowState,
+  ensureAutoRunnerOwnership,
   setState: setWorkflowState,
 });
 
@@ -132,6 +280,7 @@ const autoWatchdog = createAutoWatchdog({
   createRuntime: createWorkflowRuntime,
   dispatchNextAutoWorkflowPrompt: autoLoop.dispatchNextAutoWorkflowPrompt,
   getState: getWorkflowState,
+  ensureAutoRunnerOwnership,
   isChildSession: isSubagentChildSession,
   nextActionForState: nextWorkflowActionForActivePlanLifecycle,
   resumePendingFreshContinuation: (pi, ctx, options) =>
@@ -144,6 +293,7 @@ const sessionStartHandler = createSessionStartHandler({
     freshContinuation.resumePendingFreshContinuation(pi, ctx, options),
   ensureConfig: ensureWorkflowConfig,
   initializeWidget: initializeWorkflowWidgetFromContext,
+  ensureAutoRunnerOwnership,
   isChildSession: isSubagentChildSession,
   maybeRunAutoWatchdog: (pi, ctx, trigger, options) =>
     autoWatchdog.maybeRunAutoWatchdog(pi, ctx, trigger, options),
@@ -231,6 +381,7 @@ const agentEndHandler = createAgentEndHandler({
     ),
   baseCwd,
   getState: getWorkflowState,
+  ensureAutoRunnerOwnership,
   isChildSession: isSubagentChildSession,
   maybeContinueAfterTaskCommit: (pi, ctx, text, state, options) =>
     taskCommitCoordinator.maybeContinueAfterTaskCommit(
@@ -292,12 +443,18 @@ export function registerAddyWorkflowMonitor(pi: ExtensionAPI) {
         options,
       ),
     getState: getWorkflowState,
+    ensureAutoRunnerOwnership,
     handleWorkflowEvent: handleWorkflowEventFromContext,
     maybeRunAutoWatchdog: (pi, ctx, source, options) =>
       autoWatchdog.maybeRunAutoWatchdog(pi, ctx, source, options),
     notify: notifyWorkflow,
     openNextWorkflowPrompt: openNextWorkflowPromptFromContext,
-    resetWorkflow: resetWorkflowFromContext,
+    recordAutoRunnerStopIntent: recordAutoRunnerStopRequest,
+    releaseAutoRunnerLock: releaseOwnedAutoRunnerLock,
+    resetWorkflow: (ctx, appendEntry) => {
+      resetWorkflowFromContext(ctx, appendEntry);
+      releaseOwnedAutoRunnerLock(ctx);
+    },
     runFreshContextContinuation: (pi, ctx, reason) =>
       freshContinuation.runFreshContextContinuation(pi, ctx, reason),
     sendUserMessage: (pi, ctx, input) =>

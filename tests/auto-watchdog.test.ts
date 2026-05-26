@@ -30,7 +30,11 @@ function runtime(runOnceResult = true): WorkflowRuntime {
 
 function createHarness(
   state: WorkflowState,
-  options: { child?: boolean; runOnce?: boolean } = {},
+  options: {
+    child?: boolean;
+    runOnce?: boolean;
+    ensureAutoRunnerOwnership?: () => Promise<boolean>;
+  } = {},
 ) {
   let storedState = state;
   let dispatches = 0;
@@ -47,6 +51,7 @@ function createHarness(
       dispatches += 1;
     },
     getState: () => storedState,
+    ensureAutoRunnerOwnership: options.ensureAutoRunnerOwnership,
     isChildSession: () => options.child ?? false,
     nextActionForState: () => ({ prompt: '/addy-review PLAN.md' }),
     resumePendingFreshContinuation: async () => {
@@ -138,6 +143,23 @@ test('auto watchdog clears stale pending action before dispatching next prompt',
   assert.equal(harness.state.autoPendingAction, undefined);
   assert.equal(harness.appends, 1);
   assert.equal(harness.dispatches, 1);
+});
+
+test('auto watchdog stays passive when another runner owns the lock', async () => {
+  const harness = createHarness(
+    { ...createInitialWorkflowState(), autoMode: true },
+    { ensureAutoRunnerOwnership: async () => false },
+  );
+
+  assert.equal(
+    await harness.watchdog.maybeRunAutoWatchdog(
+      {} as never,
+      {},
+      'session-start',
+    ),
+    false,
+  );
+  assert.equal(harness.dispatches, 0);
 });
 
 test('auto watchdog treats duplicate runtime keys as handled without dispatch', async () => {

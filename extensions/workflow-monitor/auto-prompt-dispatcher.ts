@@ -59,18 +59,24 @@ type AutoPromptDispatcherDeps = {
     ctx: unknown,
   ): Parameters<typeof planAutoPromptDispatch>[0]['freshContext'];
   getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
   setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
 };
 
 export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
-  function executeCurrentSessionAutoPromptPlan(
+  async function executeCurrentSessionAutoPromptPlan(
     pi: ExtensionAPI,
     ctx: unknown,
     prompt: string,
     state: WorkflowState,
     plan: Extract<AutoPromptDispatchPlan, { kind: 'current-session' }>,
     options: FreshContinuationDispatchOptions = {},
-  ): void {
+  ): Promise<void> {
     const message = plan.deliveryPrompt ?? prompt;
     deps.setState(
       ctx,
@@ -92,13 +98,7 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
           message,
           deliveryOptions,
         );
-        if (
-          delivered &&
-          typeof (delivered as Promise<void>).catch === 'function'
-        )
-          void (delivered as Promise<void>).catch((error) =>
-            deps.delivery.handleUserMessageDeliveryFailure(ctx, message, error),
-          );
+        await delivered;
       } catch (error) {
         deps.delivery.handleUserMessageDeliveryFailure(ctx, message, error);
         throw error;
@@ -116,6 +116,12 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
     options: FreshContinuationDispatchOptions = {},
     deliveryPrompt?: string,
   ): Promise<void> {
+    if (
+      state.autoMode &&
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(pi, ctx, state, prompt))
+    )
+      return;
     const plan = planAutoPromptDispatch({
       prompt,
       state,
@@ -127,7 +133,7 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
       expandedPrompt: expandPackagedPromptTemplate(prompt),
     });
     if (plan.kind === 'current-session') {
-      executeCurrentSessionAutoPromptPlan(
+      await executeCurrentSessionAutoPromptPlan(
         pi,
         ctx,
         prompt,
