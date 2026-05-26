@@ -6353,10 +6353,11 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
   await commands.get('addy-auto')?.handler('docs/plans/current.md', ctx);
 
   assert.match(notices.at(-1) ?? '', /running in another Pi instance/);
-  assert.match(
-    widgets.get('pi-addy-workflow')?.render().join('\n') ?? '',
-    /Addy auto passive/,
-  );
+  const passiveWidget =
+    widgets.get('pi-addy-workflow')?.render().join('\n') ?? '';
+  assert.match(passiveWidget, /🔁 Addy Workflow:/);
+  assert.match(passiveWidget, /docs\/plans\/current\.md/);
+  assert.match(passiveWidget, /Addy auto passive/);
 });
 
 test('session start ignores reasonless pending fresh state', async () => {

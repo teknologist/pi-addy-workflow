@@ -49,7 +49,10 @@ import {
 import { createInputHandler } from './input-handler.ts';
 import { registerWorkflowCommands } from './commands.ts';
 import { registerWorkflowEvents } from './events.ts';
-import { WORKFLOW_WIDGET_KEY } from './workflow-widget-presenter.ts';
+import {
+  WORKFLOW_WIDGET_KEY,
+  renderWorkflowWidget,
+} from './workflow-widget-presenter.ts';
 import {
   baseCwd,
   ensureWorkflowConfig,
@@ -87,13 +90,25 @@ function autoRunnerPassiveMessage(
   return `Addy auto passive — running in another Pi instance. ${autoRunnerLockOwnerSummary(result.owner)}. Run /addy-auto stop here to request the owner stop.`;
 }
 
-function showAutoRunnerPassiveWidget(ctx: unknown, message: string): void {
+function showAutoRunnerPassiveWidget(
+  ctx: unknown,
+  state: WorkflowState,
+  message: string,
+): void {
   (
-    ctx as { ui?: { setWidget?: (key: string, value: unknown) => void } }
+    ctx as {
+      cwd?: string;
+      ui?: { setWidget?: (key: string, value: unknown) => void };
+    }
   ).ui?.setWidget?.(WORKFLOW_WIDGET_KEY, {
     invalidate() {},
-    render() {
-      return [message];
+    render(width?: number) {
+      return [
+        ...renderWorkflowWidget(state, (ctx as { cwd?: string }).cwd)().render(
+          width,
+        ),
+        message,
+      ];
     },
   });
 }
@@ -199,7 +214,7 @@ function ensureAutoRunnerOwnership(
         { status: 'owned' | 'reclaimed' }
       >,
     );
-    showAutoRunnerPassiveWidget(ctx, passiveMessage);
+    showAutoRunnerPassiveWidget(ctx, state, passiveMessage);
     notifyWorkflowWarning(ctx, passiveMessage);
     return false;
   });
