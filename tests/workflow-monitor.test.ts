@@ -6313,7 +6313,10 @@ test('plain addy-auto resumes after explicit stop pause', async () => {
 test('addy-auto passive owner conflict renders passive widget', async () => {
   const { pi, commands } = createPiMock();
   addyWorkflowMonitor(pi as never);
-  const widgets = new Map<string, { render: () => string[] }>();
+  const widgets = new Map<
+    string,
+    () => { invalidate: () => void; render: () => string[] }
+  >();
   const notices: string[] = [];
   const ctx: any = {
     cwd: join(stateDir, 'auto-passive-widget-project'),
@@ -6324,8 +6327,10 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
       activePlan: 'docs/plans/current.md',
     },
     ui: {
-      setWidget: (key: string, value: { render: () => string[] }) =>
-        widgets.set(key, value),
+      setWidget: (
+        key: string,
+        value: () => { invalidate: () => void; render: () => string[] },
+      ) => widgets.set(key, value),
       notify: (message: string) => notices.push(message),
     },
   };
@@ -6353,8 +6358,66 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
   await commands.get('addy-auto')?.handler('docs/plans/current.md', ctx);
 
   assert.match(notices.at(-1) ?? '', /running in another Pi instance/);
+  assert.equal(typeof widgets.get('pi-addy-workflow'), 'function');
   const passiveWidget =
-    widgets.get('pi-addy-workflow')?.render().join('\n') ?? '';
+    widgets.get('pi-addy-workflow')?.().render().join('\n') ?? '';
+  assert.match(passiveWidget, /🔁 Addy Workflow:/);
+  assert.match(passiveWidget, /docs\/plans\/current\.md/);
+  assert.match(passiveWidget, /Addy auto passive/);
+});
+
+test('session start passive owner conflict renders workflow footer immediately', async () => {
+  const cwd = join(stateDir, 'startup-auto-passive-widget-project');
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const widgets = new Map<
+    string,
+    () => { invalidate: () => void; render: () => string[] }
+  >();
+  const notices: string[] = [];
+  const ctx: any = {
+    cwd,
+    id: 'startup-auto-passive-widget',
+    state: {
+      ...createInitialWorkflowState(),
+      autoMode: true,
+      activePlan: 'docs/plans/current.md',
+    },
+    ui: {
+      setWidget: (
+        key: string,
+        value: () => { invalidate: () => void; render: () => string[] },
+      ) => widgets.set(key, value),
+      notify: (message: string) => notices.push(message),
+    },
+  };
+  setContextWorkflowState(ctx, ctx.state);
+  const lockDir = autoRunnerLockDir(ctx);
+  mkdirSync(lockDir, { recursive: true });
+  writeFileSync(
+    join(lockDir, 'owner.json'),
+    `${JSON.stringify({
+      version: 1,
+      projectKey: 'test-project-key',
+      instanceId: 'another-pi-instance',
+      runnerId: 'another-runner',
+      fencingToken: 'other-token',
+      pid: process.pid,
+      cwd: '/other/repo',
+      activePlan: 'docs/plans/current.md',
+      acquiredAt: '2026-05-26T00:00:00.000Z',
+      heartbeatAt: '2026-05-26T00:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    })}\n`,
+    'utf8',
+  );
+
+  await events.get('session_start')?.({}, ctx);
+
+  assert.match(notices.at(-1) ?? '', /running in another Pi instance/);
+  assert.equal(typeof widgets.get('pi-addy-workflow'), 'function');
+  const passiveWidget =
+    widgets.get('pi-addy-workflow')?.().render().join('\n') ?? '';
   assert.match(passiveWidget, /🔁 Addy Workflow:/);
   assert.match(passiveWidget, /docs\/plans\/current\.md/);
   assert.match(passiveWidget, /Addy auto passive/);

@@ -95,22 +95,27 @@ function showAutoRunnerPassiveWidget(
   state: WorkflowState,
   message: string,
 ): void {
-  (
-    ctx as {
-      cwd?: string;
-      ui?: { setWidget?: (key: string, value: unknown) => void };
-    }
-  ).ui?.setWidget?.(WORKFLOW_WIDGET_KEY, {
-    invalidate() {},
-    render(width?: number) {
-      return [
-        ...renderWorkflowWidget(state, (ctx as { cwd?: string }).cwd)().render(
-          width,
-        ),
-        message,
-      ];
+  const host = ctx as {
+    cwd?: string;
+    ui?: { setWidget?: (key: string, value: unknown) => void };
+  };
+  host.ui?.setWidget?.(
+    WORKFLOW_WIDGET_KEY,
+    (_tui?: unknown, theme?: unknown) => {
+      const workflowWidget = renderWorkflowWidget(state, host.cwd)(
+        _tui,
+        theme as Parameters<ReturnType<typeof renderWorkflowWidget>>[1],
+      );
+      return {
+        invalidate() {
+          workflowWidget.invalidate();
+        },
+        render(width?: number) {
+          return [...workflowWidget.render(width), message];
+        },
+      };
     },
-  });
+  );
 }
 
 function releaseOwnedAutoRunnerLock(ctx: unknown): void {
