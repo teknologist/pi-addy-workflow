@@ -5922,6 +5922,51 @@ test('session start restores persisted workflow widget state', async () => {
   ]);
 });
 
+test('session start renders active auto workflow footer immediately', async () => {
+  const cwd = join(stateDir, 'startup-active-auto-widget-project');
+  const planPath = 'docs/plans/startup-active-auto.md';
+  const ctx: any = {
+    cwd,
+    id: 'startup-active-auto-widget',
+    ui: { setWidget() {}, notify() {} },
+  };
+  setContextWorkflowState(ctx, {
+    ...createInitialWorkflowState(),
+    current: 'build',
+    phases: {
+      define: 'complete',
+      plan: 'complete',
+      build: 'active',
+      simplify: 'pending',
+      verify: 'pending',
+      review: 'pending',
+      finish: 'pending',
+    },
+    autoMode: true,
+    activePlan: planPath,
+  });
+
+  const { pi, events } = createPiMock();
+  addyWorkflowMonitor(pi as never);
+  const widgets: Array<[string, unknown]> = [];
+  await events.get('session_start')?.(
+    {},
+    {
+      cwd,
+      id: 'startup-active-auto-widget-next',
+      ui: {
+        setWidget: (key: string, value: unknown) => widgets.push([key, value]),
+        notify() {},
+      },
+    },
+  );
+
+  assert.equal(widgets[0]?.[0], 'pi-addy-workflow');
+  assert.deepEqual((widgets[0]?.[1] as any)().render(), [
+    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | startup-active-auto.md',
+  ]);
+});
+
 test('session project restore preserves persistent auto mode but clears stale prompt controls', async () => {
   const cwd = join(stateDir, 'startup-auto-sanitize-project');
   const planPath = 'docs/plans/startup-auto.md';
