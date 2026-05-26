@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { truncateToWidth } from '@earendil-works/pi-tui';
 import { actionTargetsCompletePlanTask } from './auto-lifecycle.ts';
 import { stateAfterAutoPrompt } from './command-dispatch.ts';
 import { autoWorkflowActionKeyForAction } from './auto-action-keys.ts';
@@ -111,7 +112,12 @@ function showAutoRunnerPassiveWidget(
           workflowWidget.invalidate();
         },
         render(width?: number) {
-          return [...workflowWidget.render(width), message];
+          return [
+            ...workflowWidget.render(width),
+            width
+              ? truncateToWidth(message, Math.max(1, width), '', true)
+              : message,
+          ];
         },
       };
     },

@@ -164,7 +164,10 @@ export function createAddyWorkflowHarness(options: {
   }
 
   function latestFooterLine(): string | undefined {
-    return widgets.at(-1)?.lines[1];
+    const lines = widgets.at(-1)?.lines;
+    return (
+      lines?.find((line) => line.includes('Current task:')) ?? lines?.at(-1)
+    );
   }
 
   return {

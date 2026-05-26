@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { visibleWidth } from '@earendil-works/pi-tui';
 import addyWorkflowMonitor from '../extensions/workflow-monitor.ts';
 import { loadAddyWorkflowConfig } from '../extensions/workflow-monitor/config.ts';
 import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
@@ -356,7 +357,8 @@ test('auto command activates the first unfinished slice when given an index plan
   assert.equal(ctx.state.activeSuitePlan, '@docs/plans/migration-index.md');
   assert.equal(ctx.state.currentTask, 'Complete API');
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
-    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | migration-slice-01-api.md | suite: migration-index.md',
+    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Slice: \x1b[1mmigration-slice-01-api.md\x1b[22m | Plan: \x1b[1mmigration-index.md\x1b[22m',
     `Current task: Complete API | Next task: none | Slice 1/2 | Task 1/1 | ${expectedTotalTasksProgress(1, 2)}`,
   ]);
   assert.equal(sentMessages.length, 1);
@@ -3757,7 +3759,9 @@ test('addy-auto continues every workflow step in current session when fresh is c
     assert.equal(ctx.state.autoFreshPrompt, undefined);
     assert.equal(ctx.state.current, 'build');
     assert.equal(ctx.state.phases.build, 'active');
-    const footer = (lastWidget as () => { render: () => string[] })()
+    const footer = (
+      lastWidget as () => { render: (width?: number) => string[] }
+    )()
       .render()
       .join('\n');
     assert.match(footer, /\[build\]/);
@@ -5918,7 +5922,8 @@ test('session start restores persisted workflow widget state', async () => {
   assert.equal(nextCtx.state.current, 'build');
   assert.equal(nextCtx.state.activePlan, planPath);
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | startup-restore.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mstartup-restore.md\x1b[22m',
   ]);
 });
 
@@ -5963,7 +5968,8 @@ test('session start renders active auto workflow footer immediately', async () =
 
   assert.equal(widgets[0]?.[0], 'pi-addy-workflow');
   assert.deepEqual((widgets[0]?.[1] as any)().render(), [
-    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | startup-active-auto.md',
+    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mstartup-active-auto.md\x1b[22m',
   ]);
 });
 
@@ -6360,7 +6366,7 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
   addyWorkflowMonitor(pi as never);
   const widgets = new Map<
     string,
-    () => { invalidate: () => void; render: () => string[] }
+    () => { invalidate: () => void; render: (width?: number) => string[] }
   >();
   const notices: string[] = [];
   const ctx: any = {
@@ -6374,7 +6380,10 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
     ui: {
       setWidget: (
         key: string,
-        value: () => { invalidate: () => void; render: () => string[] },
+        value: () => {
+          invalidate: () => void;
+          render: (width?: number) => string[];
+        },
       ) => widgets.set(key, value),
       notify: (message: string) => notices.push(message),
     },
@@ -6409,6 +6418,12 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
   assert.match(passiveWidget, /🔁 Addy Workflow:/);
   assert.match(passiveWidget, /docs\/plans\/current\.md/);
   assert.match(passiveWidget, /Addy auto passive/);
+  const passiveWidgetLinesAtWidth =
+    widgets.get('pi-addy-workflow')?.().render(80) ?? [];
+  assert.equal(
+    passiveWidgetLinesAtWidth.every((line) => visibleWidth(line) <= 80),
+    true,
+  );
 });
 
 test('session start passive owner conflict renders workflow footer immediately', async () => {
@@ -6417,7 +6432,7 @@ test('session start passive owner conflict renders workflow footer immediately',
   addyWorkflowMonitor(pi as never);
   const widgets = new Map<
     string,
-    () => { invalidate: () => void; render: () => string[] }
+    () => { invalidate: () => void; render: (width?: number) => string[] }
   >();
   const notices: string[] = [];
   const ctx: any = {
@@ -6431,7 +6446,10 @@ test('session start passive owner conflict renders workflow footer immediately',
     ui: {
       setWidget: (
         key: string,
-        value: () => { invalidate: () => void; render: () => string[] },
+        value: () => {
+          invalidate: () => void;
+          render: (width?: number) => string[];
+        },
       ) => widgets.set(key, value),
       notify: (message: string) => notices.push(message),
     },
@@ -6466,6 +6484,12 @@ test('session start passive owner conflict renders workflow footer immediately',
   assert.match(passiveWidget, /🔁 Addy Workflow:/);
   assert.match(passiveWidget, /docs\/plans\/current\.md/);
   assert.match(passiveWidget, /Addy auto passive/);
+  const passiveWidgetLinesAtWidth =
+    widgets.get('pi-addy-workflow')?.().render(80) ?? [];
+  assert.equal(
+    passiveWidgetLinesAtWidth.every((line) => visibleWidth(line) <= 80),
+    true,
+  );
 });
 
 test('session start ignores reasonless pending fresh state', async () => {
@@ -8812,7 +8836,8 @@ test('next command parses args, transitions, persists, prefills, and continues',
   assert.equal(entries.at(-1)?.[0], 'pi-addy-workflow-state');
   assert.equal(effects.at(0)?.[0], 'pi-addy-workflow');
   assert.deepEqual((effects.at(0)?.[1] as any)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { build → simplify → verify → [review] → finish } | diff.md',
+    'Addy Workflow: ✓define → ✓plan => { build → simplify → verify → [review] → finish }',
+    'Plan: \x1b[1mdiff.md\x1b[22m',
   ]);
   assert.deepEqual(effects.at(1), ['prefill', '/addy-review diff.md']);
 });
@@ -8960,7 +8985,8 @@ test('auto mode input preserves plan and task progress while toggling footer lab
   assert.equal(auto.activePlan, 'docs/plans/auto-mode.md');
   assert.equal(auto.currentTask, 'Current task');
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
-    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | auto-mode.md',
+    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mauto-mode.md\x1b[22m',
     'Current task: Current task | Next task: Next task | Task 1/2',
   ]);
 
@@ -8973,7 +8999,8 @@ test('auto mode input preserves plan and task progress while toggling footer lab
   assert.equal(stopped.activePlan, 'docs/plans/auto-mode.md');
   assert.equal(stopped.currentTask, 'Current task');
   assert.deepEqual((widgets.at(-1)?.[1] as any)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | auto-mode.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mauto-mode.md\x1b[22m',
     'Current task: Current task | Next task: Next task | Task 1/2',
   ]);
 

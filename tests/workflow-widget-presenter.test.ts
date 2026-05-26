@@ -77,7 +77,8 @@ test('workflow widget renders spec or plan name footer', () => {
     text: `/addy-plan ${specPath}`,
   });
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    `Addy Workflow: define → [plan] => { build → simplify → verify → review → finish } | 2026-05-11-better-workflow.md`,
+    `Addy Workflow: define → [plan] => { build → simplify → verify → review → finish }`,
+    `Spec: \x1b[1m2026-05-11-better-workflow.md\x1b[22m`,
   ]);
 
   const build = transitionWorkflow(
@@ -85,7 +86,8 @@ test('workflow widget renders spec or plan name footer', () => {
     { source: 'user-input', text: '/addy-build' },
   );
   assert.deepEqual(renderWorkflowWidget(build)().render(), [
-    `Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-11-better-workflow.md`,
+    `Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }`,
+    `Plan: \x1b[1m2026-05-11-better-workflow.md\x1b[22m`,
   ]);
 });
 
@@ -111,7 +113,8 @@ test('workflow widget hides task progress while plan phase is active', () => {
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    `Addy Workflow: ✓define → [plan] => { build → simplify → verify → review → finish } | 2026-05-11-better-workflow.md`,
+    `Addy Workflow: ✓define → [plan] => { build → simplify → verify → review → finish }`,
+    `Spec: \x1b[1m2026-05-11-better-workflow.md\x1b[22m`,
   ]);
 });
 
@@ -154,7 +157,8 @@ test('workflow widget renders current and next task from active plan', () => {
   assert.equal(state.currentTask, 'Parse invoice rows');
   assert.equal(state.nextTask, 'Persist invoice payloads');
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mtask-footer.md\x1b[22m',
     'Current task: Parse invoice rows | Next task: Persist invoice payloads | Task 2/3',
   ]);
 });
@@ -217,7 +221,8 @@ test('workflow widget renders verify and review counts for the current task', ()
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { ✓build → simplify → ✓verify (2) → ✓review (3) → [finish] } | task-footer.md',
+    'Addy Workflow: ✓define → ✓plan => { ✓build → simplify → ✓verify (2) → ✓review (3) → [finish] }',
+    'Plan: \x1b[1mtask-footer.md\x1b[22m',
     'Current task: Parse invoice rows | Next task: Persist invoice payloads | Task 2/3',
   ]);
 });
@@ -293,9 +298,14 @@ test('workflow widget resolves index plans to the first unfinished slice', () =>
     '/addy-build @docs/plans/2026-05-14-migration-slice-02-runtime.md',
   );
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-14-migration-slice-02-runtime.md | suite: 2026-05-14-migration-index.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Slice: \x1b[1m2026-05-14-migration-slice-02-runtime.md\x1b[22m | Plan: \x1b[1m2026-05-14-migration-index.md\x1b[22m',
     `Current task: Migrate runtime | Next task: Remove stale config | Slice 2/2 | Task 1/2 | ${expectedTotalTasksProgress(2, 3)}`,
   ]);
+  assert.equal(
+    renderWorkflowWidget(state, cwd)().render(120)[1].trimEnd(),
+    'Slice: \x1b[1m2026-05-14-migration-slice-02-runtime.md\x1b[22m | Plan: \x1b[1m2026-05-14-migration-index.md\x1b[22m',
+  );
 });
 
 test('workflow widget resolves numeric-prefix index plans to the first unfinished slice', () => {
@@ -363,7 +373,8 @@ test('workflow widget resolves numeric-prefix index plans to the first unfinishe
       cwd,
     )().render(),
     [
-      'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 00-index.md',
+      'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+      'Plan: \x1b[1m00-index.md\x1b[22m',
       `Current task: Implement runner skeleton | Next task: none | Slice 1/2 | Task 2/2 | ${expectedTotalTasksProgress(2, 3)}`,
     ],
   );
@@ -417,7 +428,8 @@ test('workflow widget renders cumulative total task progress across slices', () 
   );
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-21-feature-slice-02.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1m2026-05-21-feature-slice-02.md\x1b[22m',
     `Current task: Slice 2 task 2 | Next task: Slice 2 task 3 | Slice 2/3 | Task 2/4 | ${expectedTotalTasksProgress(6, 12)}`,
   ]);
 });
@@ -458,7 +470,8 @@ test('workflow widget resolves Pi @-referenced active plan paths', () => {
       cwd,
     )().render(),
     [
-      'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md',
+      'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+      'Plan: \x1b[1mtask-footer.md\x1b[22m',
       'Current task: Parse invoice rows | Next task: none | Task 1/1',
     ],
   );
@@ -500,7 +513,8 @@ test('workflow widget renders task and slice progress for complete direct plan f
   };
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-08-invoice-csv-etl-slice-02-test.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1m2026-05-08-invoice-csv-etl-slice-02-test.md\x1b[22m',
     `Current task: all tasks complete | Next task: none | Slice 2/3 | Task 1/1 | ${expectedTotalTasksProgress(2, 3)}`,
   ]);
 });
@@ -547,7 +561,8 @@ test('workflow widget does not treat date-prefixed plan names as slice progress'
   };
 
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | 2026-05-12-addy-auto-command.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1m2026-05-12-addy-auto-command.md\x1b[22m',
     'Current task: Add packaged auto prompt | Next task: Store/render auto mode | Task 1/4',
   ]);
 });
@@ -568,7 +583,8 @@ test('workflow widget uses persisted task state when plan file is unavailable', 
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | missing.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mmissing.md\x1b[22m',
     'Current task: Parse invoice rows | Next task: Persist invoice payloads',
   ]);
 });
@@ -594,7 +610,8 @@ test('workflow widget prefers summarized task labels', () => {
   };
 
   assert.deepEqual(renderWorkflowWidget(state)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mtask-footer.md\x1b[22m',
     'Current task: Wire state transitions | Next task: Route draft/live submits | Task 6/18',
   ]);
 });
@@ -610,7 +627,8 @@ test('workflow widget colors footer artifact name light blue', () => {
   };
 
   assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [
-    `Addy Workflow: define → [plan] => { build → simplify → verify → review → finish } | <light-blue>2026-05-11-better-workflow.md</light-blue>`,
+    `Addy Workflow: define → [plan] => { build → simplify → verify → review → finish }`,
+    `Spec: \x1b[1m<light-blue>2026-05-11-better-workflow.md</light-blue>\x1b[22m`,
   ]);
 });
 
@@ -636,7 +654,8 @@ test('workflow widget colors task labels like workflow label', () => {
   };
 
   assert.deepEqual(renderWorkflowWidget(state)(undefined, theme).render(), [
-    '<accent>Addy Workflow: </accent>✓define → ✓plan => { [build] → simplify → verify → review → finish } | task-footer.md',
+    '<accent>Addy Workflow: </accent>✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    '<accent>Plan: </accent>\x1b[1mtask-footer.md\x1b[22m',
     '<accent>Current task: </accent>Parse invoice rows | <accent>Next task: </accent>Persist invoice payloads | <accent>Task </accent>2/3',
   ]);
 });
@@ -681,7 +700,8 @@ test('auto mode toggles without changing lifecycle phase', () => {
   assert.equal(auto.autoMode, true);
   assert.deepEqual(auto.warnings, ['keep warning']);
   assert.deepEqual(renderWorkflowWidget(auto)().render(), [
-    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | slice-02.md',
+    '🔁 Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mslice-02.md\x1b[22m',
   ]);
 
   const stopped = transitionWorkflow(auto, {
@@ -693,7 +713,8 @@ test('auto mode toggles without changing lifecycle phase', () => {
   assert.equal(stopped.autoMode, false);
   assert.deepEqual(stopped.warnings, ['keep warning']);
   assert.deepEqual(renderWorkflowWidget(stopped)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish } | slice-02.md',
+    'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+    'Plan: \x1b[1mslice-02.md\x1b[22m',
   ]);
 
   const unrelated = transitionWorkflow(build, {
@@ -804,7 +825,8 @@ test('completed active slice stays on current slice until finish', () => {
   assert.equal(state.currentTask, 'all tasks complete');
   assert.equal(state.nextTask, 'none');
   assert.deepEqual(renderWorkflowWidget(state, cwd)().render(), [
-    'Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish } | 2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md',
+    'Addy Workflow: ✓define → ✓plan => { ✓build → simplify → [verify] → review → finish }',
+    'Plan: \x1b[1m2026-05-08-invoice-csv-etl-slice-05-ingestion-happy-path.md\x1b[22m',
     `Current task: all tasks complete | Next task: none | Slice 5/8 | Task 1/1 | ${expectedTotalTasksProgress(5, 10)}`,
   ]);
 });

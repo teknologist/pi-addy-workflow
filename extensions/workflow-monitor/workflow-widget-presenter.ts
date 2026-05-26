@@ -1,4 +1,4 @@
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
 import {
   WORKFLOW_PHASES,
   phaseIndex,
@@ -13,6 +13,7 @@ import {
 } from './slice-plan-progress.ts';
 
 export const WORKFLOW_WIDGET_KEY = 'pi-addy-workflow';
+const MIN_ARTIFACT_NAME_WIDTH = 12;
 
 const OPTIONAL_PHASES = new Set<WorkflowPhase>(['simplify']);
 
@@ -69,13 +70,68 @@ export function workflowArtifactName(path: string): string {
   return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) ?? path;
 }
 
+function shortenArtifactName(name: string, maxWidth: number): string {
+  if (visibleWidth(name) <= maxWidth) return name;
+
+  const extension = name.match(/\.[^./]+$/)?.[0] ?? '';
+  const stem = extension ? name.slice(0, -extension.length) : name;
+  const lastWord = stem
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .at(-1);
+  const suffix = `${lastWord ?? stem}${extension}`;
+  const suffixWidth = Math.max(1, maxWidth - 3);
+  return `...${
+    visibleWidth(suffix) <= suffixWidth
+      ? suffix
+      : truncateToWidth(suffix, suffixWidth, '', false).trimEnd()
+  }`;
+}
+
 function styledArtifactName(
   path: string | undefined,
   theme?: { fg?: (name: string, text: string) => string },
+  maxWidth?: number,
 ): string | undefined {
   if (!path) return undefined;
-  const name = workflowArtifactName(path);
+  const name = maxWidth
+    ? shortenArtifactName(workflowArtifactName(path), maxWidth)
+    : workflowArtifactName(path);
   return theme?.fg?.('mdLinkUrl', name) ?? theme?.fg?.('accent', name) ?? name;
+}
+
+function bold(text: string): string {
+  return `\x1b[1m${text}\x1b[22m`;
+}
+
+function artifactNameWidthsForLine(
+  width: number | undefined,
+  artifactName: string | undefined,
+  suiteName: string | undefined,
+  makeLine: (artifactWidth?: number, suiteWidth?: number) => string,
+): { artifactWidth?: number; suiteWidth?: number } {
+  if (!width) return {};
+
+  const maxWidth = Math.max(1, width);
+  let overflow = visibleWidth(makeLine()) - maxWidth;
+  if (overflow <= 0) return {};
+
+  let artifactWidth = artifactName ? visibleWidth(artifactName) : undefined;
+  let suiteWidth = suiteName ? visibleWidth(suiteName) : undefined;
+  const artifactReduction = Math.min(
+    overflow,
+    Math.max(0, (artifactWidth ?? 0) - MIN_ARTIFACT_NAME_WIDTH),
+  );
+  if (artifactWidth) artifactWidth -= artifactReduction;
+  overflow = visibleWidth(makeLine(artifactWidth, suiteWidth)) - maxWidth;
+  if (overflow <= 0) return { artifactWidth, suiteWidth };
+
+  const suiteReduction = Math.min(
+    overflow,
+    Math.max(0, (suiteWidth ?? 0) - MIN_ARTIFACT_NAME_WIDTH),
+  );
+  if (suiteWidth) suiteWidth -= suiteReduction;
+  return { artifactWidth, suiteWidth };
 }
 
 function progressSuffix(
@@ -230,18 +286,51 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
         state.autoMode ? '🔁 Addy Workflow: ' : 'Addy Workflow: ',
       );
       const artifact = workflowArtifactForFooter(state);
-      const styledArtifact = styledArtifactName(artifact, theme);
-      const styledSuiteArtifact =
+      const suiteArtifact =
         state.activeSuitePlan && state.activeSuitePlan !== artifact
-          ? styledArtifactName(state.activeSuitePlan, theme)
+          ? state.activeSuitePlan
           : undefined;
-      const suiteSuffix = styledSuiteArtifact
-        ? ` | ${styleLabel('suite: ')}${styledSuiteArtifact}`
-        : '';
-      const artifactSuffix = styledArtifact
-        ? ` | ${styledArtifact}${suiteSuffix}`
-        : suiteSuffix;
-      const line = `${label}${renderWorkflowStrip(state, theme)}${artifactSuffix}`;
+      const workflowStrip = renderWorkflowStrip(state, theme);
+      const line = `${label}${workflowStrip}`;
+      const artifactName = artifact
+        ? workflowArtifactName(artifact)
+        : undefined;
+      const suiteName = suiteArtifact
+        ? workflowArtifactName(suiteArtifact)
+        : undefined;
+      const makeArtifactLine = (
+        artifactWidth?: number,
+        suiteWidth?: number,
+      ) => {
+        const styledArtifact = styledArtifactName(
+          artifact,
+          theme,
+          artifactWidth,
+        );
+        const styledSuiteArtifact = styledArtifactName(
+          suiteArtifact,
+          theme,
+          suiteWidth,
+        );
+        if (styledArtifact && styledSuiteArtifact)
+          return `${styleLabel('Slice: ')}${bold(styledArtifact)} | ${styleLabel('Plan: ')}${bold(styledSuiteArtifact)}`;
+        if (styledArtifact) {
+          const artifactLabel =
+            state.current === 'define' || state.current === 'plan'
+              ? 'Spec: '
+              : 'Plan: ';
+          return `${styleLabel(artifactLabel)}${bold(styledArtifact)}`;
+        }
+        return undefined;
+      };
+      const { artifactWidth, suiteWidth } = artifactNameWidthsForLine(
+        width,
+        artifactName,
+        suiteName,
+        (nextArtifactWidth, nextSuiteWidth) =>
+          makeArtifactLine(nextArtifactWidth, nextSuiteWidth) ?? '',
+      );
+      const artifactLine = makeArtifactLine(artifactWidth, suiteWidth);
       const currentTask = state.currentTaskSummary ?? state.currentTask;
       const nextTask = state.nextTaskSummary ?? state.nextTask;
       const taskProgress = progressSuffix(
@@ -265,7 +354,9 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
           ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
           : workflowTaskFooterLine(state.activePlan, baseCwd, theme, state)
         : undefined;
-      const lines = taskLine ? [line, taskLine] : [line];
+      const lines = [line, artifactLine, taskLine].filter(
+        (value): value is string => Boolean(value),
+      );
       return width
         ? lines.map((value) =>
             truncateToWidth(value, Math.max(1, width), '', true),
