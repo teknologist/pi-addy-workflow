@@ -24,6 +24,8 @@ import {
   getContextWorkflowState,
   setContextWorkflowState,
 } from '../extensions/workflow-monitor/workflow-state-store.ts';
+import { writeStoredWorkflowState } from '../extensions/workflow-monitor/workflow-state-store-persistence.ts';
+import { projectWorkflowStateKey } from '../extensions/workflow-monitor/workflow-state-store-scope.ts';
 import { autoRunnerLockDir } from '../extensions/workflow-monitor/auto-runner-lock.ts';
 import {
   renderWorkflowStatsMarkdown,
@@ -2682,7 +2684,7 @@ test('explicit addy-auto stop is not resurrected by older project auto state', (
       finish: 'pending',
     },
     warnings: [],
-    current: 'build',
+    current: 'build' as const,
     autoMode: true,
     autoLastPrompt: '/addy-build docs/plans/current.md',
     activePlan: 'docs/plans/current.md',
@@ -5757,9 +5759,9 @@ test('auto retry state restored from session entries pauses duplicate dispatch',
   addyWorkflowMonitor(pi as never);
   const restoredState = {
     phases: {
-      define: 'complete',
-      plan: 'complete',
-      build: 'active',
+      define: 'complete' as const,
+      plan: 'complete' as const,
+      build: 'active' as const,
       simplify: 'pending',
       verify: 'pending',
       review: 'pending',
@@ -6453,22 +6455,29 @@ test('addy-auto passive owner conflict renders passive widget', async () => {
     globalThis.setInterval = previousSetInterval;
   }
 
-  setContextWorkflowState(
-    { cwd: ctx.cwd, id: 'auto-passive-widget-owner', ui: { setWidget() {} } },
-    {
-      ...createInitialWorkflowState(),
-      current: 'build',
-      phases: {
-        ...createInitialWorkflowState().phases,
-        define: 'complete',
-        plan: 'complete',
-        build: 'active',
-      },
-      autoMode: true,
-      activePlan: 'docs/plans/updated.md',
-      currentTask: 'Owner advanced task',
-      nextTask: 'Owner next task',
+  const ownerCtx = {
+    cwd: ctx.cwd,
+    id: 'auto-passive-widget-owner',
+    ui: { setWidget() {} },
+  };
+  const ownerState = {
+    ...createInitialWorkflowState(),
+    current: 'build' as const,
+    phases: {
+      ...createInitialWorkflowState().phases,
+      define: 'complete' as const,
+      plan: 'complete' as const,
+      build: 'active' as const,
     },
+    autoMode: true,
+    activePlan: 'docs/plans/updated.md',
+    currentTask: 'Owner advanced task',
+    nextTask: 'Owner next task',
+  };
+  writeStoredWorkflowState(
+    projectWorkflowStateKey(ownerCtx),
+    ownerState,
+    ownerCtx,
   );
 
   const refreshedPassiveWidget =

@@ -40,8 +40,9 @@ export function getWorkflowStateFromContext(ctx: unknown): WorkflowState {
 
 export function getProjectWorkflowStateFromContext(
   ctx: unknown,
+  options?: { preferStored?: boolean },
 ): WorkflowState | undefined {
-  return getProjectWorkflowState(ctx as never);
+  return getProjectWorkflowState(ctx as never, options);
 }
 
 export function setWorkflowStateFromContext(

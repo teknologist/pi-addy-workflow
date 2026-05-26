@@ -70,14 +70,22 @@ function projectFallbackWorkflowState(
 function getProjectWorkflowStateByKey(
   key: string,
   ctx: WorkflowContext,
+  options?: { preferStored?: boolean },
 ): WorkflowState | undefined {
-  return readWorkflowMemoryState(key) ?? readStoredWorkflowState(key, ctx);
+  const stored = readStoredWorkflowState(key, ctx);
+  if (options?.preferStored) return stored ?? readWorkflowMemoryState(key);
+  return readWorkflowMemoryState(key) ?? stored;
 }
 
 export function getProjectWorkflowState(
   ctx: WorkflowContext,
+  options?: { preferStored?: boolean },
 ): WorkflowState | undefined {
-  return getProjectWorkflowStateByKey(projectWorkflowStateKey(ctx), ctx);
+  return getProjectWorkflowStateByKey(
+    projectWorkflowStateKey(ctx),
+    ctx,
+    options,
+  );
 }
 
 export function getContextWorkflowState(ctx: WorkflowContext): WorkflowState {

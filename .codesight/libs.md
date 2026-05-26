@@ -98,7 +98,7 @@
   - function hostContext: (ctx) => HostContext
   - function baseCwd: (ctx) => string | undefined
   - function getWorkflowStateFromContext: (ctx) => WorkflowState
-  - function getProjectWorkflowStateFromContext: (ctx) => WorkflowState | undefined
+  - function getProjectWorkflowStateFromContext: (ctx, options?) => WorkflowState | undefined
   - function setWorkflowStateFromContext: (ctx, state, appendEntry?) => void
   - function loadWorkflowConfig: (ctx) => AddyWorkflowConfig
   - _...8 more_
@@ -311,7 +311,7 @@
   - function workflowStatePath: (key, ctx?) => string
   - type WorkflowStateScopeContext
 - `extensions/workflow-monitor/workflow-state-store.ts`
-  - function getProjectWorkflowState: (ctx) => WorkflowState | undefined
+  - function getProjectWorkflowState: (ctx, options?) => WorkflowState | undefined
   - function getContextWorkflowState: (ctx) => WorkflowState
   - function setContextWorkflowState: (ctx, state, appendEntry?) => void
   - type WorkflowContext

@@ -150,7 +150,8 @@ function renderPassiveWorkflowWidget(
   cwd?: string,
 ): ReturnType<typeof renderWorkflowWidget> {
   return renderWorkflowWidget(
-    getProjectWorkflowStateFromContext(ctx) ?? fallbackState,
+    getProjectWorkflowStateFromContext(ctx, { preferStored: true }) ??
+      fallbackState,
     cwd,
   );
 }
