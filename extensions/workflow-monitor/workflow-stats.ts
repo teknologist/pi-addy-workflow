@@ -326,6 +326,30 @@ export function recordWorkflowTaskFinished(
   }));
 }
 
+export function workflowTaskDurationMs(
+  task: WorkflowTaskStats,
+  active = false,
+  now = new Date().toISOString(),
+): number | undefined {
+  const accumulated = Object.values(task.phaseDurationsMs ?? {}).reduce(
+    (sum, duration) => sum + duration,
+    0,
+  );
+  const activeStartedAt = task.phaseStartedAt
+    ? Date.parse(task.phaseStartedAt)
+    : NaN;
+  const activeEndedAt = Date.parse(now);
+  const activeDuration =
+    active &&
+    task.activePhase &&
+    Number.isFinite(activeStartedAt) &&
+    Number.isFinite(activeEndedAt)
+      ? Math.max(0, activeEndedAt - activeStartedAt)
+      : 0;
+  const total = accumulated + activeDuration;
+  return total > 0 ? total : undefined;
+}
+
 export function recordWorkflowVerifyRun(
   state: WorkflowState,
   target: WorkflowStatsTarget = {},

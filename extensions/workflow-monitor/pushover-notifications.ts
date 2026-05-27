@@ -1,5 +1,8 @@
 import type { AddyWorkflowConfig } from './config.ts';
-import type { WorkflowStatsTarget } from './workflow-stats.ts';
+import {
+  type WorkflowStatsTarget,
+  workflowTaskDurationMs,
+} from './workflow-stats.ts';
 import {
   WORKFLOW_PHASES,
   type WorkflowState,
@@ -87,9 +90,7 @@ export function buildTaskFinishedPushoverMessage(
   const finished = total?.currentTaskIndex ?? task.taskIndex ?? 0;
   const totalTasks = total?.taskCount ?? state.taskCount ?? task.taskIndex ?? 0;
   const left = Math.max(0, totalTasks - finished);
-  const startedAt = task.startedAt ? Date.parse(task.startedAt) : NaN;
-  const finishedAt = task.finishedAt ? Date.parse(task.finishedAt) : NaN;
-  const duration = formatDuration(finishedAt - startedAt);
+  const duration = formatDuration(workflowTaskDurationMs(task) ?? NaN);
   const verifyRetries = Math.max(0, task.verifyRuns - 1);
   const reviewRetries = Math.max(0, task.reviewRuns - 1);
   const sliceDetails =

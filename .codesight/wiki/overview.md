@@ -19,7 +19,7 @@
 Changes to these files have the widest blast radius across the codebase:
 
 - `extensions/workflow-monitor/workflow-transitions.ts` — imported by **72** files
-- `extensions/workflow-monitor/workflow-stats.ts` — imported by **23** files
+- `extensions/workflow-monitor/workflow-stats.ts` — imported by **22** files
 - `extensions/workflow-monitor/command-router.ts` — imported by **20** files
 - `extensions/workflow-monitor/workflow-state-store.ts` — imported by **18** files
 - `extensions/workflow-monitor/workflow-core.ts` — imported by **15** files

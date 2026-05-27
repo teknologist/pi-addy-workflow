@@ -93,6 +93,33 @@ test('workflow stats records task duration and per-step timings', () => {
   );
 });
 
+test('workflow stats excludes idle time between stopped and resumed task work', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    activePlan: 'docs/plans/current.md',
+    currentTaskId: 'task-1',
+    currentTask: 'Paused task',
+    currentTaskIndex: 1,
+  };
+
+  const firstRun = recordWorkflowTaskFinished(
+    recordWorkflowTaskTurn(state, {}, 'build', '2026-05-27T10:00:00.000Z'),
+    {},
+    '2026-05-27T10:05:00.000Z',
+  );
+  const stopped = archiveWorkflowStats(firstRun, 'stopped');
+  const resumed = recordWorkflowTaskFinished(
+    recordWorkflowVerifyRun(stopped, {}, '2026-05-27T10:15:00.000Z'),
+    {},
+    '2026-05-27T10:20:00.000Z',
+  );
+
+  const statsText = renderWorkflowStatsText(resumed);
+  assert.match(statsText, /duration 10m 0s/);
+  assert.doesNotMatch(statsText, /duration 20m 0s/);
+  assert.match(statsText, /build 5m 0s, verify 5m 0s/);
+});
+
 test('workflow stats normalizes empty state for rendering', () => {
   assert.deepEqual(createEmptyWorkflowStats(), {
     active: { tasks: {} },

@@ -4,7 +4,7 @@
 
 > 1 routes (1 inferred) | 0 models | 0 components | 100 lib files | 7 env vars | 2 middleware | 100% test coverage
 > **Token savings:** this file is ~9,100 tokens. Without it, AI exploration would cost ~37,100 tokens. **Saves ~28,000 tokens per conversation.**
-> **Last scanned:** 2026-05-27 20:03 — re-run after significant changes
+> **Last scanned:** 2026-05-27 20:15 — re-run after significant changes
 
 ---
 
@@ -362,7 +362,7 @@
   - function normalizeWorkflowStats: (value) => WorkflowStats
   - function recordWorkflowTaskTurn: (state, target, phase?, now) => void
   - function recordWorkflowTaskFinished: (state, target, finishedAt) => void
-  - _...7 more_
+  - _...8 more_
 - `extensions/workflow-monitor/workflow-task-identity.ts`
   - function hasLegacyTaskIdentity: (identity) => boolean
   - function legacyTaskIdentityMatches: (identity, candidate) => boolean
@@ -420,7 +420,7 @@
 ## Most Imported Files (change these carefully)
 
 - `extensions/workflow-monitor/workflow-transitions.ts` — imported by **72** files
-- `extensions/workflow-monitor/workflow-stats.ts` — imported by **23** files
+- `extensions/workflow-monitor/workflow-stats.ts` — imported by **22** files
 - `extensions/workflow-monitor/command-router.ts` — imported by **20** files
 - `extensions/workflow-monitor/workflow-state-store.ts` — imported by **18** files
 - `extensions/workflow-monitor/workflow-core.ts` — imported by **15** files
@@ -443,7 +443,7 @@
 ## Import Map (who imports what)
 
 - `extensions/workflow-monitor/workflow-transitions.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts` +67 more
-- `extensions/workflow-monitor/workflow-stats.ts` ← `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-loop.ts` +18 more
+- `extensions/workflow-monitor/workflow-stats.ts` ← `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-loop.ts` +17 more
 - `extensions/workflow-monitor/command-router.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-finish.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` +15 more
 - `extensions/workflow-monitor/workflow-state-store.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-agent-finish.ts`, `extensions/workflow-monitor/auto-prompt-dispatcher.ts` +13 more
 - `extensions/workflow-monitor/workflow-core.ts` ← `extensions/workflow-monitor/dashboard-server.ts`, `extensions/workflow-monitor/renderers.ts`, `extensions/workflow-monitor/workflow-state-codec-auto-control.ts`, `extensions/workflow-monitor/workflow-state-codec-auto.ts`, `extensions/workflow-monitor/workflow-state-codec-metadata.ts` +10 more

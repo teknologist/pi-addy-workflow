@@ -10,6 +10,7 @@ import {
   addIssueStats,
   emptyIssueStats,
   normalizeWorkflowStats,
+  workflowTaskDurationMs,
 } from './workflow-stats.ts';
 import { workflowTaskIdentityKey } from './workflow-task-identity.ts';
 
@@ -142,10 +143,8 @@ function durationFromMs(ms: number): string {
 }
 
 function taskDuration(task: WorkflowTaskStats): string {
-  if (!task.startedAt || !task.finishedAt) return '—';
-  return durationFromMs(
-    Date.parse(task.finishedAt) - Date.parse(task.startedAt),
-  );
+  const duration = workflowTaskDurationMs(task);
+  return duration === undefined ? '—' : durationFromMs(duration);
 }
 
 const TIMED_PHASES = WORKFLOW_PHASES.filter((phase): phase is WorkflowPhase =>

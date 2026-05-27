@@ -75,7 +75,7 @@ test('buildTaskFinishedPushoverMessage includes progress duration and retries', 
             taskIndex: 1,
             taskTitle: 'First task',
             startedAt: '2026-05-27T10:00:00.000Z',
-            finishedAt: '2026-05-27T10:05:30.000Z',
+            finishedAt: '2026-05-27T10:15:30.000Z',
             phaseDurationsMs: {
               build: 120_000,
               verify: 90_000,
@@ -111,6 +111,7 @@ test('buildTaskFinishedPushoverMessage includes progress duration and retries', 
     /Slice 1\/1 · Task 1\/2 · Total 1\/2 \(50%\)/,
   );
   assert.match(message?.message ?? '', /Cycle time: 5m 30s/);
+  assert.doesNotMatch(message?.message ?? '', /Cycle time: 15m 30s/);
   assert.match(
     message?.message ?? '',
     /Step time: build 2m 0s, verify 1m 30s, review 2m 0s/,

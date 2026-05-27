@@ -346,7 +346,7 @@
   - function normalizeWorkflowStats: (value) => WorkflowStats
   - function recordWorkflowTaskTurn: (state, target, phase?, now) => void
   - function recordWorkflowTaskFinished: (state, target, finishedAt) => void
-  - _...7 more_
+  - _...8 more_
 - `extensions/workflow-monitor/workflow-task-identity.ts`
   - function hasLegacyTaskIdentity: (identity) => boolean
   - function legacyTaskIdentityMatches: (identity, candidate) => boolean
