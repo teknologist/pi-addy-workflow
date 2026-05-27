@@ -31,6 +31,8 @@ Recommend `run verify`. Only continue review after the user explicitly chooses `
 
 When an active/supplied plan exists, read it before reviewing to identify the current verified task, but do not update the plan yet. Status checkbox updates happen only after review finishes. Mark `[x] Reviewed` only for tasks covered by this review. If the review finds blocking issues for a task, leave that task unchecked for review until fixes are verified or clearly record the blocker next to the checkbox.
 
+When the active/supplied plan or spec lists ADRs, `Required context`, or `Must preserve ADR constraints`, read those linked ADR/spec/steering files before reviewing. Enforce ADR-derived guardrails as part of review: flag any implementation that violates listed ADR constraints, skips a `must not` acceptance criterion, changes architecture decisions without a superseding ADR, or relies on behavior the ADR explicitly rejected. If ADR context appears missing but the changes are clearly architecture-sensitive, report that as an Important planning/spec gap instead of inventing ADR constraints. Make ADR-related Critical or Important findings actionable for `/addy-fix-all`: name whether the safe fix is updating implementation, adding missing spec/plan required context, linking an existing ADR, or stopping for a superseding ADR / explicit human architecture decision.
+
 This checkbox synchronization is mandatory after every `/addy-review` run. Before reporting completion, re-open the active/supplied plan and update each affected slice task so:
 
 - `[x] Reviewed` means this review covered the task and found no unresolved blocking issues.
@@ -42,7 +44,7 @@ Review the current changes (staged, unstaged, or recent commits) across all five
 
 1. **Correctness** — Does it match the spec? Edge cases handled? Tests adequate?
 2. **Readability** — Clear names? Straightforward logic? Well-organized?
-3. **Architecture** — Follows existing patterns? Clean boundaries? Right abstraction level?
+3. **Architecture** — Follows existing patterns? Clean boundaries? Right abstraction level? Preserves related ADR decisions and plan `must not` guardrails?
 4. **Security** — Input validated? Secrets safe? Auth checked? Use the Pi `security-and-hardening` skill.
 5. **Performance** — No N+1 queries? No unbounded ops? Use the Pi `performance-optimization` skill.
 

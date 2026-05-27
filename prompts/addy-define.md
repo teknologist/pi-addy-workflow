@@ -26,7 +26,16 @@ Begin by understanding what the user wants to build. When a build explanation ar
 3. Tech stack preferences and constraints
 4. Known boundaries (what to always do, ask first about, and never do)
 
+For ambiguous, risky, domain-heavy, or architecture-sensitive specs, use the Pi `grill-with-docs` skill before finalizing the spec. Use it to challenge the idea against existing domain language, `CONTEXT.md`/`CONTEXT-MAP.md` when present, and documented decisions such as ADRs. Do not use `grill-with-docs` for trivial specs where ordinary clarification is enough.
+
 Then generate a structured spec covering all six core areas: objective, commands, project structure, code style, testing strategy, and boundaries.
+
+Also add a concise `## Related ADRs / Architecture constraints` section:
+
+- Discover ADRs explicitly mentioned by the user or existing related docs first.
+- Then inspect bounded ADR locations such as `docs/adr/`, `docs/adrs/`, `decisions/`, or `docs/decisions/` when they exist, and link only ADRs whose titles, filenames, or summaries are relevant to the requested work.
+- For each relevant ADR, include a short note like “Before implementation, read `docs/adr/NNNN-decision.md`.”
+- Capture apparent ADR conflicts as open questions or boundaries. Do not rewrite or override ADR decisions from the spec; require a superseding ADR or explicit human architecture decision when the requested work conflicts with an ADR.
 
 Save new `/addy-define` specs under `docs/specs/` using a meaningful, kebab-case filename with a timestamp prefix: `YYYY-MM-DD-HHMMSS-<meaningful-name>.md`. Do not save `/addy-define` specs as `SPEC.md` in the project root. Confirm the generated spec path with the user before proceeding.
 

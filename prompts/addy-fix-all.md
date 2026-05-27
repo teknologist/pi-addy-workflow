@@ -18,6 +18,13 @@ This command is a fix pass, not a review pass. Fix only the issues and suggestio
 
 Treat Critical and Important findings as required fixes. Treat Suggestions as applicable unless they are unsafe, conflicting, out of scope, or would add speculative complexity.
 
+ADR-related review findings are actionable fix targets. If the immediately preceding `/addy-review` reports an ADR violation, skipped ADR-derived `must not` guardrail, missing superseding ADR, or missing ADR context for architecture-sensitive changes, auto-recover when safe by making the smallest scoped change that satisfies the finding:
+
+- Fix implementation that violates an existing ADR or plan guardrail.
+- Add missing spec/plan required context when an existing relevant ADR was omitted.
+- Link an existing ADR from the spec or plan when that resolves the review finding.
+- Stop instead of guessing when resolution requires creating or changing an ADR, making a product/security/architecture judgment, or choosing between conflicting ADRs.
+
 Do not invent issues. Do not search for new review findings. If the immediately preceding assistant turn was not a `/addy-review` result with actionable issues or suggestions, or a clean `/addy-review` result whose only unresolved work is an unchecked `Reviewed` checkbox for the current task, stop and ask the user to run `/addy-review` first.
 
 For each surfaced item:

@@ -20,7 +20,9 @@ Before pausing:
 3. Classify the blocker:
    - implementation defect
    - test/fixture/tooling gap
+   - build-time missing ADR/spec/steering context that can be repaired by linking an existing unambiguous artifact
    - review finding needing a code or test fix
+   - ADR-related review finding needing implementation repair, missing spec/plan required context, or an existing ADR link
    - plan/status checkbox out of sync with evidence
    - workflow state/stat synchronization lag where the plan already has the owned checkbox checked and this run has real phase evidence
    - genuinely unsafe or ambiguous decision
@@ -28,6 +30,10 @@ Before pausing:
 5. Add or update meaningful regression coverage when behavior changed.
 6. Re-run the required verification/review step.
 7. Update only the lifecycle checkbox owned by the completed step.
+
+ADR-related review findings are recoverable when the safe scoped fix is to preserve an existing ADR, restore a skipped `must not` guardrail, or add missing references to an already-existing ADR in the spec/plan required context. Pause instead of auto-fixing when resolution requires creating or superseding an ADR, choosing between conflicting ADRs, or making a product/security/architecture judgment.
+
+Build-time missing ADR/spec/steering context is recoverable only when the existing ADR or steering file is unambiguous and the safe scoped fix is limited to linking it from the active spec/plan required context. After repairing that context, rerun the blocked build step. Pause instead of redesigning during build or guessing; if re-defining the spec, a new/superseding ADR, conflicting ADR interpretation, or human architecture/product/security judgment is needed, stop and report the blocker.
 
 If the repeated blocker is "missing lifecycle evidence: Reviewed" but the active task already has `[x] Reviewed` and the latest real `/addy-review` for that task reported `No issues found`, do not re-run review just to satisfy stale state. Treat it as synchronization lag, preserve the review evidence in the report, and let Addy auto commit or advance to the next unfinished slice.
 

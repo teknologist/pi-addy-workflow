@@ -129,6 +129,60 @@ test('define prompt accepts either a spec path or build idea', async () => {
   assert.match(content, /YYYY-MM-DD-HHMMSS-<meaningful-name>\.md/);
 });
 
+test('define guidance links relevant ADRs from specs', async () => {
+  const definePrompt = await readFile(
+    join('prompts', 'addy-define.md'),
+    'utf8',
+  );
+  const specSkill = await readFile(
+    join('skills', 'spec-driven-development', 'SKILL.md'),
+    'utf8',
+  );
+  const specReviewer = await readFile(
+    join('agents', 'addy-spec-reviewer.md'),
+    'utf8',
+  );
+
+  for (const content of [definePrompt, specSkill]) {
+    assert.match(content, /Related ADRs \/ Architecture constraints/i);
+    assert.match(content, /docs\/adr\//i);
+    assert.match(content, /decisions\//i);
+    assert.match(content, /Before implementation, read/i);
+    assert.match(content, /superseding ADR/i);
+  }
+
+  assert.match(specReviewer, /related ADRs \/ architecture constraints/i);
+  assert.match(
+    specReviewer,
+    /ADR conflict.*open question|open question.*ADR conflict/i,
+  );
+});
+
+test('define guidance uses grill-with-docs for risky specs', async () => {
+  const definePrompt = await readFile(
+    join('prompts', 'addy-define.md'),
+    'utf8',
+  );
+  const specSkill = await readFile(
+    join('skills', 'spec-driven-development', 'SKILL.md'),
+    'utf8',
+  );
+
+  for (const content of [definePrompt, specSkill]) {
+    assert.match(content, /grill-with-docs/);
+    assert.match(
+      content,
+      /ambiguous, risky, domain-heavy, or architecture-sensitive specs/i,
+    );
+    assert.match(content, /CONTEXT\.md/);
+    assert.match(content, /CONTEXT-MAP\.md/);
+    assert.match(
+      content,
+      /Do not use `grill-with-docs` for trivial specs|Skip it for trivial specs/i,
+    );
+  }
+});
+
 test('finish prompt advances tasks and slices with inline commit instructions', async () => {
   const content = await readFile(join('prompts', 'addy-finish.md'), 'utf8');
 
@@ -326,6 +380,30 @@ test('plan and build define lifecycle task completion semantics', async () => {
   assert.match(buildPrompt, /Legacy checklist-only plans remain supported/i);
 });
 
+test('build guidance consumes ADR required context before coding', async () => {
+  const buildPrompt = await readFile(join('prompts', 'addy-build.md'), 'utf8');
+  const incrementalSkill = await readFile(
+    join('skills', 'incremental-implementation', 'SKILL.md'),
+    'utf8',
+  );
+  const implementerAgent = await readFile(
+    join('agents', 'addy-implementer.md'),
+    'utf8',
+  );
+
+  for (const content of [buildPrompt, incrementalSkill, implementerAgent]) {
+    assert.match(content, /required context/i);
+    assert.match(content, /linked ADRs/i);
+    assert.match(content, /must not.*guardrails/i);
+    assert.match(content, /superseding ADR/i);
+    assert.match(content, /human architecture decision/i);
+  }
+
+  assert.match(buildPrompt, /Do not perform broad ADR discovery during build/i);
+  assert.match(buildPrompt, /stop and ask for plan\/spec clarification/i);
+  assert.match(buildPrompt, /preserving ADR constraints/i);
+});
+
 test('plan guidance keeps auto-ready metadata durable and non-task audits', async () => {
   const planPrompt = await readFile(join('prompts', 'addy-plan.md'), 'utf8');
   const planningSkill = await readFile(
@@ -347,6 +425,86 @@ test('plan guidance keeps auto-ready metadata durable and non-task audits', asyn
     assert.match(content, /not .*lifecycle task/i);
     assert.doesNotMatch(content, /## Task N: Audit completed implementation/i);
   }
+});
+
+test('plan guidance carries relevant ADRs into implementation tasks', async () => {
+  const planPrompt = await readFile(join('prompts', 'addy-plan.md'), 'utf8');
+  const planningSkill = await readFile(
+    join('skills', 'planning-and-task-breakdown', 'SKILL.md'),
+    'utf8',
+  );
+  const plannerAgent = await readFile(
+    join('agents', 'addy-planner.md'),
+    'utf8',
+  );
+
+  for (const content of [planPrompt, planningSkill, plannerAgent]) {
+    assert.match(content, /Architecture Decision Records \(ADRs\)/i);
+    assert.match(
+      content,
+      /ADRs linked from the spec|ADRs explicitly (?:listed or )?linked from the spec/i,
+    );
+    assert.match(content, /docs\/adr\//i);
+    assert.match(content, /decisions\//i);
+    assert.match(content, /superseding ADR/i);
+  }
+
+  for (const content of [planPrompt, planningSkill]) {
+    assert.match(content, /## Required context|plan-level required context/i);
+    assert.match(content, /relevant ADR paths/i);
+    assert.match(content, /Steering files/i);
+    assert.match(content, /Must preserve ADR constraints/i);
+    assert.match(content, /must not.*ADR constraints/i);
+    assert.match(content, /task title.*ADR ID|ADR ID.*task title/i);
+  }
+
+  assert.match(
+    plannerAgent,
+    /required context listing the spec, relevant ADR paths/i,
+  );
+  assert.match(plannerAgent, /explicit `must not` guardrails/i);
+});
+
+test('plan guidance does not use grill-with-docs', async () => {
+  const planPrompt = await readFile(join('prompts', 'addy-plan.md'), 'utf8');
+  const planningSkill = await readFile(
+    join('skills', 'planning-and-task-breakdown', 'SKILL.md'),
+    'utf8',
+  );
+  const plannerAgent = await readFile(
+    join('agents', 'addy-planner.md'),
+    'utf8',
+  );
+
+  for (const content of [planPrompt, planningSkill, plannerAgent]) {
+    assert.doesNotMatch(content, /grill-with-docs/);
+  }
+});
+
+test('plan and build guidance define safe auto recovery for missing ADR context', async () => {
+  const planPrompt = await readFile(join('prompts', 'addy-plan.md'), 'utf8');
+  const buildPrompt = await readFile(join('prompts', 'addy-build.md'), 'utf8');
+  const autoPrompt = await readFile(join('prompts', 'addy-auto.md'), 'utf8');
+  const unblockSkill = await readFile(
+    join('skills', 'addy-auto-unblock', 'SKILL.md'),
+    'utf8',
+  );
+
+  for (const content of [planPrompt, buildPrompt, autoPrompt, unblockSkill]) {
+    assert.match(content, /safe|safely/i);
+    assert.match(content, /unambiguous/i);
+    assert.match(content, /existing ADR|existing.*steering file/i);
+    assert.match(content, /required context/i);
+    assert.match(content, /stop|Pause/i);
+    assert.match(content, /guessing/i);
+  }
+
+  assert.match(buildPrompt, /If Addy Auto Mode is active/i);
+  assert.match(autoPrompt, /rerun the current build step/i);
+  assert.match(
+    unblockSkill,
+    /Pause instead of redesigning during build or guessing/i,
+  );
 });
 
 test('ambiguous spec and plan selection uses structured questions', async () => {
@@ -398,6 +556,35 @@ test('verify and review prompts avoid completed stale active plans', async () =>
   );
 });
 
+test('review guidance enforces ADR constraints and guardrails', async () => {
+  const reviewPrompt = await readFile(
+    join('prompts', 'addy-review.md'),
+    'utf8',
+  );
+  const reviewSkill = await readFile(
+    join('skills', 'code-review-and-quality', 'SKILL.md'),
+    'utf8',
+  );
+  const reviewerAgent = await readFile(
+    join('agents', 'addy-reviewer.md'),
+    'utf8',
+  );
+
+  for (const content of [reviewPrompt, reviewSkill, reviewerAgent]) {
+    assert.match(content, /ADR constraints/i);
+    assert.match(content, /must not.*guardrails/i);
+    assert.match(content, /superseding ADR/i);
+  }
+
+  assert.match(reviewPrompt, /read those linked ADR\/spec\/steering files/i);
+  assert.match(reviewPrompt, /violates listed ADR constraints/i);
+  assert.match(reviewPrompt, /Important planning\/spec gap/i);
+  assert.match(reviewPrompt, /actionable for `\/addy-fix-all`/i);
+  assert.match(reviewPrompt, /adding missing spec\/plan required context/i);
+  assert.match(reviewSkill, /Treat violations of linked ADRs/i);
+  assert.match(reviewerAgent, /Flag changes that violate an ADR/i);
+});
+
 test('review may update plan checkboxes without editing source files', async () => {
   const content = await readFile(join('prompts', 'addy-review.md'), 'utf8');
 
@@ -437,6 +624,13 @@ test('fix-all prompt fixes surfaced items and reruns review', async () => {
   assert.match(content, /\/addy-review <plan-path>/);
   assert.match(
     content,
+    /ADR-related review findings are actionable fix targets/i,
+  );
+  assert.match(content, /Add missing spec\/plan required context/i);
+  assert.match(content, /Link an existing ADR/i);
+  assert.match(content, /Stop instead of guessing/i);
+  assert.match(
+    content,
     /Do not merely print `\/addy-verify` or `\/addy-review` and stop/,
   );
   assert.match(content, /Do not commit unless the user explicitly asks/);
@@ -462,6 +656,8 @@ test('auto prompt documents autonomous plan execution', async () => {
     content,
     /Do not use unblock recovery to skip, weaken, or silently reinterpret acceptance criteria/i,
   );
+  assert.match(content, /ADR-related review findings as actionable/i);
+  assert.match(content, /adding missing spec\/plan required context/i);
   assert.match(readme, /\/addy-auto/);
   assert.match(readme, /docs\/addy-auto-unblock-flow\.md/);
   assert.match(unblockDoc, /Autonomous recovery must not weaken the workflow/);
@@ -473,6 +669,20 @@ test('auto prompt documents autonomous plan execution', async () => {
     unblockDoc,
     /must not invoke or perform `\/addy-verify` or `\/addy-review` inside the fix-all turn/,
   );
+});
+
+test('auto unblock treats safe ADR review findings as recoverable', async () => {
+  const unblockSkill = await readFile(
+    join('skills', 'addy-auto-unblock', 'SKILL.md'),
+    'utf8',
+  );
+
+  assert.match(unblockSkill, /ADR-related review finding/i);
+  assert.match(unblockSkill, /implementation repair/i);
+  assert.match(unblockSkill, /missing spec\/plan required context/i);
+  assert.match(unblockSkill, /recoverable when the safe scoped fix/i);
+  assert.match(unblockSkill, /Pause instead of auto-fixing/i);
+  assert.match(unblockSkill, /creating or superseding an ADR/i);
 });
 
 test('auto prompt defines autonomous task loop boundaries', async () => {
