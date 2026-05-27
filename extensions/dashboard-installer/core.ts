@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
 import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -82,4 +83,73 @@ export function dashboardShimUsage(result: DashboardShimResult): string {
     ? ` Add ${result.binDir} to your shell PATH to use it outside Pi.`
     : '';
   return `Installed addy-dashboard. Open it with: addy-dashboard --project-path "$PWD".${pathHint}`;
+}
+
+export type DashboardCommandPlan = {
+  serverArgs: string[];
+  url: string;
+  public: boolean;
+};
+
+export function planDashboardCommand(
+  args: string[],
+  options: { cwd?: string } = {},
+): DashboardCommandPlan {
+  const serverArgs = [...args];
+  const publicIndex = serverArgs.indexOf('--public');
+  const isPublic = publicIndex >= 0;
+  if (isPublic) {
+    serverArgs.splice(publicIndex, 1);
+    if (!serverArgs.includes('--host') && !serverArgs.includes('-h'))
+      serverArgs.push('--host', '0.0.0.0');
+  }
+
+  if (!serverArgs.includes('--project-path') && options.cwd)
+    serverArgs.push('--project-path', options.cwd);
+
+  const portIndex = serverArgs.findIndex(
+    (arg) => arg === '--port' || arg === '-p',
+  );
+  const port = portIndex >= 0 ? serverArgs[portIndex + 1] : '3848';
+  return { serverArgs, url: `http://127.0.0.1:${port}`, public: isPublic };
+}
+
+function openCommand(url: string): { command: string; args: string[] } {
+  if (process.platform === 'darwin') return { command: 'open', args: [url] };
+  if (process.platform === 'win32')
+    return { command: 'cmd', args: ['/c', 'start', '', url] };
+  return { command: 'xdg-open', args: [url] };
+}
+
+export function launchDashboardCommand(
+  importMetaUrl: string,
+  args: string[],
+  options: {
+    cwd?: string;
+    spawnProcess?: typeof spawn;
+  } = {},
+): DashboardCommandPlan & { server: ChildProcess; opener: ChildProcess } {
+  const plan = planDashboardCommand(args, options);
+  const spawnProcess = options.spawnProcess ?? spawn;
+  const server = spawnProcess(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      dashboardBinSource(importMetaUrl),
+      ...plan.serverArgs,
+    ],
+    { detached: true, stdio: 'ignore' },
+  );
+  server.on('error', () => {});
+  server.unref();
+
+  const openerCommand = openCommand(plan.url);
+  const opener = spawnProcess(openerCommand.command, openerCommand.args, {
+    detached: true,
+    stdio: 'ignore',
+  });
+  opener.on('error', () => {});
+  opener.unref();
+
+  return { ...plan, server, opener };
 }

@@ -4,7 +4,7 @@
 
 > 1 routes (1 inferred) | 0 models | 0 components | 100 lib files | 7 env vars | 2 middleware | 100% test coverage
 > **Token savings:** this file is ~9,100 tokens. Without it, AI exploration would cost ~37,100 tokens. **Saves ~28,000 tokens per conversation.**
-> **Last scanned:** 2026-05-27 19:55 — re-run after significant changes
+> **Last scanned:** 2026-05-27 20:03 — re-run after significant changes
 
 ---
 
@@ -39,7 +39,7 @@
   - function dashboardShimContent: (sourcePath) => string
   - function ensureDashboardShim: (importMetaUrl, options) => Promise<DashboardShimResult>
   - function dashboardShimUsage: (result) => string
-  - _...2 more_
+  - _...5 more_
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string

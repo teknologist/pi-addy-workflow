@@ -6,10 +6,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
+import addyDashboardInstaller from '../extensions/dashboard-installer.ts';
 import {
   dashboardBinSource,
   dashboardShimUsage,
   ensureDashboardShim,
+  launchDashboardCommand,
+  planDashboardCommand,
 } from '../extensions/dashboard-installer/core.ts';
 
 const execFileAsync = promisify(execFile);
@@ -76,4 +79,72 @@ test('dashboard shim usage tells users how to open the dashboard', () => {
     }),
     /addy-dashboard --project-path "\$PWD"/,
   );
+});
+
+test('dashboard slash command defaults to current project and local URL', () => {
+  assert.deepEqual(planDashboardCommand([], { cwd: '/repo' }), {
+    serverArgs: ['--project-path', '/repo'],
+    url: 'http://127.0.0.1:3848',
+    public: false,
+  });
+});
+
+test('dashboard slash command --public binds host 0.0.0.0', () => {
+  assert.deepEqual(
+    planDashboardCommand(['--public', '--port', '4000'], { cwd: '/repo' }),
+    {
+      serverArgs: [
+        '--port',
+        '4000',
+        '--host',
+        '0.0.0.0',
+        '--project-path',
+        '/repo',
+      ],
+      url: 'http://127.0.0.1:4000',
+      public: true,
+    },
+  );
+});
+
+test('dashboard slash command launches server and browser opener', () => {
+  const calls: Array<{ command: string; args: string[] }> = [];
+  const fakeSpawn = ((command: string, args: string[]) => {
+    calls.push({ command, args });
+    return { on() {}, unref() {} };
+  }) as never;
+  const packageRoot = join(tmpdir(), 'addy dashboard package');
+  const extensionUrl = pathToFileURL(
+    join(packageRoot, 'extensions', 'dashboard-installer.ts'),
+  ).href;
+
+  launchDashboardCommand(extensionUrl, ['--public'], {
+    cwd: '/repo',
+    spawnProcess: fakeSpawn,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, process.execPath);
+  assert.deepEqual(calls[0].args, [
+    '--experimental-strip-types',
+    join(packageRoot, 'bin', 'addy-dashboard.ts'),
+    '--host',
+    '0.0.0.0',
+    '--project-path',
+    '/repo',
+  ]);
+  assert.match(calls[1].args.join(' '), /http:\/\/127\.0\.0\.1:3848/);
+});
+
+test('dashboard installer registers addy-dashboard slash command', () => {
+  const commands = new Map<string, { description?: string }>();
+
+  addyDashboardInstaller({
+    registerCommand: (name: string, command: { description?: string }) => {
+      commands.set(name, command);
+    },
+    on: () => {},
+  } as never);
+
+  assert.match(commands.get('addy-dashboard')?.description ?? '', /--public/);
 });

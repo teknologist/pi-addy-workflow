@@ -23,7 +23,7 @@
   - function dashboardShimContent: (sourcePath) => string
   - function ensureDashboardShim: (importMetaUrl, options) => Promise<DashboardShimResult>
   - function dashboardShimUsage: (result) => string
-  - _...2 more_
+  - _...5 more_
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string

@@ -45,9 +45,12 @@ Options:
 ```bash
 addy-dashboard --port 8080
 addy-dashboard --host 0.0.0.0
+addy-dashboard --public
 addy-dashboard --project-path /path/to/another/project
 addy-dashboard --state-dir /path/to/custom/state-dir
 ```
+
+Inside Pi, run `/addy-dashboard` to start the dashboard for the current project and open `http://127.0.0.1:3848`. Use `/addy-dashboard --public` to bind the server to `0.0.0.0` while still opening the local URL.
 
 The dashboard shows the same core information as the Addy footer: active plan, current phase, current and next task, slice/task/total-task progress, phase status, plus active and completed task stats with time spent per workflow step. `GET /api/state` returns the same snapshot as JSON.
 

@@ -8,14 +8,18 @@ function valueAfter(flag: string, args: string[]): string | undefined {
 
 const args = process.argv.slice(2);
 const portValue = valueAfter('--port', args) ?? valueAfter('-p', args);
-const host = valueAfter('--host', args) ?? valueAfter('-h', args);
+const host =
+  valueAfter('--host', args) ??
+  valueAfter('-h', args) ??
+  (args.includes('--public') ? '0.0.0.0' : undefined);
 const stateDir = valueAfter('--state-dir', args);
 const projectPath = valueAfter('--project-path', args);
 
 if (args.includes('--help')) {
-  console.log(`Usage: addy-dashboard [--port 3848] [--host 127.0.0.1] [--project-path PATH] [--state-dir PATH]
+  console.log(`Usage: addy-dashboard [--port 3848] [--host 127.0.0.1] [--public] [--project-path PATH] [--state-dir PATH]
 
 Shows the current Addy auto active plan from the current directory, or --project-path when supplied.
+Use --public as shorthand for --host 0.0.0.0.
 `);
   process.exit(0);
 }
