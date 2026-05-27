@@ -239,9 +239,6 @@ Verification:
 npm test -- --test-name-pattern "(auto runner lock|addy-auto|session start|agent_end|auto watchdog|fresh continuation)"
 ```
 
-
-
-
 ## Distilled implementation context (2026-05-26)
 
 - This plan is the canonical note for the [[Addy Auto Mode]] single-runner ownership problem; do not create a duplicate concept note unless the implementation lands and needs an architecture update in [[context]].
