@@ -28,6 +28,29 @@ Prompts:
 - `/addy-auto [plan-path]` — autonomously build, verify, review, and commit tasks from a slice plan
 - `/addy-finish` — commit current work, continue the next task or slice, or ship when all slices are complete
 
+## Dashboard
+
+Start a read-only web dashboard for the current project's Addy auto state:
+
+```bash
+addy-dashboard
+```
+
+By default it serves `http://127.0.0.1:3848` and reads the project-scoped state from `$PI_ADDY_WORKFLOW_STATE_DIR` or `<cwd>/.pi/addy-workflow/state`.
+
+On Pi startup, the package installs a lightweight `addy-dashboard` shim at `~/.pi/agent/bin/addy-dashboard` if needed. The installer runs in the background and does not block startup. To launch from any terminal, add `~/.pi/agent/bin` to your shell `PATH`, then run `addy-dashboard --project-path "$PWD"` from the project you want to inspect.
+
+Options:
+
+```bash
+addy-dashboard --port 8080
+addy-dashboard --host 0.0.0.0
+addy-dashboard --project-path /path/to/another/project
+addy-dashboard --state-dir /path/to/custom/state-dir
+```
+
+The dashboard shows the same core information as the Addy footer: active plan, current phase, current and next task, slice/task/total-task progress, phase status, plus active and completed task stats with time spent per workflow step. `GET /api/state` returns the same snapshot as JSON.
+
 ## Runtime behavior
 
 - Bootstrap injects concise `using-addy-workflow` guidance once per session.

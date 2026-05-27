@@ -2,9 +2,15 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 0 routes | 0 models | 0 components | 98 lib files | 6 env vars | 2 middleware | 0% test coverage
-> **Token savings:** this file is ~8,900 tokens. Without it, AI exploration would cost ~35,900 tokens. **Saves ~27,000 tokens per conversation.**
-> **Last scanned:** 2026-05-27 18:01 — re-run after significant changes
+> 1 routes (1 inferred) | 0 models | 0 components | 100 lib files | 7 env vars | 2 middleware | 100% test coverage
+> **Token savings:** this file is ~9,100 tokens. Without it, AI exploration would cost ~37,100 tokens. **Saves ~28,000 tokens per conversation.**
+> **Last scanned:** 2026-05-27 19:55 — re-run after significant changes
+
+---
+
+# Routes
+
+- `ALL` `/api/state` [auth, cache, queue] `[inferred]` ✓
 
 ---
 
@@ -26,6 +32,14 @@
   - type BootstrapToolAvailability
   - type BootstrapOptions
   - _...1 more_
+- `extensions/dashboard-installer/core.ts`
+  - function defaultDashboardBinDir: (home) => void
+  - function packageRoot: (importMetaUrl) => string
+  - function dashboardBinSource: (importMetaUrl) => string
+  - function dashboardShimContent: (sourcePath) => string
+  - function ensureDashboardShim: (importMetaUrl, options) => Promise<DashboardShimResult>
+  - function dashboardShimUsage: (result) => string
+  - _...2 more_
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string
@@ -118,6 +132,10 @@
   - function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig
   - type AddyWorkflowConfig
   - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
+- `extensions/workflow-monitor/dashboard-server.ts`
+  - function dashboardSnapshot: (options) => DashboardSnapshot
+  - function startAddyDashboard: (options) => void
+  - type DashboardSnapshot
 - `extensions/workflow-monitor/event-intake.ts`
   - function planToolResultEvent: (event) => PlannedWorkflowEvent
   - function planToolCallEvent: (event) => PlannedWorkflowEvent | undefined
@@ -374,6 +392,7 @@
 ## Environment Variables
 
 - `HOME` **required** — extensions/agent-installer/core.ts
+- `PATH` **required** — extensions/dashboard-installer/core.ts
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/addy-auto-fixture-loop.test.ts
@@ -404,19 +423,19 @@
 - `extensions/workflow-monitor/workflow-stats.ts` — imported by **23** files
 - `extensions/workflow-monitor/command-router.ts` — imported by **20** files
 - `extensions/workflow-monitor/workflow-state-store.ts` — imported by **18** files
-- `extensions/workflow-monitor/workflow-core.ts` — imported by **14** files
+- `extensions/workflow-monitor/workflow-core.ts` — imported by **15** files
 - `extensions/workflow-monitor/workflow-dispatch-options.ts` — imported by **10** files
+- `extensions/workflow-monitor/plan-task-lifecycle.ts` — imported by **8** files
 - `extensions/workflow-monitor/workflow-stats-target.ts` — imported by **7** files
 - `extensions/workflow-monitor/workflow-runtime.ts` — imported by **7** files
-- `extensions/workflow-monitor/plan-task-lifecycle.ts` — imported by **7** files
 - `extensions/workflow-monitor/fresh-continuation.ts` — imported by **6** files
 - `extensions/workflow-monitor/workflow-tracker.ts` — imported by **6** files
 - `extensions/workflow-monitor/auto-lifecycle.ts` — imported by **6** files
+- `extensions/workflow-monitor/workflow-phases.ts` — imported by **6** files
 - `extensions/workflow-monitor/workflow-task-identity.ts` — imported by **5** files
 - `extensions/workflow-monitor/prompt-template.ts` — imported by **5** files
 - `extensions/workflow-monitor/auto-control.ts` — imported by **5** files
 - `extensions/workflow-monitor/config.ts` — imported by **5** files
-- `extensions/workflow-monitor/workflow-phases.ts` — imported by **5** files
 - `extensions/workflow-monitor/workflow-state-normalizer.ts` — imported by **5** files
 - `extensions/workflow-monitor/workflow-state-codec.ts` — imported by **5** files
 - `extensions/workflow-monitor/workflow-plan-continuation.ts` — imported by **4** files
@@ -427,19 +446,23 @@
 - `extensions/workflow-monitor/workflow-stats.ts` ← `extensions/workflow-monitor/agent-end-review-stats.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-loop.ts` +18 more
 - `extensions/workflow-monitor/command-router.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-action-keys.ts`, `extensions/workflow-monitor/auto-agent-finish.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` +15 more
 - `extensions/workflow-monitor/workflow-state-store.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-agent-finish.ts`, `extensions/workflow-monitor/auto-prompt-dispatcher.ts` +13 more
-- `extensions/workflow-monitor/workflow-core.ts` ← `extensions/workflow-monitor/renderers.ts`, `extensions/workflow-monitor/workflow-state-codec-auto-control.ts`, `extensions/workflow-monitor/workflow-state-codec-auto.ts`, `extensions/workflow-monitor/workflow-state-codec-metadata.ts`, `extensions/workflow-monitor/workflow-state-codec-review.ts` +9 more
+- `extensions/workflow-monitor/workflow-core.ts` ← `extensions/workflow-monitor/dashboard-server.ts`, `extensions/workflow-monitor/renderers.ts`, `extensions/workflow-monitor/workflow-state-codec-auto-control.ts`, `extensions/workflow-monitor/workflow-state-codec-auto.ts`, `extensions/workflow-monitor/workflow-state-codec-metadata.ts` +10 more
 - `extensions/workflow-monitor/workflow-dispatch-options.ts` ← `extensions/workflow-monitor/agent-end-handler.ts`, `extensions/workflow-monitor/auto-agent-end.ts`, `extensions/workflow-monitor/auto-review-fix-loop.ts`, `extensions/workflow-monitor/auto-watchdog.ts`, `extensions/workflow-monitor/fresh-continuation-delivery.ts` +5 more
+- `extensions/workflow-monitor/plan-task-lifecycle.ts` ← `extensions/workflow-monitor/plan-task-reader.ts`, `extensions/workflow-monitor/plan-task-resolution.ts`, `extensions/workflow-monitor/workflow-state-codec-commits.ts`, `tests/auto-lifecycle.test.ts`, `tests/dashboard-server.test.ts` +3 more
 - `extensions/workflow-monitor/workflow-stats-target.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/auto-lifecycle.ts`, `extensions/workflow-monitor/command-registry.ts`, `extensions/workflow-monitor/composition.ts` +2 more
 - `extensions/workflow-monitor/workflow-runtime.ts` ← `extensions/workflow-monitor/auto-watchdog.ts`, `extensions/workflow-monitor/composition.ts`, `extensions/workflow-monitor/fresh-continuation-delivery.ts`, `extensions/workflow-monitor/fresh-continuation-runtime.ts`, `tests/auto-watchdog.test.ts` +2 more
-- `extensions/workflow-monitor/plan-task-lifecycle.ts` ← `extensions/workflow-monitor/plan-task-reader.ts`, `extensions/workflow-monitor/plan-task-resolution.ts`, `extensions/workflow-monitor/workflow-state-codec-commits.ts`, `tests/auto-lifecycle.test.ts`, `tests/plan-task-resolution.test.ts` +2 more
 - `extensions/workflow-monitor/fresh-continuation.ts` ← `extensions/workflow-monitor/addy-auto-command.ts`, `extensions/workflow-monitor/auto-loop.ts`, `extensions/workflow-monitor/auto-prompt-dispatcher.ts`, `extensions/workflow-monitor/auto-workflow-orchestrator.ts`, `extensions/workflow-monitor/command-registry.ts` +1 more
 
 ---
 
 # Test Coverage
 
-> **0%** of routes and models are covered by tests
-> 79 test files found
+> **100%** of routes and models are covered by tests
+> 81 test files found
+
+## Covered Routes
+
+- ALL:/api/state
 
 ---
 

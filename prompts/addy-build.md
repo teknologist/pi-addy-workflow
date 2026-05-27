@@ -1,5 +1,5 @@
 ---
-description: "Addy workflow: implement next task incrementally with TDD, verification, no auto-commit"
+description: "Addy workflow: implement next task incrementally with TDD, no auto-commit"
 thinking: medium
 argument-hint: "[plan-path]"
 ---
@@ -41,11 +41,10 @@ Pick the next pending task from the plan. For each task:
 3. Load relevant context (existing code, patterns, types)
 4. Write a failing test for the expected behavior (RED)
 5. Implement the minimum code to pass the test (GREEN), preserving ADR constraints and plan `must not` guardrails
-6. Run the full test suite to check for regressions
-7. Run the build to verify compilation
-8. After the build work for the task is complete, update the active/supplied plan so only the task's `[ ] Implemented` checkbox becomes `[x] Implemented`. Leave `[ ] Verified` and `[ ] Reviewed` unchanged.
-9. Prepare a descriptive commit message, but do not commit unless the user explicitly asks
-10. Move or report progress only after the build-owned `[x] Implemented` checkbox matches the completed build work. Leave `Verified` and `Reviewed` unchanged for later workflow phases.
+6. Run only the targeted checks needed to confirm the implementation you just changed. Do not run full-suite verification, broad regression checks, or full build/typecheck gates from `/addy-build`; `/addy-verify` owns full verification.
+7. After the build work for the task is complete, update the active/supplied plan so only the task's `[ ] Implemented` checkbox becomes `[x] Implemented`. Leave `[ ] Verified` and `[ ] Reviewed` unchanged.
+8. Prepare a descriptive commit message, but do not commit unless the user explicitly asks
+9. Move or report progress only after the build-owned `[x] Implemented` checkbox matches the completed build work. Leave `Verified` and `Reviewed` unchanged for later workflow phases.
 
 If any step fails, follow the Pi `debugging-and-error-recovery` skill.
 
@@ -54,4 +53,4 @@ Pi-specific execution notes:
 - Use `todo` for task tracking when there are multiple steps.
 - Use `process` for long-running dev servers, watchers, or log tails.
 - Keep only the build-owned `[ ] Implemented` checkbox synchronized before reporting progress. Do not update verify/review-owned checkboxes from `/addy-build`.
-- Before claiming completion, follow `verification-before-completion` and report the exact checks run.
+- Before claiming completion, report the exact targeted checks run. Do not invoke `verification-before-completion` or perform full verification from `/addy-build`; that belongs to `/addy-verify`.

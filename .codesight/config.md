@@ -3,6 +3,7 @@
 ## Environment Variables
 
 - `HOME` **required** — extensions/agent-installer/core.ts
+- `PATH` **required** — extensions/dashboard-installer/core.ts
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS` **required** — tests/addy-auto-fixture-loop.test.ts
 - `PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP` **required** — tests/addy-auto-fixture-loop.test.ts

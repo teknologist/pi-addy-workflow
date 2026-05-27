@@ -2,9 +2,9 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**98 library files** across 1 module
+**100 library files** across 1 module
 
-## Extensions (98 files)
+## Extensions (100 files)
 
 - `extensions/workflow-monitor/auto-runner-lock.ts` — getAutoRunnerInstanceId, autoRunnerLockDir, acquireAutoRunnerLock, verifyAutoRunnerLock, renewAutoRunnerLock, releaseAutoRunnerLock, …
 - `extensions/workflow-monitor/auto-control.ts` — hasLiveAutoControl, explicitlyStoppedAuto, withProjectAutoControl, sanitizedProjectFallbackAutoControl, autoFreshContinuationKey, validPendingFreshContinuation, …
@@ -17,6 +17,7 @@
 - `extensions/workflow-monitor/workflow-runtime.ts` — createWorkflowRuntime, UserMessageDeliveryOptions, WorkflowPromptRuntime, WorkflowIdleRuntime, WorkflowTimerRuntime, WorkflowFreshSessionRuntime, …
 - `extensions/workflow-monitor/workflow-state-control.ts` — clearReviewControlUpdates, clearReviewControl, stopAutoModeControlUpdates, exitAutoModeControlUpdates, enterAutoModeControlUpdates, preserveWorkflowControlState, …
 - `extensions/agent-installer/core.ts` — defaultAgentTargetRoot, addGeneratedNotice, listMarkdownFiles, syncAgents, packageAgentSourceRoot, relativeAgentSyncSummary, …
+- `extensions/dashboard-installer/core.ts` — defaultDashboardBinDir, packageRoot, dashboardBinSource, dashboardShimContent, ensureDashboardShim, dashboardShimUsage, …
 - `extensions/workflow-monitor/command-dispatch.ts` — stateAfterAutoPrompt, freshContextReasonForPrompt, planAutoPromptDispatch, planPendingFreshDispatch, planManualStepDispatch, CommandDispatchOptions, …
 - `extensions/workflow-monitor/plan-task-lifecycle.ts` — planTasksFromMarkdown, workflowTaskCommitKey, taskMatchesPlanTask, taskIsClosed, planTaskFrontier, PlanTaskStatus, …
 - `extensions/bootstrap/core.ts` — shouldSkipBootstrap, toolAvailable, buildAddyBootstrap, injectAddyBootstrap, BootstrapToolAvailability, BootstrapOptions, …
@@ -30,8 +31,7 @@
 - `extensions/workflow-monitor/auto-action-keys.ts` — idleUserMessageKey, autoWorkflowActionKey, autoWorkflowActionKeyForAction, autoWorkflowActionKeyForPromptState, currentAutoWorkflowActionKey
 - `extensions/workflow-monitor/prompt-template.ts` — expandPackagedPromptTemplate, parseTemplateArgs, stripFrontmatter, substituteTemplateArgs, PromptTemplateDeps
 - `extensions/workflow-monitor/workflow-phases.ts` — phaseIndex, WorkflowPhase, PhaseStatus, WORKFLOW_PHASES, ENFORCED_WORKFLOW_PHASES
-- `extensions/workflow-monitor/workflow-runtime-adapter.ts` — appendWorkflowEntry, appendWorkflowEntryFromContext, extensionApiFromContext, notifyWorkflow, notifyWorkflowWarning
-- _…and 73 more files_
+- _…and 75 more files_
 
 ---
 _Back to [overview.md](./overview.md)_

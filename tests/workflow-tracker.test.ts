@@ -220,20 +220,20 @@ test('finish warns about both verify and review when started after build', () =>
     text: '/addy-finish',
   });
 
-  assert.equal(finish.current, 'build');
-  assert.equal(finish.phases.build, 'active');
-  assert.equal(finish.phases.finish, 'pending');
+  assert.equal(finish.current, 'finish');
+  assert.equal(finish.phases.build, 'complete');
+  assert.equal(finish.phases.finish, 'active');
   assert.match(finish.warnings[0], /verify and review/);
 });
 
-test('finish advances after explicit skipped-step confirmation', () => {
+test('finish skip warning does not delay active phase state', () => {
   const build = transitionWorkflow(createInitialWorkflowState(), {
     source: 'user-input',
     text: '/addy-build',
   });
   const finish = transitionWorkflow(build, {
     source: 'user-input',
-    text: '/addy-finish --skip-missing-steps-confirmed',
+    text: '/addy-finish',
   });
 
   assert.equal(finish.current, 'finish');
@@ -252,20 +252,20 @@ test('review warns when verify is skipped after build', () => {
     text: '/addy-review',
   });
 
-  assert.equal(review.current, 'build');
-  assert.equal(review.phases.build, 'active');
-  assert.equal(review.phases.review, 'pending');
+  assert.equal(review.current, 'review');
+  assert.equal(review.phases.build, 'complete');
+  assert.equal(review.phases.review, 'active');
   assert.match(review.warnings[0], /verify/);
 });
 
-test('review advances after explicit skip verify confirmation', () => {
+test('review skip warning does not delay active phase state', () => {
   const build = transitionWorkflow(createInitialWorkflowState(), {
     source: 'user-input',
     text: '/addy-build',
   });
   const review = transitionWorkflow(build, {
     source: 'user-input',
-    text: '/addy-review --skip-verify-confirmed',
+    text: '/addy-review',
   });
 
   assert.equal(review.current, 'review');

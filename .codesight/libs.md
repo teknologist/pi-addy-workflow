@@ -16,6 +16,14 @@
   - type BootstrapToolAvailability
   - type BootstrapOptions
   - _...1 more_
+- `extensions/dashboard-installer/core.ts`
+  - function defaultDashboardBinDir: (home) => void
+  - function packageRoot: (importMetaUrl) => string
+  - function dashboardBinSource: (importMetaUrl) => string
+  - function dashboardShimContent: (sourcePath) => string
+  - function ensureDashboardShim: (importMetaUrl, options) => Promise<DashboardShimResult>
+  - function dashboardShimUsage: (result) => string
+  - _...2 more_
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string
@@ -108,6 +116,10 @@
   - function loadAddyWorkflowConfig: (ctx, env) => AddyWorkflowConfig
   - type AddyWorkflowConfig
   - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
+- `extensions/workflow-monitor/dashboard-server.ts`
+  - function dashboardSnapshot: (options) => DashboardSnapshot
+  - function startAddyDashboard: (options) => void
+  - type DashboardSnapshot
 - `extensions/workflow-monitor/event-intake.ts`
   - function planToolResultEvent: (event) => PlannedWorkflowEvent
   - function planToolCallEvent: (event) => PlannedWorkflowEvent | undefined

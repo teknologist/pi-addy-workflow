@@ -136,8 +136,6 @@ export type WorkflowEvent = {
   agentName?: string;
   success?: boolean;
   artifact?: string;
-  skipConfirmed?: boolean;
-  confirmedSkippedPhases?: WorkflowPhase[];
 };
 
 export function createInitialWorkflowState(): WorkflowState {

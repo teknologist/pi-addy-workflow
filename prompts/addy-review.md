@@ -27,7 +27,7 @@ If Addy Auto Mode is not active, call `ask_user_question` with one single-select
 - `run verify` — run `/addy-verify <plan-path>` before reviewing.
 - `skip verify` — intentionally continue to review without verified status.
 
-Recommend `run verify`. Only continue review after the user explicitly chooses `skip verify`, or after verification has run and the plan has been rechecked. If the user explicitly chooses `skip verify`, continue the review with the workflow transition confirmation flag `--skip-verify-confirmed` so the footer may move from build to review after confirmation. Never silently skip verify between build and review.
+Recommend `run verify`. Only continue review after the user explicitly chooses `skip verify`, or after verification has run and the plan has been rechecked. The user's `skip verify` answer is the required confirmation gate. Never silently skip verify between build and review.
 
 When an active/supplied plan exists, read it before reviewing to identify the current verified task, but do not update the plan yet. Status checkbox updates happen only after review finishes. Mark `[x] Reviewed` only for tasks covered by this review. If the review finds blocking issues for a task, leave that task unchecked for review until fixes are verified or clearly record the blocker next to the checkbox.
 

@@ -63,6 +63,7 @@ test('package manifest exposes Pi resources but not native agents', async () => 
   assert.deepEqual(manifest.pi.extensions, [
     'extensions/bootstrap.ts',
     'extensions/agent-installer.ts',
+    'extensions/dashboard-installer.ts',
     'extensions/workflow-monitor.ts',
   ]);
   assert.equal(manifest.pi.agents, undefined);
@@ -189,7 +190,7 @@ test('finish prompt advances tasks and slices with inline commit instructions', 
   assert.match(content, /ask_user_question/);
   assert.match(content, /missing lifecycle steps/);
   assert.match(content, /skip missing steps/);
-  assert.match(content, /--skip-missing-steps-confirmed/);
+  assert.match(content, /required confirmation gate/);
   assert.match(content, /Never silently skip missing verify or review steps/);
   assert.match(
     content,
@@ -595,7 +596,7 @@ test('review may update plan checkboxes without editing source files', async () 
   );
   assert.match(content, /Run `\/addy-verify <plan-path>` automatically/);
   assert.match(content, /ask_user_question/);
-  assert.match(content, /--skip-verify-confirmed/);
+  assert.match(content, /required confirmation gate/);
   assert.match(content, /Never silently skip verify between build and review/);
   assert.match(content, /do not edit source files unless the user asks/i);
   assert.match(

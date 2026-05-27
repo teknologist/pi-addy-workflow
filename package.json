@@ -1,6 +1,6 @@
 {
   "name": "pi-addy-workflow",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Addy Osmani agent-skills workflow for Pi coding agent",
   "type": "module",
   "license": "MIT",
@@ -12,6 +12,7 @@
     "workflow"
   ],
   "files": [
+    "bin/",
     "extensions/",
     "skills/",
     "prompts/",
@@ -22,6 +23,9 @@
   ],
   "engines": {
     "node": ">=22.6.0"
+  },
+  "bin": {
+    "addy-dashboard": "bin/addy-dashboard.ts"
   },
   "scripts": {
     "format": "prettier --write .",
@@ -34,6 +38,7 @@
     "extensions": [
       "extensions/bootstrap.ts",
       "extensions/agent-installer.ts",
+      "extensions/dashboard-installer.ts",
       "extensions/workflow-monitor.ts"
     ],
     "skills": [
