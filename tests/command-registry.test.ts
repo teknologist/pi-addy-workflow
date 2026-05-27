@@ -12,6 +12,7 @@ function createHarness() {
   const events: unknown[] = [];
   const notifications: string[] = [];
   let statsHeading: string | undefined;
+  let statsPlanPath: string | undefined;
   const state = createInitialWorkflowState();
   registerWorkflowCommands(
     {
@@ -43,6 +44,7 @@ function createHarness() {
       shouldFreshContextBeforeStep: () => false,
       showWorkflowStats: (_pi, _ctx, _state, options) => {
         statsHeading = options?.heading;
+        statsPlanPath = options?.planPath;
       },
     },
   );
@@ -54,6 +56,10 @@ function createHarness() {
     get statsHeading() {
       return statsHeading;
     },
+    get statsPlanPath() {
+      return statsPlanPath;
+    },
+    state,
   };
 }
 
@@ -102,4 +108,26 @@ test('addy-auto stop records command event and shows stats', async () => {
     { source: 'command', text: '/addy-auto stop', artifact: undefined },
   ]);
   assert.equal(harness.statsHeading, 'Addy auto stopped.');
+});
+
+test('addy-stats defaults to the active plan', () => {
+  const harness = createHarness();
+  harness.state.activePlan = 'docs/plans/current.md';
+
+  harness.commands.get('addy-stats')?.handler({ args: [] }, {});
+
+  assert.equal(harness.statsPlanPath, 'docs/plans/current.md');
+});
+
+test('addy-stats preserves supplied plan and explicit all-history mode', () => {
+  const harness = createHarness();
+  harness.state.activePlan = 'docs/plans/current.md';
+
+  harness.commands
+    .get('addy-stats')
+    ?.handler({ args: ['docs/plans/other.md'] }, {});
+  assert.equal(harness.statsPlanPath, 'docs/plans/other.md');
+
+  harness.commands.get('addy-stats')?.handler({ args: ['--all'] }, {});
+  assert.equal(harness.statsPlanPath, undefined);
 });

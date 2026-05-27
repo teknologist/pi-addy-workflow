@@ -178,11 +178,13 @@ export function registerWorkflowCommands(
   });
 
   pi.registerCommand?.('addy-stats', {
-    description: 'Show Addy workflow stats for the active or supplied plan.',
+    description:
+      'Show Addy workflow stats for the active plan, supplied plan, or --all.',
     handler: (event: CommandEvent, ctx: unknown) => {
       const plan = planStatsCommand(event);
-      deps.showWorkflowStats(pi, ctx, deps.getState(ctx), {
-        planPath: plan.planPath,
+      const state = deps.getState(ctx);
+      deps.showWorkflowStats(pi, ctx, state, {
+        planPath: plan.all ? undefined : (plan.planPath ?? state.activePlan),
       });
       return { action: 'continue' } satisfies ContinueResult;
     },

@@ -46,8 +46,12 @@ export function planAutoContinueCommand(
     : { kind: 'warn', message: AUTO_CONTINUE_USAGE };
 }
 
-export function planStatsCommand(event: CommandEvent): { planPath?: string } {
+export function planStatsCommand(event: CommandEvent): {
+  planPath?: string;
+  all?: boolean;
+} {
   const args = parseCommandArgs(event);
+  if (args.length === 1 && args[0] === '--all') return { all: true };
   return { planPath: args.join(' ') || undefined };
 }
 
