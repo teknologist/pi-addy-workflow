@@ -1,5 +1,7 @@
 import {
+  WORKFLOW_PHASES,
   type WorkflowIssueStats,
+  type WorkflowPhase,
   type WorkflowState,
   type WorkflowStatsSession,
   type WorkflowTaskStats,
@@ -52,6 +54,12 @@ function mergeTaskStats(tasks: WorkflowTaskStats[]): WorkflowTaskStats[] {
     }
     merged.set(key, {
       ...existing,
+      startedAt: earliestIso(existing.startedAt, task.startedAt),
+      finishedAt: latestIso(existing.finishedAt, task.finishedAt),
+      phaseDurationsMs: addPhaseDurations(
+        existing.phaseDurationsMs,
+        task.phaseDurationsMs,
+      ),
       turns: existing.turns + task.turns,
       verifyRuns: existing.verifyRuns + task.verifyRuns,
       reviewRuns: existing.reviewRuns + task.reviewRuns,
@@ -61,6 +69,35 @@ function mergeTaskStats(tasks: WorkflowTaskStats[]): WorkflowTaskStats[] {
   return [...merged.values()];
 }
 
+function earliestIso(
+  left: string | undefined,
+  right: string | undefined,
+): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function latestIso(
+  left: string | undefined,
+  right: string | undefined,
+): string | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function addPhaseDurations(
+  left: WorkflowTaskStats['phaseDurationsMs'],
+  right: WorkflowTaskStats['phaseDurationsMs'],
+): WorkflowTaskStats['phaseDurationsMs'] {
+  if (!left && !right) return undefined;
+  const durations: WorkflowTaskStats['phaseDurationsMs'] = { ...left };
+  for (const phase of WORKFLOW_PHASES)
+    durations[phase] = (durations[phase] ?? 0) + (right?.[phase] ?? 0);
+  return durations;
+}
+
 function renderTaskStatsLine(
   task: WorkflowTaskStats,
   current: boolean,
@@ -68,7 +105,7 @@ function renderTaskStatsLine(
   const slice = task.sliceIndex ? `slice ${task.sliceIndex}, ` : '';
   const taskLabel = task.taskIndex ? `task ${task.taskIndex}` : 'task';
   const title = task.taskTitle ? `: ${task.taskTitle}` : '';
-  return `${current ? 'Current' : 'Completed'} ${slice}${taskLabel}${title} — ${task.turns} turns, verify ${task.verifyRuns}, review ${task.reviewRuns}, issues ${task.issues.total}`;
+  return `${current ? 'Current' : 'Completed'} ${slice}${taskLabel}${title} — ${task.turns} turns, verify ${task.verifyRuns}, review ${task.reviewRuns}, issues ${task.issues.total}, duration ${taskDuration(task)}, steps ${taskStepDurations(task)}`;
 }
 
 function escapeMarkdownTableCell(value: string): string {
@@ -86,7 +123,41 @@ function renderTaskStatsMarkdownRow(
   ]
     .filter(Boolean)
     .join(': ');
-  return `| ${current ? 'Current' : 'Completed'} | ${escapeMarkdownTableCell(scope)} | ${escapeMarkdownTableCell(taskLabel)} | ${task.turns} | ${task.verifyRuns} | ${task.reviewRuns} | ${task.issues.total} |`;
+  return `| ${current ? 'Current' : 'Completed'} | ${escapeMarkdownTableCell(scope)} | ${escapeMarkdownTableCell(taskLabel)} | ${task.turns} | ${task.verifyRuns} | ${task.reviewRuns} | ${task.issues.total} | ${taskDuration(task)} | ${escapeMarkdownTableCell(taskStepDurations(task))} |`;
+}
+
+function durationFromMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return 'unknown';
+  const totalSeconds = Math.round(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [
+    hours ? `${hours}h` : undefined,
+    minutes || hours ? `${minutes}m` : undefined,
+    `${seconds}s`,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function taskDuration(task: WorkflowTaskStats): string {
+  if (!task.startedAt || !task.finishedAt) return '—';
+  return durationFromMs(
+    Date.parse(task.finishedAt) - Date.parse(task.startedAt),
+  );
+}
+
+const TIMED_PHASES = WORKFLOW_PHASES.filter((phase): phase is WorkflowPhase =>
+  ['build', 'simplify', 'verify', 'review', 'finish'].includes(phase),
+);
+
+function taskStepDurations(task: WorkflowTaskStats): string {
+  const parts = TIMED_PHASES.map((phase) => {
+    const duration = task.phaseDurationsMs?.[phase];
+    return duration ? `${phase} ${durationFromMs(duration)}` : undefined;
+  }).filter(Boolean);
+  return parts.length ? parts.join(', ') : '—';
 }
 
 export function renderWorkflowStatsText(
@@ -153,8 +224,8 @@ export function renderWorkflowStatsMarkdown(
     `| Suggestions | ${totals.issues.suggestion} |`,
     `| Unknown | ${totals.issues.unknown} |`,
     '',
-    '| Status | Scope | Task | Turns | Verify | Review | Issues |',
-    '|---|---|---|---:|---:|---:|---:|',
+    '| Status | Scope | Task | Turns | Verify | Review | Issues | Duration | Steps |',
+    '|---|---|---|---:|---:|---:|---:|---:|---|',
     ...taskRows,
   ].join('\n');
 }

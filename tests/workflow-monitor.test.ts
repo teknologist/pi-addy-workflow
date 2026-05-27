@@ -220,6 +220,7 @@ test('session start creates the global Addy workflow config with defaults', asyn
         beforeReview: false,
       },
       review: { maxFixLoops: 3 },
+      notifications: { pushover: { enabled: false, priority: 0 } },
     });
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
@@ -235,6 +236,10 @@ test('Addy workflow config uses fresh-context defaults and env overrides', () =>
       PI_ADDY_AUTO_FRESH_CONTEXT_BETWEEN_TASKS: '0',
       PI_ADDY_AUTO_FRESH_CONTEXT_BEFORE_REVIEW: 'true',
       PI_ADDY_AUTO_REVIEW_MAX_FIX_LOOPS: '2',
+      PI_ADDY_PUSHOVER_ENABLED: 'true',
+      PI_ADDY_PUSHOVER_APP_TOKEN: 'app-token',
+      PI_ADDY_PUSHOVER_USER_KEY: 'user-key',
+      PI_ADDY_PUSHOVER_PRIORITY: '1',
     },
   );
 
@@ -245,6 +250,14 @@ test('Addy workflow config uses fresh-context defaults and env overrides', () =>
       beforeReview: true,
     },
     review: { maxFixLoops: 2 },
+    notifications: {
+      pushover: {
+        enabled: true,
+        appToken: 'app-token',
+        userKey: 'user-key',
+        priority: 1,
+      },
+    },
   });
 });
 
@@ -257,6 +270,14 @@ test('Addy workflow config lets project config override defaults', () => {
       auto: {
         freshContext: { betweenTasks: false, beforeReview: true },
         review: { maxFixLoops: 4 },
+        notifications: {
+          pushover: {
+            enabled: true,
+            appToken: 'project-token',
+            userKey: 'project-user',
+            priority: -1,
+          },
+        },
       },
     }),
   );
@@ -270,6 +291,14 @@ test('Addy workflow config lets project config override defaults', () => {
       beforeReview: true,
     },
     review: { maxFixLoops: 4 },
+    notifications: {
+      pushover: {
+        enabled: true,
+        appToken: 'project-token',
+        userKey: 'project-user',
+        priority: -1,
+      },
+    },
   });
 });
 
@@ -297,6 +326,14 @@ test('Addy workflow config ignores malformed project config safely', () => {
       beforeReview: false,
     },
     review: { maxFixLoops: 3 },
+    notifications: {
+      pushover: {
+        enabled: false,
+        appToken: undefined,
+        userKey: undefined,
+        priority: 0,
+      },
+    },
   });
   assert.match(
     notices.at(-1)?.[0] ?? '',

@@ -1,6 +1,7 @@
 import {
   type WorkflowEvent,
   type WorkflowIssueStats,
+  type WorkflowPhase,
   type WorkflowState,
   type WorkflowStats,
   type WorkflowStatsSession,
@@ -81,11 +82,55 @@ function normalizeTaskStats(value: unknown): WorkflowTaskStats | undefined {
         : undefined,
     taskTitle:
       typeof candidate.taskTitle === 'string' ? candidate.taskTitle : undefined,
+    startedAt:
+      typeof candidate.startedAt === 'string' ? candidate.startedAt : undefined,
+    finishedAt:
+      typeof candidate.finishedAt === 'string'
+        ? candidate.finishedAt
+        : undefined,
+    activePhase: normalizePhase(candidate.activePhase),
+    phaseStartedAt:
+      typeof candidate.phaseStartedAt === 'string'
+        ? candidate.phaseStartedAt
+        : undefined,
+    phaseDurationsMs: normalizePhaseDurations(candidate.phaseDurationsMs),
     turns: nonNegative(candidate.turns),
     verifyRuns: nonNegative(candidate.verifyRuns),
     reviewRuns: nonNegative(candidate.reviewRuns),
     issues: normalizeIssueStats(candidate.issues),
   };
+}
+
+const TIMED_PHASES = new Set<WorkflowPhase>([
+  'build',
+  'simplify',
+  'verify',
+  'review',
+  'finish',
+]);
+
+function normalizePhase(value: unknown): WorkflowPhase | undefined {
+  return typeof value === 'string' && TIMED_PHASES.has(value as WorkflowPhase)
+    ? (value as WorkflowPhase)
+    : undefined;
+}
+
+function normalizePhaseDurations(
+  value: unknown,
+): Partial<Record<WorkflowPhase, number>> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const durations: Partial<Record<WorkflowPhase, number>> = {};
+  for (const [phase, duration] of Object.entries(value)) {
+    const normalizedPhase = normalizePhase(phase);
+    if (
+      normalizedPhase &&
+      typeof duration === 'number' &&
+      Number.isSafeInteger(duration) &&
+      duration >= 0
+    )
+      durations[normalizedPhase] = duration;
+  }
+  return Object.keys(durations).length ? durations : undefined;
 }
 
 function normalizeStatsSession(value: unknown): WorkflowStatsSession {
@@ -180,6 +225,11 @@ function emptyTaskStats(
     sliceIndex: target.sliceIndex || undefined,
     taskIndex: target.taskIndex || undefined,
     taskTitle: target.taskTitle || undefined,
+    startedAt: undefined,
+    finishedAt: undefined,
+    activePhase: undefined,
+    phaseStartedAt: undefined,
+    phaseDurationsMs: undefined,
     turns: 0,
     verifyRuns: 0,
     reviewRuns: 0,
@@ -216,18 +266,72 @@ function updateWorkflowTaskStats(
 export function recordWorkflowTaskTurn(
   state: WorkflowState,
   target: WorkflowStatsTarget = {},
+  phase?: WorkflowPhase,
+  now = new Date().toISOString(),
 ): WorkflowState {
   return updateWorkflowTaskStats(state, target, (existing) => ({
-    ...existing,
+    ...startTaskStatsPhase(existing, phase, now),
     turns: existing.turns + 1,
+  }));
+}
+
+function closeTaskStatsPhase(
+  existing: WorkflowTaskStats,
+  now: string,
+): WorkflowTaskStats {
+  const startedAt = existing.phaseStartedAt
+    ? Date.parse(existing.phaseStartedAt)
+    : NaN;
+  const endedAt = Date.parse(now);
+  if (
+    !existing.activePhase ||
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(endedAt)
+  )
+    return existing;
+  const elapsed = Math.max(0, endedAt - startedAt);
+  return {
+    ...existing,
+    phaseDurationsMs: {
+      ...existing.phaseDurationsMs,
+      [existing.activePhase]:
+        (existing.phaseDurationsMs?.[existing.activePhase] ?? 0) + elapsed,
+    },
+  };
+}
+
+function startTaskStatsPhase(
+  existing: WorkflowTaskStats,
+  phase: WorkflowPhase | undefined,
+  now: string,
+): WorkflowTaskStats {
+  const base = { ...existing, startedAt: existing.startedAt ?? now };
+  if (!phase || !TIMED_PHASES.has(phase)) return base;
+  if (existing.activePhase === phase && existing.phaseStartedAt) return base;
+  const closed = closeTaskStatsPhase(base, now);
+  return { ...closed, activePhase: phase, phaseStartedAt: now };
+}
+
+export function recordWorkflowTaskFinished(
+  state: WorkflowState,
+  target: WorkflowStatsTarget = {},
+  finishedAt = new Date().toISOString(),
+): WorkflowState {
+  return updateWorkflowTaskStats(state, target, (existing) => ({
+    ...closeTaskStatsPhase(existing, finishedAt),
+    startedAt: existing.startedAt ?? finishedAt,
+    finishedAt,
+    activePhase: undefined,
+    phaseStartedAt: undefined,
   }));
 }
 
 export function recordWorkflowVerifyRun(
   state: WorkflowState,
   target: WorkflowStatsTarget = {},
+  now = new Date().toISOString(),
 ): WorkflowState {
-  const withTurn = recordWorkflowTaskTurn(state, target);
+  const withTurn = recordWorkflowTaskTurn(state, target, 'verify', now);
   const key = statsTaskKey(withTurn, target);
   const stats = withTurn.stats ?? createEmptyWorkflowStats();
   const existing = stats.active.tasks[key];
@@ -254,8 +358,9 @@ export function recordWorkflowVerifyRun(
 export function recordWorkflowReviewRun(
   state: WorkflowState,
   target: WorkflowStatsTarget = {},
+  now = new Date().toISOString(),
 ): WorkflowState {
-  const withTurn = recordWorkflowTaskTurn(state, target);
+  const withTurn = recordWorkflowTaskTurn(state, target, 'review', now);
   const key = statsTaskKey(withTurn, target);
   const stats = withTurn.stats ?? createEmptyWorkflowStats();
   const existing = stats.active.tasks[key];
@@ -340,7 +445,17 @@ export function recordManualTaskTurn(
   if (!isManualTurnCommand(command)) return state;
   if (command === '/addy-verify') return recordWorkflowVerifyRun(state);
   if (command === '/addy-review') return recordWorkflowReviewRun(state);
-  return recordWorkflowTaskTurn(state);
+  return recordWorkflowTaskTurn(state, {}, phaseForStatsCommand(command));
+}
+
+export function phaseForStatsCommand(
+  command: string | undefined,
+): WorkflowPhase | undefined {
+  if (command === '/addy-code-simplify') return 'simplify';
+  if (command === '/addy-fix-all') return 'review';
+  if (command === '/addy-build') return 'build';
+  if (command === '/addy-finish') return 'finish';
+  return undefined;
 }
 
 export function archiveWorkflowStats(

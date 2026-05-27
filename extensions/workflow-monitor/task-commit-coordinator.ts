@@ -13,6 +13,8 @@ import {
   withPlanTaskId,
 } from './task-commit-target.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
+import { recordWorkflowTaskFinished } from './workflow-stats.ts';
+import { maybeSendTaskFinishedPushoverNotification } from './pushover-notifications.ts';
 import type { WorkflowDispatchOptions } from './workflow-dispatch-options.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
 import type { AutoFreshReason, WorkflowState } from './workflow-transitions.ts';
@@ -129,17 +131,18 @@ export function createTaskCommitCoordinator(deps: TaskCommitCoordinatorDeps) {
       ? actionTarget
       : (deps.latestActiveStatsTarget(state) ?? actionTarget);
     const targetWithTaskId = withPlanTaskId(committedTarget, cwd);
-    const stateAfterCommit = {
-      ...deps.archiveWorkflowStats(
-        recordCommittedTask(
-          state,
-          targetWithTaskId,
-          agentTextReportsCommitComplete(text)
-            ? commitShaFromAgentText(text)
-            : UNCONFIRMED_TASK_COMMIT_SHA,
-        ),
-        'task-commit',
+    const stateWithFinishedTask = recordWorkflowTaskFinished(
+      recordCommittedTask(
+        state,
+        targetWithTaskId,
+        agentTextReportsCommitComplete(text)
+          ? commitShaFromAgentText(text)
+          : UNCONFIRMED_TASK_COMMIT_SHA,
       ),
+      targetWithTaskId,
+    );
+    const stateAfterCommit = {
+      ...deps.archiveWorkflowStats(stateWithFinishedTask, 'task-commit'),
       autoPendingAction: undefined,
       autoPausedReason: undefined,
       autoReviewTask: targetWithTaskId?.taskTitle,
@@ -147,6 +150,19 @@ export function createTaskCommitCoordinator(deps: TaskCommitCoordinatorDeps) {
       autoReviewTaskIndex: targetWithTaskId?.taskIndex,
     };
     const nextSlicePlan = nextUnfinishedSlicePlanPath(stateAfterCommit, cwd);
+    const config = loadAddyWorkflowConfig(
+      ctx as {
+        cwd?: string;
+        ui?: { notify?: (msg: string, level?: string) => void };
+      },
+    );
+    await maybeSendTaskFinishedPushoverNotification({
+      config,
+      state: stateWithFinishedTask,
+      target: targetWithTaskId,
+      cwd,
+      notifyWarning: (message) => deps.notify(ctx, message, 'warning'),
+    });
     const continuationPlan = planTaskClosureContinuation({
       stateAfterCommit,
       nextSlicePlan,
@@ -162,12 +178,7 @@ export function createTaskCommitCoordinator(deps: TaskCommitCoordinatorDeps) {
             : undefined,
         };
       },
-      freshContextBetweenTasks: loadAddyWorkflowConfig(
-        ctx as {
-          cwd?: string;
-          ui?: { notify?: (msg: string, level?: string) => void };
-        },
-      ).auto.freshContext.betweenTasks,
+      freshContextBetweenTasks: config.auto.freshContext.betweenTasks,
       disableFreshSession: options.disableFreshSession,
     });
     deps.setState(ctx, continuationPlan.state, deps.appendEntry(pi));

@@ -11,6 +11,7 @@ import {
   recordWorkflowReviewRun,
   recordWorkflowTaskTurn,
   recordWorkflowVerifyRun,
+  phaseForStatsCommand,
   type WorkflowStatsTarget,
 } from './workflow-stats.ts';
 import {
@@ -85,7 +86,7 @@ export function stateAfterAutoPrompt(
       : cmd === '/addy-review'
         ? recordWorkflowReviewRun(nextState, target)
         : autoStatsCommand(cmd)
-          ? recordWorkflowTaskTurn(nextState, target)
+          ? recordWorkflowTaskTurn(nextState, target, phaseForStatsCommand(cmd))
           : nextState;
   return cmd?.startsWith('/addy-')
     ? transitionWorkflow(stateWithStats, {

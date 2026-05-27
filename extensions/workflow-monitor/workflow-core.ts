@@ -20,6 +20,11 @@ export type WorkflowTaskStats = {
   sliceIndex?: number;
   taskIndex?: number;
   taskTitle?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  activePhase?: WorkflowPhase;
+  phaseStartedAt?: string;
+  phaseDurationsMs?: Partial<Record<WorkflowPhase, number>>;
   turns: number;
   verifyRuns: number;
   reviewRuns: number;

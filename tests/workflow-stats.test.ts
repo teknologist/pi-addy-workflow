@@ -13,6 +13,8 @@ import {
   createEmptyWorkflowStats,
   recordWorkflowReviewIssues,
   recordWorkflowReviewRun,
+  recordWorkflowTaskFinished,
+  recordWorkflowTaskTurn,
   recordWorkflowVerifyRun,
 } from '../extensions/workflow-monitor/workflow-stats.ts';
 import {
@@ -50,6 +52,44 @@ test('workflow stats records verify review issues and archives active tasks', ()
   assert.equal(
     Object.values(archived.stats?.history.at(-1)?.tasks ?? {})[0].turns,
     2,
+  );
+});
+
+test('workflow stats records task duration and per-step timings', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    activePlan: 'docs/plans/current.md',
+    currentTask: 'Timed task',
+    currentTaskIndex: 1,
+  };
+
+  const built = recordWorkflowTaskTurn(
+    state,
+    {},
+    'build',
+    '2026-05-27T10:00:00.000Z',
+  );
+  const verified = recordWorkflowVerifyRun(
+    built,
+    {},
+    '2026-05-27T10:03:00.000Z',
+  );
+  const finished = recordWorkflowTaskFinished(
+    verified,
+    {},
+    '2026-05-27T10:05:00.000Z',
+  );
+
+  const task = Object.values(finished.stats?.active.tasks ?? {})[0];
+  assert.equal(task.startedAt, '2026-05-27T10:00:00.000Z');
+  assert.equal(task.finishedAt, '2026-05-27T10:05:00.000Z');
+  assert.equal(task.phaseDurationsMs?.build, 180_000);
+  assert.equal(task.phaseDurationsMs?.verify, 120_000);
+  assert.match(renderWorkflowStatsText(finished), /duration 5m 0s/);
+  assert.match(renderWorkflowStatsText(finished), /build 3m 0s/);
+  assert.match(
+    renderWorkflowStatsMarkdown(finished),
+    /\| Duration \| Steps \|/,
   );
 });
 
