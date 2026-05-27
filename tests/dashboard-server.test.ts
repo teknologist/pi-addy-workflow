@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,6 +20,21 @@ import {
 import { workflowTaskCommitKey } from '../extensions/workflow-monitor/plan-task-lifecycle.ts';
 import { serializeWorkflowState } from '../extensions/workflow-monitor/workflow-state.ts';
 import { projectWorkflowStateKey } from '../extensions/workflow-monitor/workflow-state-store-scope.ts';
+
+test('dashboard html preserves slice expansion state across refreshes', () => {
+  const html = readFileSync(
+    join(process.cwd(), 'extensions/workflow-monitor/dashboard-server.ts'),
+    'utf8',
+  );
+
+  assert.match(html, /const sliceOpenState = new Map\(\);/);
+  assert.match(html, /function captureSliceOpenState\(\)/);
+  assert.match(html, /data-slice-key=/);
+  assert.match(
+    html,
+    /captureSliceOpenState\(\);\n\s*setHtmlIfChanged\(\$\('slices'\)/,
+  );
+});
 
 test('dashboard snapshot reads the project-scoped active plan state', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-'));

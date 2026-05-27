@@ -637,10 +637,21 @@ function dashboardHtml(): string {
     function taskRows(tasks) {
       return (tasks || []).map((task) => '<tr class="' + (task.status === 'active' ? 'active-row' : '') + '"><td class="status-' + escapeHtml(task.status) + '">' + escapeHtml(task.status) + '</td><td><div class="task-title">' + escapeHtml(task.taskTitle || task.taskId) + '</div><div class="muted" title="' + escapeHtml(task.plan || '') + '">' + escapeHtml(task.planDisplayName || task.taskId || '') + '</div></td><td>' + escapeHtml(task.duration) + '</td><td>' + escapeHtml(task.turns) + '</td><td>' + escapeHtml(task.verifyRuns) + '</td><td>' + escapeHtml(task.reviewRuns) + '</td><td>' + escapeHtml(task.issues) + '</td><td><div class="steps">' + taskSteps(task) + '</div></td></tr>').join('');
     }
+    const sliceOpenState = new Map();
+    function sliceKey(slice) { return slice.plan || slice.displayName || ''; }
+    function captureSliceOpenState() {
+      document.querySelectorAll('details.slice[data-slice-key]').forEach((slice) => {
+        sliceOpenState.set(slice.dataset.sliceKey, slice.open);
+      });
+    }
+    function sliceIsOpen(slice, activeSlicePath) {
+      const key = sliceKey(slice);
+      return sliceOpenState.has(key) ? sliceOpenState.get(key) : slice.plan === activeSlicePath;
+    }
     function sliceBlock(slice, activeSlicePath) {
       const rows = taskRows(slice.tasks);
-      const isCurrent = slice.plan === activeSlicePath;
-      return '<details class="slice"' + (isCurrent ? ' open' : '') + ' title="' + escapeHtml(slice.plan) + '"><summary class="slice-summary"><div><div class="slice-name">' + (slice.active ? '<span class="active-dot"></span>' : '') + escapeHtml(slice.displayName || slice.plan) + '</div><div class="slice-meta">' + (slice.active ? 'Current slice · ' : 'Completed slice · ') + 'accumulated totals</div></div><div class="slice-stat">' + slice.taskCount + ' tasks</div><div class="slice-stat">' + escapeHtml(slice.duration) + '</div><div class="slice-stat hide-md">' + slice.turns + ' turns</div><div class="slice-stat hide-md">' + slice.verifyRuns + ' verify</div><div class="slice-stat hide-md">' + slice.reviewRuns + ' review</div><div class="slice-stat">' + slice.issues + ' issues</div></summary><div class="table-wrap"><table><thead><tr><th>Status</th><th>Task</th><th>Duration</th><th>Turns</th><th>Verify</th><th>Review</th><th>Issues</th><th>Step time</th></tr></thead><tbody>' + rows + '</tbody></table></div></details>';
+      const open = sliceIsOpen(slice, activeSlicePath);
+      return '<details class="slice" data-slice-key="' + escapeHtml(sliceKey(slice)) + '"' + (open ? ' open' : '') + ' title="' + escapeHtml(slice.plan) + '"><summary class="slice-summary"><div><div class="slice-name">' + (slice.active ? '<span class="active-dot"></span>' : '') + escapeHtml(slice.displayName || slice.plan) + '</div><div class="slice-meta">' + (slice.active ? 'Current slice · ' : 'Completed slice · ') + 'accumulated totals</div></div><div class="slice-stat">' + slice.taskCount + ' tasks</div><div class="slice-stat">' + escapeHtml(slice.duration) + '</div><div class="slice-stat hide-md">' + slice.turns + ' turns</div><div class="slice-stat hide-md">' + slice.verifyRuns + ' verify</div><div class="slice-stat hide-md">' + slice.reviewRuns + ' review</div><div class="slice-stat">' + slice.issues + ' issues</div></summary><div class="table-wrap"><table><thead><tr><th>Status</th><th>Task</th><th>Duration</th><th>Turns</th><th>Verify</th><th>Review</th><th>Issues</th><th>Step time</th></tr></thead><tbody>' + rows + '</tbody></table></div></details>';
     }
     let currentPlan = null;
     function planDefault(data) {
@@ -706,6 +717,7 @@ function dashboardHtml(): string {
       $('nextSummary').textContent = isActive ? (data.nextTaskSummary && data.nextTaskSummary !== data.nextTask ? ' · ' + data.nextTaskSummary : '') : selected ? ' · Select another plan from the dropdown to inspect its history.' : '';
       setHtmlIfChanged($('progress'), isActive ? progressCard('Current slice', data.progress && data.progress.slice) + progressCard('Current slice tasks', data.progress && data.progress.task) + planKpiCard(selected) : planProgressCard(selected) + planKpiCard(selected));
       setHtmlIfChanged($('phases'), isActive ? (data.phases || []).map((phase) => '<span class="phase phase-' + escapeHtml(phase.name) + ' ' + escapeHtml(phase.status) + '">' + escapeHtml(phase.name) + '</span>').join('') : '<span class="phase complete">archived: complete</span>');
+      captureSliceOpenState();
       setHtmlIfChanged($('slices'), selected ? selected.slices.map((slice) => sliceBlock(slice, data.activePlan)).join('') : '<div class="empty">' + (data.activePlan ? 'No stats recorded for the selected plan.' : "No active plan in this directory's state.") + '</div>');
       $('raw').textContent = JSON.stringify({ selectedPlan: selected && selected.plan, activePlan: data.activePlan, stateFile: data.stateFile, pending: data.autoPendingAction, warnings: data.warnings, paused: data.autoPausedReason }, null, 2);
     }
