@@ -10,15 +10,19 @@ Create implementation-ready plans for `/addy-auto`. A good plan is not just a st
 Plan read-only:
 
 1. Read spec and relevant code.
-2. Slice vertical user-visible increments.
-3. Decide plan packaging before writing files:
+2. Discover and read relevant Architecture Decision Records (ADRs): ADRs explicitly linked from the spec first, then bounded ADR directories such as `docs/adr/`, `docs/adrs/`, `decisions/`, or `docs/decisions/` when filenames/titles/summaries match the spec. If a relevant ADR is not linked from the spec, still carry it into the plan under required context. Do not reinterpret or override ADR decisions; add a stop condition when implementation would require a superseding ADR or human architecture decision.
+3. Slice vertical user-visible increments.
+4. Decide plan packaging before writing files:
    - Use one plan file for small/simple work: 1–5 tasks, 1–2 vertical slices, one main subsystem, low risk.
    - Use an index plan plus multiple slice plan files for larger/riskier work: 6+ tasks, 3+ slices, multiple subsystems, migrations, public API or auth/security changes, risky refactors, staged rollout, or checkpoints that should be reviewed independently.
    - If the choice is unclear or user preference matters, call `ask_user_question` with choices for single file, split by slice, or agent decides before writing files.
-4. Add acceptance criteria, verification, proof requirements, dependencies, and stop conditions for each task.
-5. Add per-task status checkboxes for `[ ] Implemented`, `[ ] Verified`, and `[ ] Reviewed` so later workflow steps can keep the plan in sync with reality.
-6. Mark dependencies and risky checkpoints.
-7. Keep plan concise and executable.
+5. Add plan-level required context listing the spec, relevant ADR paths, and steering files such as `AGENTS.md`, `CLAUDE.md`, or service-local guidance.
+6. Add acceptance criteria, verification, proof requirements, dependencies, and stop conditions for each task. For ADR-constrained tasks, include the ADR path/ID in the task title or context, summarize the ADR constraints to preserve, and include explicit `must not` acceptance checks from those ADRs. When an ADR is central to the work, put the ADR ID in the task title so downstream issues preserve the steering context.
+7. Add per-task status checkboxes for `[ ] Implemented`, `[ ] Verified`, and `[ ] Reviewed` so later workflow steps can keep the plan in sync with reality.
+8. Mark dependencies and risky checkpoints.
+9. Keep plan concise and executable.
+
+If `/addy-auto` later finds a safe, unambiguous missing-context gap in the plan, it may update the plan to link an existing ADR or required steering file and then continue. If the gap requires new architecture decisions, conflicting ADR interpretation, or a superseding ADR, stop for human input instead of auto-recovering by guessing.
 
 For every implementation task, use this shape:
 
@@ -39,6 +43,18 @@ Depends on:
 
 ### Context / files
 
+Required context:
+
+- Spec: `docs/specs/YYYY-MM-DD-feature.md`
+- ADRs:
+  - `docs/adr/NNNN-decision.md`
+- Steering files:
+  - `AGENTS.md` / `CLAUDE.md` / service-local guidance if relevant
+
+Must preserve ADR constraints:
+
+- ...
+
 - Likely files:
   - `path/to/file.ts`
 - Relevant symbols:
@@ -53,6 +69,7 @@ Depends on:
 ### Acceptance criteria
 
 - ...
+- Must not violate listed ADR constraints; if implementation requires changing an ADR decision, stop and request a superseding ADR instead.
 
 ### Verification
 

@@ -1,0 +1,179 @@
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  planAutoPromptDispatch,
+  type AutoPromptDispatchPlan,
+} from './command-dispatch.ts';
+import { expandPackagedPromptTemplate } from './prompt-template.ts';
+import type { FreshContinuationDispatchOptions } from './fresh-continuation.ts';
+import type { AppendEntry } from './workflow-state-store.ts';
+import type { WorkflowStatsTarget } from './workflow-stats.ts';
+import type { WorkflowState } from './workflow-transitions.ts';
+
+type AutoPromptDelivery = {
+  handleUserMessageDeliveryFailure(
+    ctx: unknown,
+    message: string,
+    error: unknown,
+  ): void;
+  safeSendUserMessage(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    message: string,
+    options: {
+      autoMode?: boolean;
+      useDefaultDelivery?: boolean;
+      idleTurnDelivery?: boolean;
+    },
+  ): void;
+  sendUserMessage(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    message: string,
+    options?: {
+      autoMode?: boolean;
+      useDefaultDelivery?: boolean;
+      idleTurnDelivery?: boolean;
+    },
+  ): void | Promise<void>;
+};
+
+type AutoPromptFreshContinuation = {
+  resumePendingFreshContinuation(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    options: FreshContinuationDispatchOptions,
+    mode?: 'current-session' | 'after-compaction',
+  ): Promise<'none' | 'stale-cleared' | 'delivered'>;
+  runFreshContextContinuation(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    reason: NonNullable<WorkflowState['autoFreshReason']>,
+  ): Promise<void>;
+};
+
+type AutoPromptDispatcherDeps = {
+  appendEntry(pi: ExtensionAPI): AppendEntry;
+  delivery: AutoPromptDelivery;
+  freshContinuation: AutoPromptFreshContinuation;
+  freshContext(
+    ctx: unknown,
+  ): Parameters<typeof planAutoPromptDispatch>[0]['freshContext'];
+  getState(ctx: unknown): WorkflowState;
+  ensureAutoRunnerOwnership?(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    state: WorkflowState,
+    actionKey?: string,
+  ): boolean | Promise<boolean>;
+  setState(ctx: unknown, state: WorkflowState, appendEntry?: AppendEntry): void;
+};
+
+export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
+  async function executeCurrentSessionAutoPromptPlan(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    prompt: string,
+    state: WorkflowState,
+    plan: Extract<AutoPromptDispatchPlan, { kind: 'current-session' }>,
+    options: FreshContinuationDispatchOptions = {},
+  ): Promise<void> {
+    const message = plan.deliveryPrompt ?? prompt;
+    deps.setState(
+      ctx,
+      plan.state,
+      options.appendEntry === false ? undefined : deps.appendEntry(pi),
+    );
+    const deliveryOptions = {
+      autoMode: state.autoMode,
+      useDefaultDelivery: options.useDefaultDelivery,
+      idleTurnDelivery: options.idleTurnDelivery,
+    };
+    if (options.idleTurnDelivery)
+      deps.delivery.safeSendUserMessage(pi, ctx, message, deliveryOptions);
+    else {
+      try {
+        const delivered = deps.delivery.sendUserMessage(
+          pi,
+          ctx,
+          message,
+          deliveryOptions,
+        );
+        await delivered;
+      } catch (error) {
+        deps.delivery.handleUserMessageDeliveryFailure(ctx, message, error);
+        throw error;
+      }
+    }
+  }
+
+  async function dispatchAutoPromptFreshAware(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    prompt: string,
+    state: WorkflowState,
+    updates: Partial<WorkflowState> = {},
+    statsTarget?: WorkflowStatsTarget,
+    options: FreshContinuationDispatchOptions = {},
+    deliveryPrompt?: string,
+  ): Promise<void> {
+    if (
+      state.autoMode &&
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(pi, ctx, state, prompt))
+    )
+      return;
+    const plan = planAutoPromptDispatch({
+      prompt,
+      state,
+      updates,
+      statsTarget,
+      options,
+      freshContext: deps.freshContext(ctx),
+      deliveryPrompt,
+      expandedPrompt: expandPackagedPromptTemplate(prompt),
+    });
+    if (plan.kind === 'current-session') {
+      await executeCurrentSessionAutoPromptPlan(
+        pi,
+        ctx,
+        prompt,
+        state,
+        plan,
+        options,
+      );
+      return;
+    }
+
+    deps.setState(
+      ctx,
+      plan.state,
+      options.appendEntry === false ? undefined : deps.appendEntry(pi),
+    );
+    if (options.disableFreshSession) {
+      const pendingState = deps.getState(ctx);
+      if (pendingState.autoFreshPrompt && pendingState.autoFreshReason) {
+        const fallbackOptions = {
+          ...options,
+          freshContextBypassReason: plan.reason,
+          useDefaultDelivery: options.disableCompaction
+            ? options.useDefaultDelivery
+            : true,
+        };
+        await deps.freshContinuation.resumePendingFreshContinuation(
+          pi,
+          ctx,
+          fallbackOptions,
+          options.disableCompaction ? 'current-session' : 'after-compaction',
+        );
+      }
+      return;
+    }
+    await deps.freshContinuation.runFreshContextContinuation(
+      pi,
+      ctx,
+      plan.reason,
+    );
+  }
+
+  return { dispatchAutoPromptFreshAware };
+}

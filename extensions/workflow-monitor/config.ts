@@ -12,6 +12,14 @@ export type AddyWorkflowConfig = {
     review: {
       maxFixLoops: number;
     };
+    notifications: {
+      pushover: {
+        enabled: boolean;
+        appToken?: string;
+        userKey?: string;
+        priority: number;
+      };
+    };
   };
 };
 
@@ -32,26 +40,14 @@ export const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig = {
     review: {
       maxFixLoops: 3,
     },
-  },
-};
-
-function cloneDefaultConfig(): AddyWorkflowConfig {
-  return {
-    auto: {
-      freshContext: {
-        beforeEveryStep:
-          DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeEveryStep,
-        betweenTasks:
-          DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.betweenTasks,
-        beforeReview:
-          DEFAULT_ADDY_WORKFLOW_CONFIG.auto.freshContext.beforeReview,
-      },
-      review: {
-        maxFixLoops: DEFAULT_ADDY_WORKFLOW_CONFIG.auto.review.maxFixLoops,
+    notifications: {
+      pushover: {
+        enabled: false,
+        priority: 0,
       },
     },
-  };
-}
+  },
+};
 
 function coerceBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
@@ -72,6 +68,15 @@ function coercePositiveInteger(value: unknown): number | undefined {
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 }
 
+function coerceInteger(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!/^-?\d+$/.test(normalized)) return undefined;
+  const number = Number.parseInt(normalized, 10);
+  return Number.isSafeInteger(number) ? number : undefined;
+}
+
 function mergeConfig(
   base: AddyWorkflowConfig,
   raw: unknown,
@@ -87,17 +92,36 @@ function mergeConfig(
       review?: {
         maxFixLoops?: unknown;
       };
+      notifications?: {
+        pushover?: {
+          enabled?: unknown;
+          appToken?: unknown;
+          userKey?: unknown;
+          priority?: unknown;
+        };
+      };
     };
   };
   const freshContext = candidate.auto?.freshContext;
   const review = candidate.auto?.review;
-  if (freshContext === undefined && review === undefined) return base;
+  const pushover = candidate.auto?.notifications?.pushover;
+  if (
+    freshContext === undefined &&
+    review === undefined &&
+    pushover === undefined
+  )
+    return base;
   if (
     freshContext !== undefined &&
     (typeof freshContext !== 'object' || freshContext === null)
   )
     return undefined;
   if (review !== undefined && (typeof review !== 'object' || review === null))
+    return undefined;
+  if (
+    pushover !== undefined &&
+    (typeof pushover !== 'object' || pushover === null)
+  )
     return undefined;
 
   const beforeEveryStep =
@@ -116,6 +140,14 @@ function mergeConfig(
     review?.maxFixLoops === undefined
       ? undefined
       : coercePositiveInteger(review.maxFixLoops);
+  const pushoverEnabled =
+    pushover?.enabled === undefined
+      ? undefined
+      : coerceBoolean(pushover.enabled);
+  const pushoverPriority =
+    pushover?.priority === undefined
+      ? undefined
+      : coerceInteger(pushover.priority);
   if (
     freshContext?.beforeEveryStep !== undefined &&
     beforeEveryStep === undefined
@@ -126,6 +158,14 @@ function mergeConfig(
   if (freshContext?.beforeReview !== undefined && beforeReview === undefined)
     return undefined;
   if (review?.maxFixLoops !== undefined && maxFixLoops === undefined)
+    return undefined;
+  if (pushover?.enabled !== undefined && pushoverEnabled === undefined)
+    return undefined;
+  if (pushover?.appToken !== undefined && typeof pushover.appToken !== 'string')
+    return undefined;
+  if (pushover?.userKey !== undefined && typeof pushover.userKey !== 'string')
+    return undefined;
+  if (pushover?.priority !== undefined && pushoverPriority === undefined)
     return undefined;
 
   return {
@@ -138,6 +178,17 @@ function mergeConfig(
       },
       review: {
         maxFixLoops: maxFixLoops ?? base.auto.review.maxFixLoops,
+      },
+      notifications: {
+        pushover: {
+          enabled: pushoverEnabled ?? base.auto.notifications.pushover.enabled,
+          appToken:
+            pushover?.appToken ?? base.auto.notifications.pushover.appToken,
+          userKey:
+            pushover?.userKey ?? base.auto.notifications.pushover.userKey,
+          priority:
+            pushoverPriority ?? base.auto.notifications.pushover.priority,
+        },
       },
     },
   };
@@ -204,6 +255,8 @@ function applyEnv(
   const maxFixLoops = coercePositiveInteger(
     env.PI_ADDY_AUTO_REVIEW_MAX_FIX_LOOPS,
   );
+  const pushoverEnabled = coerceBoolean(env.PI_ADDY_PUSHOVER_ENABLED);
+  const pushoverPriority = coerceInteger(env.PI_ADDY_PUSHOVER_PRIORITY);
 
   return {
     auto: {
@@ -216,6 +269,20 @@ function applyEnv(
       review: {
         maxFixLoops: maxFixLoops ?? config.auto.review.maxFixLoops,
       },
+      notifications: {
+        pushover: {
+          enabled:
+            pushoverEnabled ?? config.auto.notifications.pushover.enabled,
+          appToken:
+            env.PI_ADDY_PUSHOVER_APP_TOKEN ??
+            config.auto.notifications.pushover.appToken,
+          userKey:
+            env.PI_ADDY_PUSHOVER_USER_KEY ??
+            config.auto.notifications.pushover.userKey,
+          priority:
+            pushoverPriority ?? config.auto.notifications.pushover.priority,
+        },
+      },
     },
   };
 }
@@ -225,7 +292,7 @@ export function loadAddyWorkflowConfig(
   env: ConfigEnv = process.env,
 ): AddyWorkflowConfig {
   const notify = ctx.ui?.notify;
-  let config = cloneDefaultConfig();
+  let config = structuredClone(DEFAULT_ADDY_WORKFLOW_CONFIG);
   config = readConfigFile(globalConfigPath(), config, notify);
   if (ctx.cwd)
     config = readConfigFile(

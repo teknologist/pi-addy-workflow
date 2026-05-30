@@ -1,0 +1,3 @@
+# Addy Auto uses a project-wide process-owned runner lock
+
+Addy Auto Mode must not dispatch duplicate workflow prompts when multiple Pi sessions are open in the same repository. We will use a project-wide Addy Auto Runner Lock owned by one top-level Pi process, not by an individual session or Slice Plan, because Addy Auto state, widgets, stats, and task frontier decisions are already project-scoped. The lock uses fencing tokens so stale owners become passive after reclaim, allows owner-created fresh sessions to continue the same run, lets non-owners observe state without dispatching, and supports token-scoped remote stop intent instead of unsafe force unlock.

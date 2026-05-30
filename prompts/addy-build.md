@@ -1,5 +1,5 @@
 ---
-description: "Addy workflow: implement next task incrementally with TDD, verification, no auto-commit"
+description: "Addy workflow: implement next task incrementally with TDD, no auto-commit"
 thinking: medium
 argument-hint: "[plan-path]"
 ---
@@ -30,16 +30,18 @@ When asking for a plan, include the active plan as the recommended option unless
 
 Before changing code, read the active/supplied plan to identify the current task, but do not update the plan yet. Status checkbox updates happen only after the task phase finishes successfully.
 
+When the current task or plan has `Required context`, ADRs, or `Must preserve ADR constraints`, read those linked ADR/spec/steering files before coding. Treat ADR-derived `must not` guardrails as implementation constraints. Do not perform broad ADR discovery during build unless the active plan/spec clearly says ADR context is missing. If Addy Auto Mode is active and the missing context is safe and unambiguous, auto-recover by updating the active plan/spec to link the existing ADR or steering file before continuing. Otherwise stop and ask for plan/spec clarification instead of guessing. If the implementation would conflict with an ADR, stop and report that a superseding ADR or explicit human architecture decision is required.
+
 For heading/status slice plans, `/addy-build` may mark only the current task's `[x] Implemented` checkbox after the implementation exists and checks pass. Do not mark, unmark, or otherwise edit `[ ] Verified` or `[ ] Reviewed` during build, even if you ran tests, inspected the diff, or believe verification/review evidence exists. Those checkboxes belong exclusively to `/addy-verify` and `/addy-review`; a manual self-review inside build is not an Addy REVIEW step. Do not treat a task as complete just because it is implemented. The same task remains current until `Implemented`, `Verified`, and `Reviewed` are all checked by their owning phases. Legacy checklist-only plans remain supported: each top-level task checkbox represents the whole task completion state.
 
 Pick the next pending task from the plan. For each task:
 
 1. Read the task's acceptance criteria
-2. Load relevant context (existing code, patterns, types)
-3. Write a failing test for the expected behavior (RED)
-4. Implement the minimum code to pass the test (GREEN)
-5. Run the full test suite to check for regressions
-6. Run the build to verify compilation
+2. Read required context, including linked ADRs, spec sections, and steering files
+3. Load relevant context (existing code, patterns, types)
+4. Write a failing test for the expected behavior (RED)
+5. Implement the minimum code to pass the test (GREEN), preserving ADR constraints and plan `must not` guardrails
+6. Run only the targeted checks needed to confirm the implementation you just changed. Do not run full-suite verification, broad regression checks, or full build/typecheck gates from `/addy-build`; `/addy-verify` owns full verification.
 7. After the build work for the task is complete, update the active/supplied plan so only the task's `[ ] Implemented` checkbox becomes `[x] Implemented`. Leave `[ ] Verified` and `[ ] Reviewed` unchanged.
 8. Prepare a descriptive commit message, but do not commit unless the user explicitly asks
 9. Move or report progress only after the build-owned `[x] Implemented` checkbox matches the completed build work. Leave `Verified` and `Reviewed` unchanged for later workflow phases.
@@ -51,4 +53,4 @@ Pi-specific execution notes:
 - Use `todo` for task tracking when there are multiple steps.
 - Use `process` for long-running dev servers, watchers, or log tails.
 - Keep only the build-owned `[ ] Implemented` checkbox synchronized before reporting progress. Do not update verify/review-owned checkboxes from `/addy-build`.
-- Before claiming completion, follow `verification-before-completion` and report the exact checks run.
+- Before claiming completion, report the exact targeted checks run. Do not invoke `verification-before-completion` or perform full verification from `/addy-build`; that belongs to `/addy-verify`.

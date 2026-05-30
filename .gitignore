@@ -2,3 +2,5 @@ node_modules/
 .pi/
 *.tgz
 /.lean-ctx
+
+graphify-out/

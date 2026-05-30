@@ -16,6 +16,13 @@ Supplied spec path argument, if any: `$ARGUMENTS`.
 
 Read the supplied spec path. If no path is supplied, use the active spec from the Addy workflow state. If neither exists, call `ask_user_question` with bounded candidate `docs/specs/YYYY-MM-DD-<meaningful-name>.md` spec paths before writing the plan.
 
+Before writing the plan, discover and read any Architecture Decision Records (ADRs) that can constrain the work:
+
+- First read ADRs explicitly listed or linked from the spec.
+- Then inspect bounded ADR locations such as `docs/adr/`, `docs/adrs/`, `decisions/`, or `docs/decisions/` when they exist, and read only ADRs whose titles, filenames, or summaries are relevant to the spec.
+- If relevant ADRs exist but the spec does not reference them, still carry them into the plan under required context. Do not silently ignore an ADR just because the spec omitted it.
+- Do not change an ADR decision in implementation guidance. If the requested work appears to conflict with an ADR, add a stop condition requiring a superseding ADR or explicit human decision before implementation.
+
 Then read the relevant codebase sections and:
 
 1. Enter plan mode — read only, no code changes
@@ -27,13 +34,19 @@ Then read the relevant codebase sections and:
    - Use an index plan plus multiple slice plan files for larger or riskier work: 6+ tasks, 3+ vertical slices, multiple subsystems, migrations, public API or auth/security changes, risky refactors, staged rollout, or checkpoints that should be reviewed independently.
    - If this choice is borderline or user preference could materially affect execution, call `ask_user_question` before writing files. Ask how to package the plan with choices for single file, split by slice, or agent decides.
 
-5. Write tasks with acceptance criteria, verification steps, proof requirements, dependencies, and stop conditions.
+5. Write tasks with required context, acceptance criteria, verification steps, proof requirements, dependencies, and stop conditions.
+   - Add a plan-level `## Required context` section listing the spec, relevant ADR paths, and other steering files such as service `AGENTS.md`/`CLAUDE.md` files.
+   - For each task affected by an ADR, include the ADR path/ID in the task title or `### Context / files`, summarize the ADR constraints that must be preserved, and make the acceptance criteria include explicit guardrails or `must not` checks from those ADRs.
+   - If the plan will become issue titles or task titles, include the relevant ADR ID there when it is central to the work, for example `Implement provider credential tables per ADR-012`.
    - For behavior-changing tasks, include at least one regression-oriented verification step that would fail before implementation and pass after implementation.
    - If exact files, symbols, commands, or implementation surfaces are unknown, create an initial discovery-only task that locates them without changing behavior. Before checking that discovery task as implemented, persist its findings into the plan or an explicitly linked durable artifact, and make dependent tasks reference that persisted section or artifact.
+   - If `/addy-auto` later finds a safe, unambiguous missing-context gap in this plan, it may update the plan to link an existing ADR or required steering file and then continue. If the gap requires new architecture decisions, conflicting ADR interpretation, or a superseding ADR, the plan must stop for human input instead of auto-recovering by guessing.
 6. For every slice task, use this exact heading/status layout so workflow commands can keep the plan synchronized:
 
    ````md
    ## Task N: Short imperative task name
+
+   <!-- addy-task-id: task-<short-random> -->
 
    - [ ] Implemented
    - [ ] Verified
@@ -49,6 +62,18 @@ Then read the relevant codebase sections and:
 
    ### Context / files
 
+   Required context:
+
+   - Spec: `docs/specs/YYYY-MM-DD-feature.md`
+   - ADRs:
+     - `docs/adr/NNNN-decision.md`
+   - Steering files:
+     - `AGENTS.md` / `CLAUDE.md` / service-local guidance if relevant
+
+   Must preserve ADR constraints:
+
+   - ...
+
    - Likely files:
      - `path/to/file.ts`
    - Relevant symbols:
@@ -63,6 +88,7 @@ Then read the relevant codebase sections and:
    ### Acceptance criteria
 
    - ...
+   - Must not violate listed ADR constraints; if implementation requires changing an ADR decision, stop and request a superseding ADR instead.
 
    ### Verification
 
@@ -85,6 +111,8 @@ Then read the relevant codebase sections and:
    - `[ ] Implemented`
    - `[ ] Verified`
    - `[ ] Reviewed`
+
+   Generate a unique stable task id for every task using `task-<short-random>` (for example, `task-k7p4x9`). Keep the id in the `<!-- addy-task-id: ... -->` HTML comment directly under the task heading so commit evidence survives task title edits.
 
 7. Add checkpoints between phases
 8. End every plan or final split-plan slice with a non-task `## Completion audit` section, not a lifecycle task and not a heading with `Implemented`/`Verified`/`Reviewed` checkboxes. The audit checklist must verify all preceding implementation tasks have implementation, verification, and review evidence; all required commands pass; no unrelated files changed; and lifecycle checkboxes reflect real completed phases only.

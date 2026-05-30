@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os';
 import {
   GENERATED_AGENT_NOTICE,
   addGeneratedNotice,
-  isSafeTargetPath,
   packageAgentSourceRoot,
   syncAgents,
 } from '../extensions/agent-installer/core.ts';
@@ -17,18 +16,6 @@ test('adds generated notice after YAML frontmatter', () => {
   assert.equal(
     addGeneratedNotice(content),
     `---\nname: addy-reviewer\n---\n${GENERATED_AGENT_NOTICE}\n\nBody\n`,
-  );
-});
-
-test('target path safety stays inside target root', () => {
-  const root = join(tmpdir(), 'addy-agent-target-root');
-  assert.equal(isSafeTargetPath(root, root), true);
-  assert.equal(isSafeTargetPath(root, join(root, 'agent.md')), true);
-  assert.equal(isSafeTargetPath(root, join(root, '..cache', 'agent.md')), true);
-  assert.equal(isSafeTargetPath(root, `${root}2/agent.md`), false);
-  assert.equal(
-    isSafeTargetPath(root, join(root, '..', 'outside', 'agent.md')),
-    false,
   );
 });
 

@@ -1,153 +1,43 @@
-export const WORKFLOW_PHASES = [
-  'define',
-  'plan',
-  'build',
-  'simplify',
-  'verify',
-  'review',
-  'finish',
-] as const;
-export const ENFORCED_WORKFLOW_PHASES = ['build', 'verify', 'review'] as const;
+import {
+  commandNameFromText,
+  phaseForWorkflowCommand,
+} from './command-router.ts';
+import {
+  ENFORCED_WORKFLOW_PHASES,
+  WORKFLOW_PHASES,
+  phaseIndex,
+  type PhaseStatus,
+  type WorkflowPhase,
+} from './workflow-phases.ts';
+import {
+  enterAutoModeControlUpdates,
+  exitAutoModeControlUpdates,
+  preserveWorkflowControlState,
+  stopAutoModeControlUpdates,
+} from './workflow-state-control.ts';
+import { createInitialWorkflowState } from './workflow-core.ts';
+import type { WorkflowEvent, WorkflowState } from './workflow-core.ts';
 
-export type WorkflowPhase = (typeof WORKFLOW_PHASES)[number];
-export type PhaseStatus = 'pending' | 'active' | 'complete';
-
-export type WorkflowIssueStats = {
-  critical: number;
-  important: number;
-  suggestion: number;
-  unknown: number;
-  total: number;
-};
-
-export type WorkflowTaskStats = {
-  plan?: string;
-  sliceIndex?: number;
-  taskIndex?: number;
-  taskTitle?: string;
-  turns: number;
-  verifyRuns: number;
-  reviewRuns: number;
-  issues: WorkflowIssueStats;
-};
-
-export type WorkflowTaskCommitRecord = {
-  plan: string;
-  sliceIndex?: number;
-  taskIndex: number;
-  taskTitle: string;
-  commitSha: string;
-  committedAt: string;
-};
-
-export type WorkflowStatsSession = {
-  tasks: Record<string, WorkflowTaskStats>;
-  endedReason?: string;
-};
-
-export type WorkflowStats = {
-  active: WorkflowStatsSession;
-  history: WorkflowStatsSession[];
-};
-
-export type AutoFreshReason = 'between-tasks' | 'before-step' | 'before-review';
-
-export type AutoPendingActionReason =
-  | 'next-action'
-  | 'fresh-fallback'
-  | 'idle-retry'
-  | 'commit-frontier';
-
-export type WorkflowAutoPendingAction = {
-  key: string;
-  prompt: string;
-  expandedPrompt?: string;
-  plan?: string;
-  taskIndex?: number;
-  taskTitle?: string;
-  sliceIndex?: number;
-  reason: AutoPendingActionReason;
-  attempts: number;
-  createdAt: string;
-};
-
-export type WorkflowAutoPausedReason =
-  | 'unclear-commit-result'
-  | 'max-review-fix-loops'
-  | 'repeated-review-finding'
-  | 'same-phase-retry-limit'
-  | 'user-stopped';
-
-export type WorkflowState = {
-  current?: WorkflowPhase;
-  phases: Record<WorkflowPhase, PhaseStatus>;
-  warnings: string[];
-  stats?: WorkflowStats;
-  committedTasks?: Record<string, WorkflowTaskCommitRecord>;
-  activeSpec?: string;
-  activePlan?: string;
-  activeSuitePlan?: string;
-  currentTask?: string;
-  nextTask?: string;
-  currentTaskIndex?: number;
-  taskCount?: number;
-  currentSliceIndex?: number;
-  sliceCount?: number;
-  currentTaskSummary?: string;
-  nextTaskSummary?: string;
-  lastTrigger?: string;
-  lastArtifact?: string;
-  testStatus?: 'detected' | 'passed' | 'failed';
-  autoMode?: boolean;
-  autoPendingAction?: WorkflowAutoPendingAction;
-  autoPausedReason?: WorkflowAutoPausedReason;
-  autoLastPrompt?: string;
-  autoRetryKey?: string;
-  autoRetryCount?: number;
-  autoFreshPrompt?: string;
-  autoFreshExpandedPrompt?: string;
-  autoFreshReason?: AutoFreshReason;
-  autoFreshDeliveryKey?: string;
-  autoFreshConsumedKey?: string;
-  autoReviewFixKey?: string;
-  autoReviewFixCount?: number;
-  autoReviewFindingFingerprint?: string;
-  autoReviewFixNeedsReview?: boolean;
-  autoReviewTask?: string;
-  autoReviewTaskIndex?: number;
-  reviewStatsKey?: string;
-  reviewStatsAgent?: string;
-};
-
-export type WorkflowEvent = {
-  source:
-    | 'user-input'
-    | 'file-write'
-    | 'tool-result'
-    | 'subagent-call'
-    | 'command';
-  text?: string;
-  command?: string;
-  manualAddyCommand?: boolean;
-  agentName?: string;
-  success?: boolean;
-  artifact?: string;
-  skipConfirmed?: boolean;
-  confirmedSkippedPhases?: WorkflowPhase[];
-};
-
-export function createInitialWorkflowState(): WorkflowState {
-  return {
-    phases: Object.fromEntries(
-      WORKFLOW_PHASES.map((phase) => [phase, 'pending']),
-    ) as Record<WorkflowPhase, PhaseStatus>,
-    warnings: [],
-  };
-}
-
-export function phaseIndex(phase: WorkflowPhase): number {
-  return WORKFLOW_PHASES.indexOf(phase);
-}
+export {
+  ENFORCED_WORKFLOW_PHASES,
+  WORKFLOW_PHASES,
+  phaseIndex,
+} from './workflow-phases.ts';
+export type { PhaseStatus, WorkflowPhase } from './workflow-phases.ts';
+export { createInitialWorkflowState } from './workflow-core.ts';
+export type {
+  AutoFreshReason,
+  AutoPendingActionReason,
+  WorkflowAutoPausedReason,
+  WorkflowAutoPendingAction,
+  WorkflowEvent,
+  WorkflowIssueStats,
+  WorkflowState,
+  WorkflowStats,
+  WorkflowStatsSession,
+  WorkflowTaskCommitRecord,
+  WorkflowTaskStats,
+} from './workflow-core.ts';
 
 function enforcedPhaseIndex(phase: WorkflowPhase): number {
   return (ENFORCED_WORKFLOW_PHASES as readonly WorkflowPhase[]).indexOf(phase);
@@ -277,12 +167,6 @@ function isLikelySpecArgument(value: string): boolean {
   return !/\s/.test(unquoted);
 }
 
-function commandNameFromText(text: string | undefined): string | undefined {
-  if (!text) return undefined;
-  const [command] = text.trim().split(/\s+/, 1);
-  return command?.startsWith('/addy-') ? command : undefined;
-}
-
 function artifactFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
   const parts = text.trim().split(/\s+/);
@@ -322,58 +206,14 @@ function applyAutoModeEvent(
   if (/^\/addy-auto\s+stop\b/.test(text.trim())) {
     return {
       ...state,
-      autoMode: false,
-      autoPendingAction: undefined,
-      autoPausedReason: 'user-stopped',
-      autoLastPrompt: undefined,
-      autoRetryKey: undefined,
-      autoRetryCount: undefined,
-      autoFreshPrompt: undefined,
-      autoFreshExpandedPrompt: undefined,
-      autoFreshReason: undefined,
-      autoFreshDeliveryKey: undefined,
-      autoFreshConsumedKey: undefined,
-      autoReviewFixKey: undefined,
-      autoReviewFixCount: undefined,
-      autoReviewFindingFingerprint: undefined,
-      autoReviewFixNeedsReview: undefined,
-      autoReviewTask: undefined,
-      autoReviewTaskIndex: undefined,
+      ...stopAutoModeControlUpdates(),
       lastTrigger,
     };
   }
 
-  const pendingFresh =
-    state.autoFreshPrompt && state.autoFreshReason
-      ? {
-          autoFreshPrompt: state.autoFreshPrompt,
-          autoFreshExpandedPrompt: state.autoFreshExpandedPrompt,
-          autoFreshReason: state.autoFreshReason,
-          autoFreshDeliveryKey: state.autoFreshDeliveryKey,
-          autoFreshConsumedKey: state.autoFreshConsumedKey,
-        }
-      : {
-          autoFreshPrompt: undefined,
-          autoFreshExpandedPrompt: undefined,
-          autoFreshReason: undefined,
-          autoFreshDeliveryKey: undefined,
-          autoFreshConsumedKey: undefined,
-        };
   return {
     ...state,
-    autoMode: true,
-    autoPendingAction: undefined,
-    autoPausedReason: undefined,
-    autoLastPrompt: undefined,
-    autoRetryKey: undefined,
-    autoRetryCount: undefined,
-    ...pendingFresh,
-    autoReviewFixKey: undefined,
-    autoReviewFixCount: undefined,
-    autoReviewFindingFingerprint: undefined,
-    autoReviewFixNeedsReview: undefined,
-    autoReviewTask: undefined,
-    autoReviewTaskIndex: undefined,
+    ...enterAutoModeControlUpdates(state),
     activePlan:
       validAutoModeArtifact(event.artifact) ??
       autoModeArtifactFromText(text) ??
@@ -386,23 +226,7 @@ function applyAutoModeEvent(
 function exitAutoMode(state: WorkflowState): WorkflowState {
   return {
     ...state,
-    autoMode: false,
-    autoPendingAction: undefined,
-    autoPausedReason: undefined,
-    autoLastPrompt: undefined,
-    autoRetryKey: undefined,
-    autoRetryCount: undefined,
-    autoFreshPrompt: undefined,
-    autoFreshExpandedPrompt: undefined,
-    autoFreshReason: undefined,
-    autoFreshDeliveryKey: undefined,
-    autoFreshConsumedKey: undefined,
-    autoReviewFixKey: undefined,
-    autoReviewFixCount: undefined,
-    autoReviewFindingFingerprint: undefined,
-    autoReviewFixNeedsReview: undefined,
-    autoReviewTask: undefined,
-    autoReviewTaskIndex: undefined,
+    ...exitAutoModeControlUpdates(),
   };
 }
 
@@ -440,31 +264,6 @@ function applyActiveArtifact(
   return state;
 }
 
-function skippedPhaseWarningConfirmed(
-  event: WorkflowEvent,
-  target: WorkflowPhase,
-  skippedPhases: WorkflowPhase[],
-): boolean {
-  if (event.skipConfirmed) return true;
-  if (skippedPhases.length === 0) return true;
-
-  const confirmed = event.confirmedSkippedPhases ?? [];
-  if (skippedPhases.every((phase) => confirmed.includes(phase))) return true;
-
-  const text = `${event.text ?? ''} ${event.command ?? ''}`;
-  if (/--skip-workflow-warning-confirmed\b/.test(text)) return true;
-  if (
-    target === 'review' &&
-    skippedPhases.includes('verify') &&
-    /--skip-verify-confirmed\b/.test(text)
-  )
-    return true;
-  if (target === 'finish' && /--skip-missing-steps-confirmed\b/.test(text))
-    return true;
-
-  return false;
-}
-
 export function resolveTargetPhase(
   event: WorkflowEvent,
   current?: WorkflowPhase,
@@ -479,13 +278,8 @@ export function resolveTargetPhase(
       );
     if (workflowNext) return workflowNext[1] as WorkflowPhase;
     const commandName = commandNameFromText(text);
-    if (commandName === '/addy-code-simplify') return 'simplify';
-    if (commandName === '/addy-define') return 'define';
-    if (commandName === '/addy-plan') return 'plan';
-    if (commandName === '/addy-build') return 'build';
-    if (commandName === '/addy-verify') return 'verify';
-    if (commandName === '/addy-review') return 'review';
-    if (commandName === '/addy-finish') return 'finish';
+    const commandPhase = phaseForWorkflowCommand(commandName);
+    if (commandPhase) return commandPhase;
   }
 
   if (event.source === 'file-write' && event.artifact)
@@ -567,24 +361,6 @@ export function transitionWorkflow(
   if (skippedPhases.length > 0)
     warnings.push(`${target} started before ${skippedPhases.join(' and ')}.`);
 
-  if (
-    current &&
-    warnings.length > 0 &&
-    (target === 'review' || target === 'finish') &&
-    !skippedPhaseWarningConfirmed(event, target, skippedPhases)
-  ) {
-    return applyActiveArtifact(
-      {
-        ...baseState,
-        warnings,
-        lastTrigger: event.text ?? event.command ?? event.agentName,
-        lastArtifact: event.artifact ?? baseState.lastArtifact,
-      },
-      event,
-      target,
-    );
-  }
-
   next.current = target;
   next.phases[target] = 'active';
   next.warnings = warnings;
@@ -593,33 +369,15 @@ export function transitionWorkflow(
   next.activeSuitePlan = baseState.activeSuitePlan;
   next.stats = baseState.stats;
   next.committedTasks = baseState.committedTasks;
-  next.autoMode = baseState.autoMode;
-  next.autoPendingAction = baseState.autoPendingAction;
-  next.autoPausedReason = baseState.autoPausedReason;
-  next.autoLastPrompt = baseState.autoLastPrompt;
-  next.autoRetryKey = baseState.autoRetryKey;
-  next.autoRetryCount = baseState.autoRetryCount;
-  next.autoFreshPrompt = baseState.autoFreshPrompt;
-  next.autoFreshExpandedPrompt = baseState.autoFreshExpandedPrompt;
-  next.autoFreshReason = baseState.autoFreshReason;
-  next.autoFreshDeliveryKey = baseState.autoFreshDeliveryKey;
-  next.autoFreshConsumedKey = baseState.autoFreshConsumedKey;
-  next.autoReviewFixKey = baseState.autoReviewFixKey;
-  next.autoReviewFixCount = baseState.autoReviewFixCount;
-  next.autoReviewFindingFingerprint = baseState.autoReviewFindingFingerprint;
-  next.autoReviewFixNeedsReview = baseState.autoReviewFixNeedsReview;
-  next.autoReviewTask = baseState.autoReviewTask;
-  next.autoReviewTaskIndex = baseState.autoReviewTaskIndex;
-  next.reviewStatsKey = baseState.reviewStatsKey;
-  next.reviewStatsAgent = baseState.reviewStatsAgent;
-  next.lastTrigger = event.text ?? event.command ?? event.agentName;
-  next.lastArtifact = event.artifact;
-  next.testStatus =
+  const nextWithControl = preserveWorkflowControlState(next, baseState);
+  nextWithControl.lastTrigger = event.text ?? event.command ?? event.agentName;
+  nextWithControl.lastArtifact = event.artifact;
+  nextWithControl.testStatus =
     target === 'verify' && event.source === 'tool-result'
       ? event.success === false
         ? 'failed'
         : 'detected'
       : baseState.testStatus;
 
-  return applyActiveArtifact(next, event, target);
+  return applyActiveArtifact(nextWithControl, event, target);
 }
