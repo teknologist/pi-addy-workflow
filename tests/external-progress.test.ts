@@ -176,7 +176,7 @@ test('updates use merge-patch semantics and enforce counter invariants', () => {
     const updated = updateExternalProgress({
       runId: run.runId,
       homeDir: fixture.homeDir,
-      patch: { loopPhase: 'queue', completed: 1, total: 3 }
+      patch: { loopPhase: 'queue', completed: 1, total: 3 },
       now: new Date(TIME.getTime() + 1),
     });
     assert.equal(updated.currentItem, 'Issue one');
