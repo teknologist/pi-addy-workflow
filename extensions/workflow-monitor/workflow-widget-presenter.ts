@@ -11,6 +11,10 @@ import {
   isValidProgress,
   readSlicePlanProgress,
 } from './slice-plan-progress.ts';
+import {
+  selectExternalProgress,
+  type SelectedExternalProgress,
+} from './external-progress.ts';
 
 export const WORKFLOW_WIDGET_KEY = 'pi-addy-workflow';
 const MIN_ARTIFACT_NAME_WIDTH = 12;
@@ -273,6 +277,49 @@ function shouldRenderTaskFooter(state: WorkflowState): boolean {
   );
 }
 
+function externalProgressLine({
+  snapshot,
+  stale,
+}: SelectedExternalProgress): string {
+  const phase =
+    snapshot.loopPhase === 'pre-loop' || snapshot.loopPhase === 'post-loop'
+      ? `boundary: ${snapshot.loopPhase}`
+      : `[${snapshot.loopPhase}]`;
+  const progress =
+    snapshot.completed === undefined || snapshot.total === undefined
+      ? snapshot.progressUnit
+      : `${snapshot.progressUnit ? `${snapshot.progressUnit} ` : ''}${snapshot.completed}/${snapshot.total}`;
+  const parts = [
+    snapshot.source,
+    phase,
+    progress,
+    snapshot.currentItem && sanitizeExternalText(snapshot.currentItem),
+    snapshot.status,
+    stale ? 'stale' : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return `External workflow: ${parts.join(' | ')}`;
+}
+
+function sanitizeExternalText(value: string): string {
+  return value
+    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+function externalProgressLines(baseCwd: string | undefined): string[] {
+  if (!baseCwd) return [];
+  try {
+    const selection = selectExternalProgress({ cwd: baseCwd });
+    return [
+      ...selection.active.map(externalProgressLine),
+      ...(selection.terminal ? [externalProgressLine(selection.terminal)] : []),
+    ];
+  } catch {
+    return [];
+  }
+}
+
 export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   return (
     _tui?: unknown,
@@ -354,9 +401,12 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
           ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
           : workflowTaskFooterLine(state.activePlan, baseCwd, theme, state)
         : undefined;
-      const lines = [line, artifactLine, taskLine].filter(
-        (value): value is string => Boolean(value),
-      );
+      const lines = [
+        line,
+        artifactLine,
+        taskLine,
+        ...externalProgressLines(baseCwd),
+      ].filter((value): value is string => Boolean(value));
       return width
         ? lines.map((value) =>
             truncateToWidth(value, Math.max(1, width), '', true),
