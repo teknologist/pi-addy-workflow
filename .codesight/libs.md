@@ -126,6 +126,14 @@
   - function planSubagentStartEvent: (event) => PlannedWorkflowEvent
   - type PlannedWorkflowEvent
 - `extensions/workflow-monitor/event-registry.ts` — function registerWorkflowEvents: (pi, deps) => void
+- `extensions/workflow-monitor/external-progress.ts`
+  - function canonicalGitCommonDir: ({...}, }, 'cwd'>) => string
+  - function externalProgressProjectKey: ({...}, }, 'cwd'>) => string
+  - function externalProgressRoot: ({...}) => string
+  - function externalProgressRunsDir: ({...}, homeDir, }) => string
+  - function parseIssueImplementationProgressSnapshot: (value) => IssueImplementationProgressSnapshot
+  - function startExternalProgress: (input) => IssueImplementationProgressSnapshot
+  - _...15 more_
 - `extensions/workflow-monitor/fresh-continuation-delivery.ts`
   - function createPendingFreshDelivery: (deps, consumedAutoFreshKeys) => void
   - type FreshContinuationDispatchOptions

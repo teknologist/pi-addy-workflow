@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 1 routes (1 inferred) | 0 models | 0 components | 100 lib files | 7 env vars | 2 middleware | 100% test coverage
-> **Token savings:** this file is ~9,200 tokens. Without it, AI exploration would cost ~37,100 tokens. **Saves ~27,900 tokens per conversation.**
-> **Last scanned:** 2026-07-14 08:45 — re-run after significant changes
+> 1 routes (1 inferred) | 0 models | 0 components | 101 lib files | 7 env vars | 2 middleware | 100% test coverage
+> **Token savings:** this file is ~9,200 tokens. Without it, AI exploration would cost ~37,300 tokens. **Saves ~28,100 tokens per conversation.**
+> **Last scanned:** 2026-07-14 18:06 — re-run after significant changes
 
 ---
 
@@ -142,6 +142,14 @@
   - function planSubagentStartEvent: (event) => PlannedWorkflowEvent
   - type PlannedWorkflowEvent
 - `extensions/workflow-monitor/event-registry.ts` — function registerWorkflowEvents: (pi, deps) => void
+- `extensions/workflow-monitor/external-progress.ts`
+  - function canonicalGitCommonDir: ({...}, }, 'cwd'>) => string
+  - function externalProgressProjectKey: ({...}, }, 'cwd'>) => string
+  - function externalProgressRoot: ({...}) => string
+  - function externalProgressRunsDir: ({...}, homeDir, }) => string
+  - function parseIssueImplementationProgressSnapshot: (value) => IssueImplementationProgressSnapshot
+  - function startExternalProgress: (input) => IssueImplementationProgressSnapshot
+  - _...15 more_
 - `extensions/workflow-monitor/fresh-continuation-delivery.ts`
   - function createPendingFreshDelivery: (deps, consumedAutoFreshKeys) => void
   - type FreshContinuationDispatchOptions
@@ -458,24 +466,11 @@
 # Test Coverage
 
 > **100%** of routes and models are covered by tests
-> 81 test files found
+> 82 test files found
 
 ## Covered Routes
 
 - ALL:/api/state
-
----
-
-# Git Hooks
-
-> **Note for agents:** These hooks fire automatically on git operations and will block the operation if they fail.
-
-## `pre-commit` — raw git hook
-
-- **npx**: `npx codesight --wiki -o .codesight`
-- **git**: `git add .codesight/`
-
-_Source: .git/hooks/pre-commit_
 
 ---
 

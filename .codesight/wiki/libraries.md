@@ -2,10 +2,11 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**100 library files** across 1 module
+**101 library files** across 1 module
 
-## Extensions (100 files)
+## Extensions (101 files)
 
+- `extensions/workflow-monitor/external-progress.ts` — canonicalGitCommonDir, externalProgressProjectKey, externalProgressRoot, externalProgressRunsDir, parseIssueImplementationProgressSnapshot, startExternalProgress, …
 - `extensions/workflow-monitor/auto-runner-lock.ts` — getAutoRunnerInstanceId, autoRunnerLockDir, acquireAutoRunnerLock, verifyAutoRunnerLock, renewAutoRunnerLock, releaseAutoRunnerLock, …
 - `extensions/workflow-monitor/auto-control.ts` — hasLiveAutoControl, explicitlyStoppedAuto, withProjectAutoControl, sanitizedProjectFallbackAutoControl, autoFreshContinuationKey, validPendingFreshContinuation, …
 - `extensions/workflow-monitor/composition-adapter.ts` — hostContext, baseCwd, getWorkflowStateFromContext, getProjectWorkflowStateFromContext, setWorkflowStateFromContext, loadWorkflowConfig, …
@@ -30,8 +31,7 @@
 - `extensions/workflow-monitor/workflow-widget-presenter.ts` — renderWorkflowStrip, workflowArtifactForFooter, workflowArtifactName, workflowTaskFooterLine, renderWorkflowWidget, WORKFLOW_WIDGET_KEY
 - `extensions/workflow-monitor/auto-action-keys.ts` — idleUserMessageKey, autoWorkflowActionKey, autoWorkflowActionKeyForAction, autoWorkflowActionKeyForPromptState, currentAutoWorkflowActionKey
 - `extensions/workflow-monitor/prompt-template.ts` — expandPackagedPromptTemplate, parseTemplateArgs, stripFrontmatter, substituteTemplateArgs, PromptTemplateDeps
-- `extensions/workflow-monitor/workflow-phases.ts` — phaseIndex, WorkflowPhase, PhaseStatus, WORKFLOW_PHASES, ENFORCED_WORKFLOW_PHASES
-- _…and 75 more files_
+- _…and 76 more files_
 
 ---
 _Back to [overview.md](./overview.md)_
