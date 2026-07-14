@@ -3,4 +3,5 @@ node_modules/
 .pi-lens/
 .codesight/
 .lean-ctx/
+.worktrees/
 *.tgz
