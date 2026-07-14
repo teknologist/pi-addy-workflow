@@ -16,12 +16,18 @@ import {
   type WorkflowState,
 } from './workflow-state.ts';
 import type { WorkflowPhase, WorkflowTaskStats } from './workflow-core.ts';
+import {
+  selectExternalProgress,
+  type SelectedExternalProgress,
+} from './external-progress.ts';
 
 type DashboardOptions = {
   cwd?: string;
   host?: string;
   port?: number;
   stateDir?: string;
+  externalProgressHomeDir?: string;
+  externalProgressCacheMs?: number;
 };
 
 type StoredState = {
@@ -62,6 +68,22 @@ export type DashboardSnapshot = {
   tasks: DashboardTask[];
   sliceGroups: DashboardSliceGroup[];
   planGroups: DashboardPlanGroup[];
+  externalRuns?: DashboardExternalRun[];
+  externalProgressWarning?: string;
+};
+
+type DashboardExternalRun = {
+  source: string;
+  status: string;
+  loopPhase: string;
+  progressUnit?: string;
+  currentItem?: string;
+  completed?: number;
+  total?: number;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+  stale: boolean;
 };
 
 type DashboardProgress = {
@@ -433,6 +455,73 @@ function planGroups(
     });
 }
 
+function dashboardExternalRun({
+  snapshot,
+  stale,
+}: SelectedExternalProgress): DashboardExternalRun {
+  return {
+    source: snapshot.source,
+    status: snapshot.status,
+    loopPhase: snapshot.loopPhase,
+    progressUnit: snapshot.progressUnit,
+    currentItem: snapshot.currentItem,
+    completed: snapshot.completed,
+    total: snapshot.total,
+    startedAt: snapshot.startedAt,
+    updatedAt: snapshot.updatedAt,
+    finishedAt: snapshot.finishedAt,
+    stale,
+  };
+}
+
+type DashboardExternalProgress = Pick<
+  DashboardSnapshot,
+  'externalRuns' | 'externalProgressWarning'
+>;
+
+const dashboardExternalProgressCache = new Map<
+  string,
+  { expiresAt: number; value: DashboardExternalProgress }
+>();
+
+function dashboardExternalProgress(
+  cwd: string,
+  homeDir: string | undefined,
+  cacheMs: number,
+): DashboardExternalProgress {
+  const cacheKey = `${homeDir ?? ''}\0${cwd}`;
+  const now = Date.now();
+  const cached = dashboardExternalProgressCache.get(cacheKey);
+  if (cacheMs > 0 && cached && cached.expiresAt > now) return cached.value;
+  let value: DashboardExternalProgress;
+  try {
+    const selected = selectExternalProgress({ cwd, homeDir });
+    const runs = [
+      ...selected.active,
+      ...(selected.terminal === undefined ? [] : [selected.terminal]),
+    ].map(dashboardExternalRun);
+    value = {
+      ...(runs.length === 0 ? {} : { externalRuns: runs }),
+      ...(selected.diagnostics.length === 0
+        ? {}
+        : {
+            externalProgressWarning:
+              'Some issue workflow snapshots could not be read.',
+          }),
+    };
+  } catch {
+    value = {
+      externalProgressWarning: 'Issue workflow progress is unavailable.',
+    };
+  }
+  if (cacheMs > 0)
+    dashboardExternalProgressCache.set(cacheKey, {
+      expiresAt: now + cacheMs,
+      value,
+    });
+  return value;
+}
+
 export function dashboardSnapshot(
   options: DashboardOptions = {},
 ): DashboardSnapshot {
@@ -448,6 +537,11 @@ export function dashboardSnapshot(
   }));
   const tasks = state ? taskList(state) : [];
   const slices = sliceGroups(tasks, state?.activePlan);
+  const externalProgress = dashboardExternalProgress(
+    cwd,
+    options.externalProgressHomeDir,
+    options.externalProgressCacheMs ?? 1_000,
+  );
 
   return {
     cwd,
@@ -500,10 +594,11 @@ export function dashboardSnapshot(
     tasks,
     sliceGroups: slices,
     planGroups: planGroups(slices, state?.activePlan),
+    ...externalProgress,
   };
 }
 
-function dashboardHtml(): string {
+export function dashboardHtml(): string {
   return String.raw`<!doctype html>
 <html lang="en">
 <head>
@@ -584,6 +679,13 @@ function dashboardHtml(): string {
     .step.current { color: var(--warn); border-color: oklch(0.5 0.1 78); background: var(--warn-soft); transform: translateY(-1px); animation: currentStepPulse 1.8s var(--ease-out) infinite; font-weight: 750; }
     .step.pending { color: var(--muted); border-color: var(--line-soft); background: var(--canvas); }
     .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line); border-radius: 2px; }
+    .issue-workflow-list { display: grid; gap: var(--space-2); }
+    .issue-workflow { display: grid; grid-template-columns: minmax(180px, 1fr) max-content; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--line-soft); background: var(--surface-2); }
+    .issue-workflow-primary { color: var(--text-strong); font-weight: 690; }
+    .issue-workflow-meta { color: var(--muted); font-size: .8125rem; margin-top: .25rem; overflow-wrap: anywhere; }
+    .issue-workflow-status { align-self: start; color: var(--muted); font-size: .8125rem; text-align: right; }
+    .issue-workflow-boundary { color: var(--muted); font-size: .8125rem; }
+    .issue-workflow-warning { color: var(--warn); }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: var(--font-mono); font-size: .75rem; line-height: 1.5; color: var(--text); font-variant-numeric: tabular-nums; }
 
     .is-refreshing { border-color: var(--accent); }
@@ -608,6 +710,7 @@ function dashboardHtml(): string {
       <div class="metric"><div class="metric-label">Current task</div><div class="metric-value" id="task">-</div><div class="metric-note" id="taskSummary"></div><div class="metric-note next-line">Next: <span id="nextTask">-</span><span id="nextSummary"></span></div></div>
     </section>
     <section class="progress-grid" id="progress"></section>
+    <section class="panel section" id="issueWorkflows" hidden><div class="section-head"><div class="section-title">Issue workflows</div></div><div class="issue-workflow-list" id="issueWorkflowRuns"></div></section>
     <section class="panel section"><div class="section-head"><div class="section-title">Slices</div></div><div class="slice-list" id="slices"></div></section>
     <section class="panel section"><div class="section-head"><div class="section-title">Raw state summary</div></div><pre id="raw"></pre></section>
   </main>
@@ -676,6 +779,26 @@ function dashboardHtml(): string {
       if (!selected) return '';
       return '<div class="panel progress-card"><div class="progress-head"><div class="metric-label">Plan performance</div><strong>' + escapeHtml(selected.duration) + '</strong></div><div class="metric-note">avg ' + escapeHtml(selected.averageTaskDuration) + ' / timed task · ' + selected.timedTaskCount + ' timed · ' + selected.turns + ' turns</div><div class="metric-note">' + selected.verifyRuns + ' verify · ' + selected.reviewRuns + ' review · ' + selected.issues + ' issues</div></div>';
     }
+    function issueWorkflowProgress(run) {
+      const unit = run.progressUnit ? ' ' + run.progressUnit : '';
+      if (Number.isInteger(run.completed) && Number.isInteger(run.total)) return run.completed + ' / ' + run.total + unit;
+      if (Number.isInteger(run.completed)) return run.completed + ' completed' + unit;
+      if (Number.isInteger(run.total)) return run.total + ' total' + unit;
+      return run.progressUnit || '';
+    }
+    function issueWorkflow(run) {
+      const boundary = run.loopPhase === 'pre-loop' || run.loopPhase === 'post-loop';
+      const phase = escapeHtml(run.loopPhase);
+      const progress = escapeHtml(issueWorkflowProgress(run));
+      return '<div class="issue-workflow"><div><div class="issue-workflow-primary">' + phase + (progress ? ' · ' + progress : '') + '</div><div class="issue-workflow-meta">' + escapeHtml(run.currentItem) + '</div><div class="issue-workflow-meta">' + escapeHtml(run.source) + (boundary ? ' <span class="issue-workflow-boundary">boundary state</span>' : '') + '</div></div><div class="issue-workflow-status">' + escapeHtml(run.status) + (run.stale ? ' · stale' : '') + '</div></div>';
+    }
+    function renderIssueWorkflows(data) {
+      const runs = data.externalRuns || [];
+      const warning = data.externalProgressWarning;
+      const panel = $('issueWorkflows');
+      panel.hidden = runs.length === 0 && !warning;
+      setHtmlIfChanged($('issueWorkflowRuns'), runs.map(issueWorkflow).join('') + (warning ? '<div class="issue-workflow-warning">' + escapeHtml(warning) + '</div>' : ''));
+    }
     async function refresh() {
       const res = await fetch('/api/state');
       const data = await res.json();
@@ -717,6 +840,7 @@ function dashboardHtml(): string {
       $('nextSummary').textContent = isActive ? (data.nextTaskSummary && data.nextTaskSummary !== data.nextTask ? ' · ' + data.nextTaskSummary : '') : selected ? ' · Select another plan from the dropdown to inspect its history.' : '';
       setHtmlIfChanged($('progress'), isActive ? progressCard('Current slice', data.progress && data.progress.slice) + progressCard('Current slice tasks', data.progress && data.progress.task) + planKpiCard(selected) : planProgressCard(selected) + planKpiCard(selected));
       setHtmlIfChanged($('phases'), isActive ? (data.phases || []).map((phase) => '<span class="phase phase-' + escapeHtml(phase.name) + ' ' + escapeHtml(phase.status) + '">' + escapeHtml(phase.name) + '</span>').join('') : '<span class="phase complete">archived: complete</span>');
+      renderIssueWorkflows(data);
       captureSliceOpenState();
       setHtmlIfChanged($('slices'), selected ? selected.slices.map((slice) => sliceBlock(slice, data.activePlan)).join('') : '<div class="empty">' + (data.activePlan ? 'No stats recorded for the selected plan.' : "No active plan in this directory's state.") + '</div>');
       $('raw').textContent = JSON.stringify({ selectedPlan: selected && selected.plan, activePlan: data.activePlan, stateFile: data.stateFile, pending: data.autoPendingAction, warnings: data.warnings, paused: data.autoPausedReason }, null, 2);
