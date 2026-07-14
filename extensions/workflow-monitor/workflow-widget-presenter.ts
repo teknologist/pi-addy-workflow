@@ -283,21 +283,28 @@ function externalProgressLine({
 }: SelectedExternalProgress): string {
   const phase =
     snapshot.loopPhase === 'pre-loop' || snapshot.loopPhase === 'post-loop'
-      ? `boundary: ${snapshot.loopPhase}`
-      : `[${snapshot.loopPhase}]`;
+      ? `${snapshot.loopPhase} boundary`
+      : snapshot.loopPhase;
+  const unit = snapshot.progressUnit ? ` ${snapshot.progressUnit}` : '';
   const progress =
-    snapshot.completed === undefined || snapshot.total === undefined
-      ? snapshot.progressUnit
-      : `${snapshot.progressUnit ? `${snapshot.progressUnit} ` : ''}${snapshot.completed}/${snapshot.total}`;
+    snapshot.completed !== undefined && snapshot.total !== undefined
+      ? `${snapshot.completed}/${snapshot.total}${unit}`
+      : snapshot.completed !== undefined
+        ? `${snapshot.completed} completed${unit}`
+        : snapshot.total !== undefined
+          ? `${snapshot.total} total${unit}`
+          : snapshot.progressUnit;
+  const primary = [progress, phase]
+    .filter((value): value is string => Boolean(value))
+    .join(' ');
   const parts = [
+    primary,
     snapshot.source,
-    phase,
-    progress,
     snapshot.currentItem && sanitizeExternalText(snapshot.currentItem),
     snapshot.status,
     stale ? 'stale' : undefined,
   ].filter((value): value is string => Boolean(value));
-  return `External workflow: ${parts.join(' | ')}`;
+  return `Issue: ${parts.join(' | ')}`;
 }
 
 function sanitizeExternalText(value: string): string {
@@ -307,15 +314,30 @@ function sanitizeExternalText(value: string): string {
     .trim();
 }
 
+const externalProgressLineCache = new Map<
+  string,
+  { expiresAt: number; lines: string[] }
+>();
+
 function externalProgressLines(baseCwd: string | undefined): string[] {
   if (!baseCwd) return [];
+  const cacheKey = `${process.env.HOME ?? ''}\0${baseCwd}`;
+  const now = Date.now();
+  const cached = externalProgressLineCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.lines;
   try {
     const selection = selectExternalProgress({ cwd: baseCwd });
-    return [
+    const lines = [
       ...selection.active.map(externalProgressLine),
       ...(selection.terminal ? [externalProgressLine(selection.terminal)] : []),
     ];
+    externalProgressLineCache.set(cacheKey, { expiresAt: now + 1_000, lines });
+    return lines;
   } catch {
+    externalProgressLineCache.set(cacheKey, {
+      expiresAt: now + 1_000,
+      lines: [],
+    });
     return [];
   }
 }

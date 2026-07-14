@@ -773,7 +773,7 @@ test('workflow widget appends selected external runs after unchanged Addy lines'
       [
         'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
         'Plan: \x1b[1mslice-01.md\x1b[22m',
-        'External workflow: df-implement-issues | [implementation] | issues 1/3 | Issue #3 | running | stale',
+        'Issue: 1/3 issues implementation | df-implement-issues | Issue #3 | running | stale',
       ],
     );
   } finally {
@@ -789,6 +789,7 @@ test('workflow widget preserves baseline lines for missing or corrupt external s
       text: '/addy-build docs/plans/slice-01.md',
     });
     const baseline = renderWorkflowWidget(state)().render();
+    const stateBefore = structuredClone(state);
     const runsDir = externalProgressRunsDir({
       cwd: fixture.cwd,
       homeDir: fixture.homeDir,
@@ -802,6 +803,13 @@ test('workflow widget preserves baseline lines for missing or corrupt external s
       ),
       baseline,
     );
+    assert.deepEqual(
+      withExternalProgressHome(fixture.homeDir, () =>
+        renderWorkflowWidget(state, join(fixture.cwd, 'missing'))().render(),
+      ),
+      baseline,
+    );
+    assert.deepEqual(state, stateBefore);
   } finally {
     fixture.cleanup();
   }
@@ -874,18 +882,21 @@ test('workflow widget orders external runs and bounds safe display text', () => 
     );
 
     assert.deepEqual(lines.slice(-3), [
-      'External workflow: implement-from-issues | boundary: pre-loop | issues 1/4 | Issue #2 | blocked | stale',
-      'External workflow: df-implement-issues | [implementation] | waves 2/3 | Wave 2 [2J review | running | stale',
-      'External workflow: df-implement-issues | boundary: post-loop | waves 3/3 | Wave 3 | completed',
+      'Issue: 1/4 issues pre-loop boundary | implement-from-issues | Issue #2 | blocked | stale',
+      'Issue: 2/3 waves implementation | df-implement-issues | Wave 2 [2J review | running | stale',
+      'Issue: 3/3 waves post-loop boundary | df-implement-issues | Wave 3 | completed',
     ]);
     assert.equal(lines.slice(-3).join('').includes('\x1b'), false);
+    const narrowLines = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(32),
+    );
     assert.equal(
-      withExternalProgressHome(fixture.homeDir, () =>
-        renderWorkflowWidget(state, fixture.cwd)()
-          .render(32)
-          .every((line) => visibleWidth(line) <= 32),
-      ),
+      narrowLines.every((line) => visibleWidth(line) <= 32),
       true,
+    );
+    assert.match(
+      narrowLines.find((line) => line.startsWith('Issue:')) ?? '',
+      /1\/4 issues pre-loop/,
     );
   } finally {
     fixture.cleanup();
