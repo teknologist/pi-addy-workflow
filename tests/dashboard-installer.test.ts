@@ -82,12 +82,17 @@ test('dashboard and progress shims install idempotently in one PATH directory', 
   ).href;
   const env = { PATH: '/usr/bin' } as NodeJS.ProcessEnv;
 
-  const dashboard = await ensureDashboardShim(extensionUrl, { binDir, env });
-  const progress = await ensureProgressShim(extensionUrl, { binDir, env });
+  const [dashboard, progress] = await Promise.all([
+    ensureDashboardShim(extensionUrl, { binDir, env }),
+    ensureProgressShim(extensionUrl, { binDir, env }),
+  ]);
   assert.equal(dashboard.changed, true);
   assert.equal(progress.changed, true);
-  assert.equal(dashboard.pathUpdated, true);
-  assert.equal(progress.pathUpdated, false);
+  assert.equal(Number(dashboard.pathUpdated) + Number(progress.pathUpdated), 1);
+  assert.equal(
+    env.PATH?.split(':').filter((entry) => entry === binDir).length,
+    1,
+  );
   assert.match(
     await readFile(dashboard.shimPath, 'utf8'),
     /addy-dashboard\.ts/,
@@ -102,6 +107,15 @@ test('dashboard and progress shims install idempotently in one PATH directory', 
   assert.equal(
     (await ensureProgressShim(extensionUrl, { binDir, env })).changed,
     false,
+  );
+
+  const concurrent = await Promise.all([
+    ensureProgressShim(extensionUrl, { binDir, env }),
+    ensureProgressShim(extensionUrl, { binDir, env }),
+  ]);
+  assert.deepEqual(
+    concurrent.map((result) => result.changed),
+    [false, false],
   );
 });
 
@@ -202,6 +216,56 @@ test('lifecycle readiness awaits both runtime shims', async () => {
       0,
     );
     assert.equal(process.env.PATH?.startsWith(`${binDir}:`), true);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  }
+});
+
+test('lifecycle waits for progress shim when dashboard installation fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'addy-partial-shims-'));
+  const binDir = join(root, '.pi', 'agent', 'bin');
+  await mkdir(binDir, { recursive: true });
+  await writeFile(join(binDir, 'addy-dashboard'), 'user dashboard\n');
+  const previousHome = process.env.HOME;
+  const previousPath = process.env.PATH;
+  process.env.HOME = root;
+  process.env.PATH = '/usr/bin';
+  try {
+    const notifications: string[] = [];
+    const handlers = new Map<
+      string,
+      (event: unknown, ctx: unknown) => unknown
+    >();
+    addyDashboardInstaller({
+      registerCommand: () => {},
+      on: (
+        name: string,
+        handler: (event: unknown, ctx: unknown) => unknown,
+      ) => {
+        handlers.set(name, handler);
+      },
+    } as never);
+    await handlers.get('resources_discover')?.(
+      {},
+      {
+        ui: { notify: (message: string) => notifications.push(message) },
+      },
+    );
+    assert.notEqual(
+      (await stat(join(binDir, 'addy-progress'))).mode & 0o111,
+      0,
+    );
+    assert.equal(
+      await readFile(join(binDir, 'addy-dashboard'), 'utf8'),
+      'user dashboard\n',
+    );
+    assert.equal(
+      notifications.some((message) => /non-generated/.test(message)),
+      true,
+    );
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;

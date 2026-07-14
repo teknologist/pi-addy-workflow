@@ -77,7 +77,37 @@ async function isExecutable(path: string): Promise<boolean> {
   }
 }
 
-async function ensureShim(
+const shimInstallations = new Map<string, Promise<DashboardShimResult>>();
+
+function ensureShim(
+  command: string,
+  notice: string,
+  content: string,
+  options: { binDir?: string; env?: NodeJS.ProcessEnv },
+): Promise<DashboardShimResult> {
+  const key = join(
+    resolve(options.binDir ?? defaultDashboardBinDir()),
+    command,
+  );
+  const previous = shimInstallations.get(key);
+  const installation = (previous ?? Promise.resolve(undefined))
+    .catch(() => undefined)
+    .then(() => installShim(command, notice, content, options));
+  shimInstallations.set(key, installation);
+  void installation.then(
+    () => {
+      if (shimInstallations.get(key) === installation)
+        shimInstallations.delete(key);
+    },
+    () => {
+      if (shimInstallations.get(key) === installation)
+        shimInstallations.delete(key);
+    },
+  );
+  return installation;
+}
+
+async function installShim(
   command: string,
   notice: string,
   content: string,
@@ -92,10 +122,12 @@ async function ensureShim(
     throw new Error('runtime shim bin directory is not a regular directory');
 
   let previousContent: string | undefined;
+  let previousIdentity: { dev: number; ino: number } | undefined;
   try {
     const entry = await lstat(shimPath);
     if (entry.isSymbolicLink() || !entry.isFile())
       throw new Error(`${command} shim path is not a regular file`);
+    previousIdentity = { dev: entry.dev, ino: entry.ino };
     previousContent = await readFile(shimPath, 'utf8');
     const generated = previousContent.split('\n')[1] === notice;
     if (previousContent !== content && !generated)
@@ -104,7 +136,6 @@ async function ensureShim(
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
-  const pathUpdated = !pathIncludes(binDir, env.PATH);
   const executable =
     previousContent === content && (await isExecutable(shimPath));
   let changed = false;
@@ -136,6 +167,16 @@ async function ensureShim(
             throw new Error(`concurrent ${command} shim install conflicted`);
         }
       } else {
+        const current = await lstat(shimPath);
+        const currentContent = await readFile(shimPath, 'utf8');
+        if (
+          current.isSymbolicLink() ||
+          !current.isFile() ||
+          current.dev !== previousIdentity?.dev ||
+          current.ino !== previousIdentity?.ino ||
+          currentContent.split('\n')[1] !== notice
+        )
+          throw new Error(`${command} shim changed during installation`);
         await rename(temporaryPath, shimPath);
         changed = true;
       }
@@ -144,6 +185,7 @@ async function ensureShim(
     }
   }
 
+  const pathUpdated = !pathIncludes(binDir, env.PATH);
   if (pathUpdated) env.PATH = `${binDir}${delimiter}${env.PATH ?? ''}`;
   return { shimPath, binDir, changed, pathUpdated };
 }

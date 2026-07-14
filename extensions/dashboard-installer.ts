@@ -24,21 +24,24 @@ function commandArgs(event: CommandEvent): string[] {
 
 async function installDashboardShim(ctx: UiContext): Promise<void> {
   ctx.ui?.setStatus?.('addy-dashboard', 'Dashboard: addy-dashboard');
-  await Promise.all([
+  const results = await Promise.allSettled([
     ensureDashboardShim(import.meta.url),
     ensureProgressShim(import.meta.url),
-  ])
-    .then(([dashboard]) => {
-      if (dashboard.changed)
-        ctx.ui?.notify?.(dashboardShimUsage(dashboard), 'info');
-    })
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui?.notify?.(
-        `pi-addy-workflow runtime shim install failed: ${message}`,
-        'warning',
-      );
-    });
+  ]);
+  const dashboard = results[0];
+  if (dashboard.status === 'fulfilled' && dashboard.value.changed)
+    ctx.ui?.notify?.(dashboardShimUsage(dashboard.value), 'info');
+  for (const result of results) {
+    if (result.status !== 'rejected') continue;
+    const message =
+      result.reason instanceof Error
+        ? result.reason.message
+        : String(result.reason);
+    ctx.ui?.notify?.(
+      `pi-addy-workflow runtime shim install failed: ${message}`,
+      'warning',
+    );
+  }
 }
 
 export default function addyDashboardInstaller(pi: ExtensionAPI) {
