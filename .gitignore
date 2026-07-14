@@ -4,3 +4,19 @@ node_modules/
 /.lean-ctx
 
 graphify-out/
+/.codesight
+/.codesight/CODESIGHT.md
+/.codesight/config.md
+/.codesight/coverage.md
+/.codesight/githooks.md
+/.codesight/graph.md
+/.codesight/libs.md
+/.codesight/middleware.md
+/.codesight/routes.md
+/.codesight/wiki
+/.codesight/wiki/dashboard-server.md
+/.codesight/wiki/index.md
+/.codesight/wiki/libraries.md
+/.codesight/wiki/log.md
+/.codesight/wiki/overview.md
+node_modules
