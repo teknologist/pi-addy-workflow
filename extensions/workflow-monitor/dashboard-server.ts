@@ -598,7 +598,7 @@ export function dashboardSnapshot(
   };
 }
 
-function dashboardHtml(): string {
+export function dashboardHtml(): string {
   return String.raw`<!doctype html>
 <html lang="en">
 <head>

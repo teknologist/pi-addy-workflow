@@ -10,7 +10,9 @@ import {
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import {
+  dashboardHtml,
   dashboardSnapshot,
   type DashboardSnapshot,
 } from '../extensions/workflow-monitor/dashboard-server.ts';
@@ -268,6 +270,81 @@ test('dashboard projects issue workflows without changing empty dashboard data',
     assert.match(html, /escapeHtml\(run\.currentItem\)/);
     assert.match(html, /externalProgressWarning/);
     assert.match(html, /const refreshIntervalMs = 5000/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('dashboard client escapes issue workflow text and renders partial counters', () => {
+  const html = dashboardHtml();
+  const script =
+    [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)?.[1] ?? '';
+  const start = script.indexOf('function value(');
+  const end = script.indexOf('function renderIssueWorkflows');
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const helpers = script.slice(start, end);
+
+  const completedOnly = runInNewContext(`${helpers}; issueWorkflow(run);`, {
+    run: {
+      source: '<img src=x>',
+      status: 'running',
+      loopPhase: 'implementation',
+      progressUnit: 'issues',
+      currentItem: '<script>alert(1)</script>',
+      completed: 3,
+      stale: false,
+    },
+  }) as string;
+  assert.match(completedOnly, /3 completed issues/);
+  assert.match(completedOnly, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(completedOnly, /&lt;img src=x&gt;/);
+  assert.doesNotMatch(completedOnly, /<script>|<img/);
+
+  const totalOnly = runInNewContext(`${helpers}; issueWorkflow(run);`, {
+    run: {
+      source: 'df-implement-issues',
+      status: 'blocked',
+      loopPhase: 'queue',
+      total: 8,
+      stale: false,
+    },
+  }) as string;
+  assert.match(totalOnly, /8 total/);
+});
+
+test('dashboard external progress cache hits then expires', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-cache-'));
+  const stateDir = join(cwd, 'state');
+  const homeDir = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-cache-home-'));
+  try {
+    writeFileSync(join(cwd, 'README.md'), 'fixture\n', 'utf8');
+    execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
+    const options = {
+      cwd,
+      stateDir,
+      externalProgressHomeDir: homeDir,
+      externalProgressCacheMs: 50,
+    };
+    assert.equal(dashboardSnapshot(options).externalRuns, undefined);
+    const now = new Date().toISOString();
+    writeExternalProgressSnapshot(
+      {
+        schemaVersion: 1,
+        projectKey: externalProgressProjectKey({ cwd }),
+        runId: '55555555-5555-4555-8555-555555555555',
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'queue',
+        startedAt: now,
+        updatedAt: now,
+      },
+      { homeDir },
+    );
+    assert.equal(dashboardSnapshot(options).externalRuns, undefined);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 75));
+    assert.equal(dashboardSnapshot(options).externalRuns?.length, 1);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });

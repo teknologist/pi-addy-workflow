@@ -118,6 +118,7 @@
   - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
 - `extensions/workflow-monitor/dashboard-server.ts`
   - function dashboardSnapshot: (options) => DashboardSnapshot
+  - function dashboardHtml: () => string
   - function startAddyDashboard: (options) => void
   - type DashboardSnapshot
 - `extensions/workflow-monitor/event-intake.ts`
