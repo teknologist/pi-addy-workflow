@@ -11,6 +11,8 @@ import {
   dashboardBinSource,
   dashboardShimUsage,
   ensureDashboardShim,
+  ensureProgressShim,
+  progressBinSource,
   launchDashboardCommand,
   planDashboardCommand,
 } from '../extensions/dashboard-installer/core.ts';
@@ -51,6 +53,50 @@ test('dashboard shim is written once, executable, and prepended to PATH', async 
   assert.equal(second.changed, false);
 });
 
+test('progress bin source resolves package bin path from extension URL', () => {
+  const packageRoot = join(tmpdir(), 'addy progress package');
+  const extensionUrl = pathToFileURL(
+    join(packageRoot, 'extensions', 'dashboard-installer.ts'),
+  ).href;
+
+  assert.equal(
+    progressBinSource(extensionUrl),
+    join(packageRoot, 'bin', 'addy-progress.ts'),
+  );
+});
+
+test('dashboard and progress shims install idempotently in one PATH directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'addy-runtime-shims-'));
+  const binDir = join(root, 'bin');
+  const packageRoot = join(root, 'package');
+  const extensionUrl = pathToFileURL(
+    join(packageRoot, 'extensions', 'dashboard-installer.ts'),
+  ).href;
+  const env = { PATH: '/usr/bin' } as NodeJS.ProcessEnv;
+
+  const dashboard = await ensureDashboardShim(extensionUrl, { binDir, env });
+  const progress = await ensureProgressShim(extensionUrl, { binDir, env });
+  assert.equal(dashboard.changed, true);
+  assert.equal(progress.changed, true);
+  assert.equal(dashboard.pathUpdated, true);
+  assert.equal(progress.pathUpdated, false);
+  assert.match(
+    await readFile(dashboard.shimPath, 'utf8'),
+    /addy-dashboard\.ts/,
+  );
+  assert.match(await readFile(progress.shimPath, 'utf8'), /addy-progress\.ts/);
+  assert.notEqual((await stat(progress.shimPath)).mode & 0o111, 0);
+
+  assert.equal(
+    (await ensureDashboardShim(extensionUrl, { binDir, env })).changed,
+    false,
+  );
+  assert.equal(
+    (await ensureProgressShim(extensionUrl, { binDir, env })).changed,
+    false,
+  );
+});
+
 test('dashboard shim executes directly', async () => {
   const root = await mkdtemp(join(tmpdir(), 'addy-dashboard-shim-exec-'));
   const binDir = join(root, 'bin');
@@ -67,6 +113,27 @@ test('dashboard shim executes directly', async () => {
   const { stdout } = await execFileAsync(result.shimPath, []);
 
   assert.equal(stdout.trim(), 'dashboard shim ok');
+});
+
+test('progress shim executes TypeScript directly', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'addy-progress-shim-exec-'));
+  const binDir = join(root, 'bin');
+  const packageRoot = join(root, 'package');
+  const sourcePath = join(packageRoot, 'bin', 'addy-progress.ts');
+  const extensionUrl = pathToFileURL(
+    join(packageRoot, 'extensions', 'dashboard-installer.ts'),
+  ).href;
+
+  await mkdir(join(packageRoot, 'bin'), { recursive: true });
+  await writeFile(
+    sourcePath,
+    'const message: string = `progress shim ok`; console.log(message);\n',
+    'utf8',
+  );
+
+  const result = await ensureProgressShim(extensionUrl, { binDir });
+  const { stdout } = await execFileAsync(result.shimPath, []);
+  assert.equal(stdout.trim(), 'progress shim ok');
 });
 
 test('dashboard shim usage tells users how to open the dashboard', () => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -88,6 +88,7 @@ function snapshot(overrides: Record<string, unknown> = {}) {
 const EXTERNAL_PROGRESS_MODULE_URL = pathToFileURL(
   join(process.cwd(), 'extensions', 'workflow-monitor', 'external-progress.ts'),
 ).href;
+const ADDY_PROGRESS_BIN = join(process.cwd(), 'bin', 'addy-progress.ts');
 
 function runChild(
   script: string,
@@ -131,6 +132,152 @@ function runChild(
     });
   });
 }
+
+test('addy-progress CLI starts, updates, and finishes through JSON stdin', () => {
+  const fixture = setup();
+  try {
+    const env = { ...process.env, HOME: fixture.homeDir };
+    const start = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'start',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+      ],
+      { encoding: 'utf8', env },
+    );
+    assert.equal(start.status, 0, start.stderr);
+    assert.match(start.stdout, /^[0-9a-f-]{36}\n$/);
+    assert.equal(start.stderr, '');
+    const runId = start.stdout.trim();
+
+    const update = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'update',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+        '--run',
+        runId,
+        '--stdin',
+      ],
+      {
+        encoding: 'utf8',
+        env,
+        input: JSON.stringify({
+          loopPhase: 'queue',
+          progressUnit: 'issues',
+          currentItem: 'Issue one',
+          completed: 0,
+          total: 1,
+        }),
+      },
+    );
+    assert.equal(update.status, 0, update.stderr);
+    assert.equal(update.stdout, '');
+
+    const finish = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'finish',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+        '--run',
+        runId,
+        '--stdin',
+      ],
+      {
+        encoding: 'utf8',
+        env,
+        input: JSON.stringify({ status: 'completed', completed: 1 }),
+      },
+    );
+    assert.equal(finish.status, 0, finish.stderr);
+    assert.equal(finish.stdout, '');
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots[0]?.status,
+      'completed',
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('addy-progress CLI rejects invalid commands and stdin concisely', () => {
+  const fixture = setup();
+  try {
+    const env = { ...process.env, HOME: fixture.homeDir };
+    const invalid = spawnSync(
+      process.execPath,
+      ['--experimental-strip-types', ADDY_PROGRESS_BIN, 'unknown'],
+      { encoding: 'utf8', env },
+    );
+    assert.notEqual(invalid.status, 0);
+    assert.match(invalid.stderr, /^addy-progress: unknown command:/);
+    assert.equal(invalid.stderr.trim().split('\n').length, 1);
+
+    const malformed = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'update',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+        '--run',
+        '11111111-1111-4111-8111-111111111111',
+        '--stdin',
+      ],
+      { encoding: 'utf8', env, input: '{' },
+    );
+    assert.notEqual(malformed.status, 0);
+    assert.equal(
+      malformed.stderr,
+      'addy-progress: stdin must contain valid JSON\n',
+    );
+
+    const oversized = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'update',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+        '--run',
+        '11111111-1111-4111-8111-111111111111',
+        '--stdin',
+      ],
+      { encoding: 'utf8', env, input: 'x'.repeat(16 * 1024 + 1) },
+    );
+    assert.notEqual(oversized.status, 0);
+    assert.equal(
+      oversized.stderr,
+      'addy-progress: stdin payload is too large\n',
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
 
 test('strictly parses schema-v1 snapshots and rejects invalid or unknown fields', () => {
   assert.deepEqual(

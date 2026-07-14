@@ -25,7 +25,8 @@
     "node": ">=22.6.0"
   },
   "bin": {
-    "addy-dashboard": "bin/addy-dashboard.ts"
+    "addy-dashboard": "bin/addy-dashboard.ts",
+    "addy-progress": "bin/addy-progress.ts"
   },
   "scripts": {
     "format": "prettier --write .",

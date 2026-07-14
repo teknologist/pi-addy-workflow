@@ -69,6 +69,10 @@ test('package manifest exposes Pi resources but not native agents', async () => 
   assert.equal(manifest.pi.agents, undefined);
   assert.ok(manifest.files.includes('agents/'));
   assert.ok(manifest.files.includes('docs/'));
+  assert.deepEqual(manifest.bin, {
+    'addy-dashboard': 'bin/addy-dashboard.ts',
+    'addy-progress': 'bin/addy-progress.ts',
+  });
 });
 
 test('all Addy prompts exist and workflow commands are not prompt files', async () => {
