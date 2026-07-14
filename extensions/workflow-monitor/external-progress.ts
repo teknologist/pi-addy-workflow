@@ -2,14 +2,15 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
+  fstatSync,
   linkSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -18,7 +19,6 @@ import { projectWorkflowStateKey } from './workflow-state-store-scope.ts';
 
 const SCHEMA_VERSION = 1;
 const STALE_AFTER_MS = 30 * 60 * 1000;
-const LOCK_STALE_AFTER_MS = 30_000;
 const MAX_SNAPSHOT_BYTES = 64 * 1024;
 const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const TERMINAL_STATUSES = new Set<ExternalProgressTerminalStatus>([
@@ -479,9 +479,7 @@ export function retainTerminalExternalProgress(
         const file = join(runsDir, `${snapshot.runId}.json`);
         try {
           withFileLock(runLockPath(file, snapshot.runId), () => {
-            const current = parseIssueImplementationProgressSnapshot(
-              JSON.parse(readFileSync(file, 'utf8')),
-            );
+            const current = readSnapshotFile(file);
             if (
               current.projectKey === projectKey &&
               current.runId === snapshot.runId &&
@@ -524,11 +522,7 @@ function readProjectByKey(
   for (const name of names) {
     const file = join(runsDir, name);
     try {
-      if (statSync(file).size > MAX_SNAPSHOT_BYTES)
-        throw new Error('Snapshot exceeds the size limit');
-      const parsed = parseIssueImplementationProgressSnapshot(
-        JSON.parse(readFileSync(file, 'utf8')),
-      );
+      const parsed = readSnapshotFile(file);
       if (
         parsed.projectKey !== projectKey ||
         basename(file) !== `${parsed.runId}.json`
@@ -564,9 +558,7 @@ function locateRun(
   for (const projectKey of projectKeys) {
     const file = join(runsDirForKey(projectKey, options), `${runId}.json`);
     try {
-      const snapshot = parseIssueImplementationProgressSnapshot(
-        JSON.parse(readFileSync(file, 'utf8')),
-      );
+      const snapshot = readSnapshotFile(file);
       if (
         snapshot.projectKey !== projectKey ||
         snapshot.runId !== runId ||
@@ -672,13 +664,33 @@ function validatePatch(
 }
 
 function ensureRunsDir(projectKey: string, options: StorageOptions): string {
+  const root = externalProgressRoot(options);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
   const runsDir = runsDirForKey(projectKey, options);
   mkdirSync(runsDir, { recursive: true, mode: 0o700 });
+  const expected = join(realpathSync(root), 'projects', projectKey, 'runs');
+  if (realpathSync(runsDir) !== expected)
+    throw new Error('External progress storage escapes its configured root');
   return runsDir;
 }
 
 function runsDirForKey(projectKey: string, options: StorageOptions): string {
+  if (!PROJECT_KEY_PATTERN.test(projectKey))
+    throw new Error('Invalid project key');
   return join(externalProgressRoot(options), 'projects', projectKey, 'runs');
+}
+
+function readSnapshotFile(file: string): IssueImplementationProgressSnapshot {
+  const descriptor = openSync(file, 'r');
+  try {
+    if (fstatSync(descriptor).size > MAX_SNAPSHOT_BYTES)
+      throw new Error('Snapshot exceeds the size limit');
+    return parseIssueImplementationProgressSnapshot(
+      JSON.parse(readFileSync(descriptor, 'utf8')),
+    );
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function persistSnapshot(
@@ -714,11 +726,16 @@ function runLockPath(file: string, runId: string): string {
 }
 
 function withFileLock<T>(lockPath: string, operation: () => T): T {
-  ensureRunsDirForLock(dirname(lockPath));
   const token = randomUUID();
   const deadline = Date.now() + 5_000;
   let descriptor: number | undefined;
   while (descriptor === undefined) {
+    if (hasReclaimMarker(lockPath)) {
+      if (Date.now() >= deadline)
+        throw new Error('Could not acquire external progress lock');
+      Atomics.wait(SLEEP_BUFFER, 0, 0, 10);
+      continue;
+    }
     try {
       descriptor = openSync(lockPath, 'wx', 0o600);
       writeFileSync(
@@ -726,11 +743,17 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
         JSON.stringify({ pid: process.pid, token, createdAt: Date.now() }),
         'utf8',
       );
+      if (hasReclaimMarker(lockPath)) {
+        closeSync(descriptor);
+        descriptor = undefined;
+        releaseOwnedLock(lockPath, token);
+        Atomics.wait(SLEEP_BUFFER, 0, 0, 10);
+      }
     } catch (error) {
       if (descriptor !== undefined) {
         closeSync(descriptor);
         descriptor = undefined;
-        rmSync(lockPath, { force: true });
+        releaseOwnedLock(lockPath, token);
       }
       if (
         !isAlreadyExistsError(error) ||
@@ -749,32 +772,46 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
   }
 }
 
-function ensureRunsDirForLock(directory: string): void {
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-}
-
 function reclaimAbandonedLock(lockPath: string): boolean {
+  let observedToken: string | undefined;
   try {
     const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
       pid?: unknown;
-      createdAt?: unknown;
+      token?: unknown;
     };
-    const age = Date.now() - statSync(lockPath).mtimeMs;
     const pid = typeof owner.pid === 'number' ? owner.pid : undefined;
-    const abandoned = pid === undefined || !isProcessAlive(pid);
-    if (!abandoned && age <= LOCK_STALE_AFTER_MS) return false;
-    rmSync(lockPath, { force: true });
-    return true;
+    if (pid !== undefined && isProcessAlive(pid)) return false;
+    observedToken = typeof owner.token === 'string' ? owner.token : undefined;
   } catch (error) {
     if (isMissingFileError(error)) return true;
-    try {
-      if (Date.now() - statSync(lockPath).mtimeMs <= LOCK_STALE_AFTER_MS)
-        return false;
-      rmSync(lockPath, { force: true });
-      return true;
-    } catch {
-      return true;
+  }
+
+  const quarantine = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
+  try {
+    renameSync(lockPath, quarantine);
+    const moved = JSON.parse(readFileSync(quarantine, 'utf8')) as {
+      token?: unknown;
+    };
+    if (observedToken !== undefined && moved.token !== observedToken) {
+      renameSync(quarantine, lockPath);
+      return false;
     }
+    rmSync(quarantine, { force: true });
+    return true;
+  } catch (error) {
+    rmSync(quarantine, { force: true });
+    return isMissingFileError(error);
+  }
+}
+
+function hasReclaimMarker(lockPath: string): boolean {
+  const prefix = `${basename(lockPath)}.reclaim-`;
+  try {
+    return readdirSync(dirname(lockPath)).some((name) =>
+      name.startsWith(prefix),
+    );
+  } catch {
+    return false;
   }
 }
 

@@ -3,9 +3,12 @@ import { execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   rmSync,
+  symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,6 +17,7 @@ import test from 'node:test';
 import { pathToFileURL } from 'node:url';
 import {
   externalProgressProjectKey,
+  externalProgressRoot,
   externalProgressRunsDir,
   finishExternalProgress,
   isExternalProgressStale,
@@ -86,6 +90,7 @@ const EXTERNAL_PROGRESS_MODULE_URL = pathToFileURL(
 function runChild(
   script: string,
   args: string[],
+  killAfterMs?: number,
 ): Promise<{
   code: number | null;
   stdout: string;
@@ -113,8 +118,15 @@ function runChild(
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
+    const timer =
+      killAfterMs === undefined
+        ? undefined
+        : setTimeout(() => child.kill('SIGTERM'), killAfterMs);
     child.on('error', reject);
-    child.on('close', (code) => resolvePromise({ code, stdout, stderr }));
+    child.on('close', (code) => {
+      if (timer !== undefined) clearTimeout(timer);
+      resolvePromise({ code, stdout, stderr });
+    });
   });
 }
 
@@ -409,7 +421,7 @@ test('separate processes serialize concurrent starts to one active run', async (
   }
 });
 
-test('reclaims an abandoned start lock without creating duplicate active runs', () => {
+test('competing processes safely reclaim an abandoned start lock', async () => {
   const fixture = setup();
   try {
     const first = startExternalProgress({
@@ -424,6 +436,57 @@ test('reclaims an abandoned start lock without creating duplicate active runs', 
       status: 'completed',
       now: new Date(TIME.getTime() + 1),
     });
+    const runsDir = externalProgressRunsDir({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    });
+    const lockPath = join(runsDir, '.start.lock');
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: Number.MAX_SAFE_INTEGER,
+        token: 'abandoned',
+        createdAt: Date.now(),
+      }),
+    );
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      const run = startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'df-implement-issues',
+      });
+      process.stdout.write(run.runId);
+    `;
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        runChild(script, [fixture.cwd, fixture.homeDir]),
+      ),
+    );
+    assert.equal(
+      results.every((result) => result.code === 0),
+      true,
+    );
+    assert.equal(new Set(results.map((result) => result.stdout)).size, 1);
+    assert.equal(existsSync(lockPath), false);
+    assert.equal(
+      readdirSync(runsDir).some((name) => name.includes('.reclaim-')),
+      false,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('never steals an old lock owned by a live process', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
     const lockPath = join(
       externalProgressRunsDir({
         cwd: fixture.cwd,
@@ -434,18 +497,30 @@ test('reclaims an abandoned start lock without creating duplicate active runs', 
     writeFileSync(
       lockPath,
       JSON.stringify({
-        pid: Number.MAX_SAFE_INTEGER,
-        token: 'abandoned',
-        createdAt: Date.now(),
+        pid: process.pid,
+        token: 'live-owner',
+        createdAt: 0,
       }),
     );
-    const second = startExternalProgress({
-      cwd: fixture.cwd,
-      homeDir: fixture.homeDir,
-      source: 'df-implement-issues',
-    });
-    assert.notEqual(second.runId, first.runId);
-    assert.equal(existsSync(lockPath), false);
+    utimesSync(lockPath, new Date(0), new Date(0));
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir], 250);
+    assert.notEqual(result.code, 0);
+    assert.equal(existsSync(lockPath), true);
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots.some((entry) => entry.source === 'implement-from-issues'),
+      false,
+    );
   } finally {
     fixture.cleanup();
   }
@@ -483,6 +558,79 @@ test('raw snapshot creation cannot overwrite an immutable terminal run', () => {
         homeDir: fixture.homeDir,
       }).snapshots[0]?.status,
       'completed',
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('rejects traversal keys and symlinked storage outside the configured root', () => {
+  const fixture = setup();
+  try {
+    assert.throws(() =>
+      retainTerminalExternalProgress({
+        homeDir: fixture.homeDir,
+        projectKey: '../../escape',
+      }),
+    );
+    assert.equal(existsSync(join(fixture.homeDir, 'escape')), false);
+
+    const projectKey = externalProgressProjectKey({ cwd: fixture.cwd });
+    const projectsDir = join(
+      externalProgressRoot({ homeDir: fixture.homeDir }),
+      'projects',
+    );
+    const outside = join(fixture.homeDir, 'outside-storage');
+    mkdirSync(projectsDir, { recursive: true });
+    mkdirSync(outside);
+    symlinkSync(outside, join(projectsDir, projectKey));
+    assert.throws(
+      () =>
+        startExternalProgress({
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+          source: 'df-implement-issues',
+        }),
+      /escapes its configured root/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('bounded mutation reads reject oversized snapshot files', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const file = join(
+      externalProgressRunsDir({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }),
+      `${run.runId}.json`,
+    );
+    writeFileSync(file, ' '.repeat(64 * 1024 + 1));
+    assert.throws(
+      () =>
+        updateExternalProgress({
+          runId: run.runId,
+          cwd: fixture.cwd,
+          source: run.source,
+          homeDir: fixture.homeDir,
+          patch: { currentItem: 'must not read unbounded input' },
+        }),
+      /Cannot read external progress run/,
+    );
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).diagnostics[0]?.message,
+      'Snapshot exceeds the size limit',
     );
   } finally {
     fixture.cleanup();
