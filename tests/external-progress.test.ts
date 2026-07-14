@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -446,7 +447,7 @@ test('competing processes safely reclaim an abandoned start lock', async () => {
       lockPath,
       JSON.stringify({
         pid: Number.MAX_SAFE_INTEGER,
-        token: 'abandoned',
+        token: '11111111-1111-4111-8111-111111111111',
         createdAt: Date.now(),
       }),
     );
@@ -503,7 +504,7 @@ test('never steals an old lock owned by a live process', async () => {
       lockPath,
       JSON.stringify({
         pid: process.pid,
-        token: 'live-owner',
+        token: '11111111-1111-4111-8111-111111111111',
         createdAt: 0,
       }),
     );
@@ -526,6 +527,90 @@ test('never steals an old lock owned by a live process', async () => {
       }).snapshots.some((entry) => entry.source === 'implement-from-issues'),
       false,
     );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('restores a live owner quarantined by a dead reclaimer', async () => {
+  const fixture = setup();
+  try {
+    const first = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    finishExternalProgress({
+      runId: first.runId,
+      homeDir: fixture.homeDir,
+      status: 'completed',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }),
+      '.start.lock',
+    );
+    const owner = JSON.stringify({
+      pid: process.pid,
+      token: '11111111-1111-4111-8111-111111111111',
+      createdAt: Date.now(),
+    });
+    const marker = `${lockPath}.reclaim-${Number.MAX_SAFE_INTEGER}-dead`;
+    writeFileSync(marker, owner);
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir]);
+    assert.notEqual(result.code, 0);
+    assert.equal(existsSync(marker), false);
+    assert.equal(readFileSync(lockPath, 'utf8'), owner);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('reclaims stale valid JSON with an invalid PID', () => {
+  const fixture = setup();
+  try {
+    const first = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    finishExternalProgress({
+      runId: first.runId,
+      homeDir: fixture.homeDir,
+      status: 'completed',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }),
+      '.start.lock',
+    );
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: 0,
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }),
+    );
+    utimesSync(lockPath, new Date(0), new Date(0));
+    const next = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    assert.notEqual(next.runId, first.runId);
   } finally {
     fixture.cleanup();
   }

@@ -731,7 +731,16 @@ function safeStorageDirectory(
     } catch (error) {
       if (!isMissingFileError(error)) throw error;
       if (!create) return join(current, ...segments.slice(index));
-      mkdirSync(next, { mode: 0o700 });
+      try {
+        mkdirSync(next, { mode: 0o700 });
+      } catch (createError) {
+        if (!isAlreadyExistsError(createError)) throw createError;
+        const concurrentEntry = lstatSync(next);
+        if (concurrentEntry.isSymbolicLink() || !concurrentEntry.isDirectory())
+          throw new Error(
+            'External progress storage escapes its configured root',
+          );
+      }
     }
     current = next;
   }
@@ -870,23 +879,40 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
   }
 }
 
+type LockOwner = { pid: number; token: string; createdAt: number };
+
+function parseLockOwner(contents: string): LockOwner | undefined {
+  try {
+    const owner = JSON.parse(contents) as Record<string, unknown>;
+    if (
+      !Number.isSafeInteger(owner.pid) ||
+      (owner.pid as number) <= 0 ||
+      typeof owner.token !== 'string' ||
+      !UUID_PATTERN.test(owner.token) ||
+      !Number.isSafeInteger(owner.createdAt) ||
+      (owner.createdAt as number) < 0
+    )
+      return undefined;
+    return owner as LockOwner;
+  } catch {
+    return undefined;
+  }
+}
+
 function reclaimAbandonedLock(lockPath: string): boolean {
   if (hasReclaimMarker(lockPath)) return false;
   let observed: BoundedFile;
-  let observedOwner: { pid?: unknown; token?: unknown } | undefined;
+  let observedOwner: LockOwner | undefined;
   try {
     observed = readBoundedRegularFile(lockPath, MAX_LOCK_BYTES);
-    try {
-      observedOwner = JSON.parse(observed.contents) as {
-        pid?: unknown;
-        token?: unknown;
-      };
-    } catch {
-      if (Date.now() - observed.mtimeMs <= LOCK_STALE_AFTER_MS) return false;
-    }
-    const pid =
-      typeof observedOwner?.pid === 'number' ? observedOwner.pid : undefined;
-    if (pid !== undefined && isProcessAlive(pid)) return false;
+    observedOwner = parseLockOwner(observed.contents);
+    if (
+      observedOwner === undefined &&
+      Date.now() - observed.mtimeMs <= LOCK_STALE_AFTER_MS
+    )
+      return false;
+    if (observedOwner !== undefined && isProcessAlive(observedOwner.pid))
+      return false;
   } catch (error) {
     if (isMissingFileError(error)) return true;
     try {
@@ -912,18 +938,8 @@ function reclaimAbandonedLock(lockPath: string): boolean {
   try {
     renameSync(lockPath, quarantine);
     const moved = readBoundedRegularFile(quarantine, MAX_LOCK_BYTES);
-    const observedToken =
-      typeof observedOwner?.token === 'string'
-        ? observedOwner.token
-        : undefined;
-    let movedToken: string | undefined;
-    try {
-      const movedOwner = JSON.parse(moved.contents) as { token?: unknown };
-      movedToken =
-        typeof movedOwner.token === 'string' ? movedOwner.token : undefined;
-    } catch {
-      // Generation comparison below still fences malformed lock files.
-    }
+    const observedToken = observedOwner?.token;
+    const movedToken = parseLockOwner(moved.contents)?.token;
     if (
       !sameGeneration(observed, moved) ||
       (observedToken !== undefined && movedToken !== observedToken)
@@ -946,9 +962,28 @@ function hasReclaimMarker(lockPath: string): boolean {
       if (!name.startsWith(prefix)) continue;
       const markerPath = join(dirname(lockPath), name);
       const pidText = name.slice(prefix.length).split('-', 1)[0];
-      const pid = Number(pidText);
-      if (Number.isSafeInteger(pid) && pid > 0 && isProcessAlive(pid))
+      const reclaimerPid = Number(pidText);
+      if (
+        Number.isSafeInteger(reclaimerPid) &&
+        reclaimerPid > 0 &&
+        isProcessAlive(reclaimerPid)
+      )
         return true;
+      try {
+        const quarantined = readBoundedRegularFile(markerPath, MAX_LOCK_BYTES);
+        const owner = parseLockOwner(quarantined.contents);
+        if (owner !== undefined && isProcessAlive(owner.pid)) {
+          try {
+            linkSync(markerPath, lockPath);
+            rmSync(markerPath, { force: true });
+          } catch (error) {
+            if (!isAlreadyExistsError(error)) throw error;
+          }
+          return true;
+        }
+      } catch {
+        // Invalid dead-reclaimer markers are safe to remove.
+      }
       rmSync(markerPath, { force: true });
     }
     return false;
@@ -972,10 +1007,10 @@ function isProcessAlive(pid: number): boolean {
 
 function lockTokenMatches(lockPath: string, token: string): boolean {
   try {
-    const owner = JSON.parse(
+    const owner = parseLockOwner(
       readBoundedRegularFile(lockPath, MAX_LOCK_BYTES).contents,
-    ) as { token?: unknown };
-    return owner.token === token;
+    );
+    return owner?.token === token;
   } catch {
     return false;
   }
