@@ -184,6 +184,25 @@ test('addy-progress CLI starts, updates, and finishes through JSON stdin', () =>
     assert.equal(update.status, 0, update.stderr);
     assert.equal(update.stdout, '');
 
+    const wrongOwner = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'update',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'implement-from-issues',
+        '--run',
+        runId,
+        '--stdin',
+      ],
+      { encoding: 'utf8', env, input: '{}' },
+    );
+    assert.notEqual(wrongOwner.status, 0);
+    assert.match(wrongOwner.stderr, /Cannot read external progress run/);
+
     const finish = spawnSync(
       process.execPath,
       [
@@ -206,6 +225,28 @@ test('addy-progress CLI starts, updates, and finishes through JSON stdin', () =>
     );
     assert.equal(finish.status, 0, finish.stderr);
     assert.equal(finish.stdout, '');
+    const repeatedFinish = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'finish',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+        '--run',
+        runId,
+        '--stdin',
+      ],
+      {
+        encoding: 'utf8',
+        env,
+        input: JSON.stringify({ status: 'completed' }),
+      },
+    );
+    assert.notEqual(repeatedFinish.status, 0);
+    assert.match(repeatedFinish.stderr, /immutable/);
     assert.equal(
       readExternalProgressProject({
         cwd: fixture.cwd,
@@ -230,6 +271,24 @@ test('addy-progress CLI rejects invalid commands and stdin concisely', () => {
     assert.notEqual(invalid.status, 0);
     assert.match(invalid.stderr, /^addy-progress: unknown command:/);
     assert.equal(invalid.stderr.trim().split('\n').length, 1);
+
+    const duplicate = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'start',
+        '--cwd',
+        fixture.cwd,
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+      ],
+      { encoding: 'utf8', env },
+    );
+    assert.notEqual(duplicate.status, 0);
+    assert.match(duplicate.stderr, /duplicate option: --cwd/);
 
     const malformed = spawnSync(
       process.execPath,

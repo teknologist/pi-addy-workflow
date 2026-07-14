@@ -1,12 +1,17 @@
-#!/usr/bin/env -S node --experimental-strip-types
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning --experimental-strip-types
 import { readSync } from 'node:fs';
 import {
   finishExternalProgress,
   startExternalProgress,
   updateExternalProgress,
-  type ExternalProgressSource,
-  type ExternalProgressPatch,
 } from '../extensions/workflow-monitor/external-progress.ts';
+
+type ExternalProgressSource = Parameters<
+  typeof startExternalProgress
+>[0]['source'];
+type ExternalProgressPatch = Parameters<
+  typeof updateExternalProgress
+>[0]['patch'];
 
 const USAGE = `Usage:
   addy-progress start --cwd PATH --source SOURCE
@@ -32,8 +37,11 @@ function parseArgs(args: string[]): {
     runId?: string;
     stdin: boolean;
   } = { command, stdin: false };
+  const seen = new Set<string>();
   for (let index = 1; index < args.length; index += 1) {
     const arg = args[index];
+    if (seen.has(arg)) throw new Error(`duplicate option: ${arg}`);
+    seen.add(arg);
     if (arg === '--stdin') {
       result.stdin = true;
       continue;

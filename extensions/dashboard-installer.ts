@@ -22,10 +22,9 @@ function commandArgs(event: CommandEvent): string[] {
   return event.args ?? event.input?.split(/\s+/).filter(Boolean) ?? [];
 }
 
-function installDashboardShim(ctx: UiContext): void {
+async function installDashboardShim(ctx: UiContext): Promise<void> {
   ctx.ui?.setStatus?.('addy-dashboard', 'Dashboard: addy-dashboard');
-  // Fire-and-forget: installing the shim must never delay Pi startup.
-  void Promise.all([
+  await Promise.all([
     ensureDashboardShim(import.meta.url),
     ensureProgressShim(import.meta.url),
   ])
@@ -59,10 +58,10 @@ export default function addyDashboardInstaller(pi: ExtensionAPI) {
   });
 
   pi.on('session_start', async (_event: unknown, ctx: UiContext) => {
-    installDashboardShim(ctx);
+    await installDashboardShim(ctx);
   });
   pi.on('resources_discover', async (_event: unknown, ctx: UiContext) => {
-    installDashboardShim(ctx);
+    await installDashboardShim(ctx);
     return {};
   });
 }

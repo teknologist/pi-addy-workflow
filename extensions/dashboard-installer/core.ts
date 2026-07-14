@@ -1,5 +1,16 @@
 import { constants } from 'node:fs';
-import { access, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import {
+  access,
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,8 +52,12 @@ function pathIncludes(
   return pathValue.split(delimiter).some((entry) => resolve(entry) === dir);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 function executableShimContent(notice: string, sourcePath: string): string {
-  return `#!/bin/sh\n${notice}\nexec node --experimental-strip-types ${JSON.stringify(sourcePath)} "$@"\n`;
+  return `#!/bin/sh\n${notice}\nexec ${shellQuote(process.execPath)} --disable-warning=ExperimentalWarning --experimental-strip-types ${shellQuote(sourcePath)} "$@"\n`;
 }
 
 export function dashboardShimContent(sourcePath: string): string {
@@ -64,30 +79,73 @@ async function isExecutable(path: string): Promise<boolean> {
 
 async function ensureShim(
   command: string,
+  notice: string,
   content: string,
   options: { binDir?: string; env?: NodeJS.ProcessEnv },
 ): Promise<DashboardShimResult> {
   const env = options.env ?? process.env;
   const binDir = resolve(options.binDir ?? defaultDashboardBinDir());
   const shimPath = join(binDir, command);
-  const pathUpdated = !pathIncludes(binDir, env.PATH);
-  if (pathUpdated) env.PATH = `${binDir}${delimiter}${env.PATH ?? ''}`;
+  await mkdir(dirname(shimPath), { recursive: true });
+  const binEntry = await lstat(binDir);
+  if (binEntry.isSymbolicLink() || !binEntry.isDirectory())
+    throw new Error('runtime shim bin directory is not a regular directory');
 
   let previousContent: string | undefined;
   try {
+    const entry = await lstat(shimPath);
+    if (entry.isSymbolicLink() || !entry.isFile())
+      throw new Error(`${command} shim path is not a regular file`);
     previousContent = await readFile(shimPath, 'utf8');
-  } catch {
-    previousContent = undefined;
+    const generated = previousContent.split('\n')[1] === notice;
+    if (previousContent !== content && !generated)
+      throw new Error(`refusing to replace non-generated ${command}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
+  const pathUpdated = !pathIncludes(binDir, env.PATH);
   const executable =
     previousContent === content && (await isExecutable(shimPath));
-  if (executable) return { shimPath, binDir, changed: false, pathUpdated };
+  let changed = false;
+  if (!executable) {
+    const temporaryPath = join(
+      binDir,
+      `.${command}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    try {
+      await writeFile(temporaryPath, content, {
+        encoding: 'utf8',
+        flag: 'wx',
+        mode: 0o755,
+      });
+      await chmod(temporaryPath, 0o755);
+      if (previousContent === undefined) {
+        try {
+          await link(temporaryPath, shimPath);
+          changed = true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          const entry = await lstat(shimPath);
+          if (
+            entry.isSymbolicLink() ||
+            !entry.isFile() ||
+            (await readFile(shimPath, 'utf8')) !== content ||
+            !(await isExecutable(shimPath))
+          )
+            throw new Error(`concurrent ${command} shim install conflicted`);
+        }
+      } else {
+        await rename(temporaryPath, shimPath);
+        changed = true;
+      }
+    } finally {
+      await rm(temporaryPath, { force: true });
+    }
+  }
 
-  await mkdir(dirname(shimPath), { recursive: true });
-  await writeFile(shimPath, content, 'utf8');
-  await chmod(shimPath, 0o755);
-  return { shimPath, binDir, changed: true, pathUpdated };
+  if (pathUpdated) env.PATH = `${binDir}${delimiter}${env.PATH ?? ''}`;
+  return { shimPath, binDir, changed, pathUpdated };
 }
 
 export async function ensureDashboardShim(
@@ -97,6 +155,7 @@ export async function ensureDashboardShim(
   const sourcePath = dashboardBinSource(importMetaUrl);
   return ensureShim(
     'addy-dashboard',
+    GENERATED_DASHBOARD_SHIM_NOTICE,
     dashboardShimContent(sourcePath),
     options,
   );
@@ -107,7 +166,12 @@ export async function ensureProgressShim(
   options: { binDir?: string; env?: NodeJS.ProcessEnv } = {},
 ): Promise<DashboardShimResult> {
   const sourcePath = progressBinSource(importMetaUrl);
-  return ensureShim('addy-progress', progressShimContent(sourcePath), options);
+  return ensureShim(
+    'addy-progress',
+    GENERATED_PROGRESS_SHIM_NOTICE,
+    progressShimContent(sourcePath),
+    options,
+  );
 }
 
 export function dashboardShimUsage(result: DashboardShimResult): string {
