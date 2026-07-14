@@ -3,8 +3,8 @@
 > **Stack:** raw-http | none | unknown | typescript
 
 > 1 routes (1 inferred) | 0 models | 0 components | 100 lib files | 7 env vars | 2 middleware | 100% test coverage
-> **Token savings:** this file is ~9,100 tokens. Without it, AI exploration would cost ~37,100 tokens. **Saves ~28,000 tokens per conversation.**
-> **Last scanned:** 2026-05-27 20:31 — re-run after significant changes
+> **Token savings:** this file is ~9,200 tokens. Without it, AI exploration would cost ~37,100 tokens. **Saves ~27,900 tokens per conversation.**
+> **Last scanned:** 2026-07-14 08:32 — re-run after significant changes
 
 ---
 
@@ -463,6 +463,19 @@
 ## Covered Routes
 
 - ALL:/api/state
+
+---
+
+# Git Hooks
+
+> **Note for agents:** These hooks fire automatically on git operations and will block the operation if they fail.
+
+## `pre-commit` — raw git hook
+
+- **npx**: `npx codesight --wiki -o .codesight`
+- **git**: `git add .codesight/`
+
+_Source: .git/hooks/pre-commit_
 
 ---
 
