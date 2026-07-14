@@ -2,12 +2,14 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
+  constants,
   fstatSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
-  readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -19,7 +21,9 @@ import { projectWorkflowStateKey } from './workflow-state-store-scope.ts';
 
 const SCHEMA_VERSION = 1;
 const STALE_AFTER_MS = 30 * 60 * 1000;
+const LOCK_STALE_AFTER_MS = 30_000;
 const MAX_SNAPSHOT_BYTES = 64 * 1024;
+const MAX_LOCK_BYTES = 1_024;
 const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const TERMINAL_STATUSES = new Set<ExternalProgressTerminalStatus>([
   'completed',
@@ -504,19 +508,24 @@ function readProjectByKey(
   projectKey: string,
   options: StorageOptions,
 ): ExternalProgressReadResult {
-  const runsDir = runsDirForKey(projectKey, options);
+  let runsDir: string | undefined;
   let names: string[];
   try {
+    runsDir = runsDirForKey(projectKey, options);
     names = readdirSync(runsDir).filter((name) => name.endsWith('.json'));
   } catch (error) {
     if (isMissingFileError(error)) return { snapshots: [], diagnostics: [] };
     return {
       snapshots: [],
       diagnostics: [
-        { file: runsDir, message: 'External progress storage is unreadable' },
+        {
+          file: runsDir ?? externalProgressRoot(options),
+          message: 'External progress storage is unreadable',
+        },
       ],
     };
   }
+  if (runsDir === undefined) return { snapshots: [], diagnostics: [] };
   const snapshots: IssueImplementationProgressSnapshot[] = [];
   const diagnostics: ExternalProgressDiagnostic[] = [];
   for (const name of names) {
@@ -542,12 +551,17 @@ function locateRun(
   options: StorageOptions & { cwd?: string; source?: ExternalProgressSource },
 ): { snapshot: IssueImplementationProgressSnapshot; file: string } {
   validateUuid(runId, 'runId');
-  const projectsDir = join(externalProgressRoot(options), 'projects');
   let projectKeys: string[];
   try {
     projectKeys = options.cwd
       ? [externalProgressProjectKey({ cwd: options.cwd })]
-      : readdirSync(projectsDir).filter((key) => PROJECT_KEY_PATTERN.test(key));
+      : readdirSync(
+          safeStorageDirectory(
+            options,
+            ['.pi', 'addy-workflow', 'external-progress', 'projects'],
+            false,
+          ),
+        ).filter((key) => PROJECT_KEY_PATTERN.test(key));
   } catch {
     throw new Error(`Unknown external progress run: ${runId}`);
   }
@@ -664,33 +678,117 @@ function validatePatch(
 }
 
 function ensureRunsDir(projectKey: string, options: StorageOptions): string {
-  const root = externalProgressRoot(options);
-  mkdirSync(root, { recursive: true, mode: 0o700 });
-  const runsDir = runsDirForKey(projectKey, options);
-  mkdirSync(runsDir, { recursive: true, mode: 0o700 });
-  const expected = join(realpathSync(root), 'projects', projectKey, 'runs');
-  if (realpathSync(runsDir) !== expected)
-    throw new Error('External progress storage escapes its configured root');
-  return runsDir;
+  validateProjectKey(projectKey);
+  return safeStorageDirectory(
+    options,
+    [
+      '.pi',
+      'addy-workflow',
+      'external-progress',
+      'projects',
+      projectKey,
+      'runs',
+    ],
+    true,
+  );
 }
 
 function runsDirForKey(projectKey: string, options: StorageOptions): string {
-  if (!PROJECT_KEY_PATTERN.test(projectKey))
-    throw new Error('Invalid project key');
-  return join(externalProgressRoot(options), 'projects', projectKey, 'runs');
+  validateProjectKey(projectKey);
+  return safeStorageDirectory(
+    options,
+    [
+      '.pi',
+      'addy-workflow',
+      'external-progress',
+      'projects',
+      projectKey,
+      'runs',
+    ],
+    false,
+  );
 }
 
-function readSnapshotFile(file: string): IssueImplementationProgressSnapshot {
-  const descriptor = openSync(file, 'r');
+function validateProjectKey(projectKey: string): void {
+  if (!PROJECT_KEY_PATTERN.test(projectKey))
+    throw new Error('Invalid project key');
+}
+
+function safeStorageDirectory(
+  options: StorageOptions,
+  segments: string[],
+  create: boolean,
+): string {
+  let current = realpathSync(resolve(options.homeDir ?? homedir()));
+  for (let index = 0; index < segments.length; index += 1) {
+    const next = join(current, segments[index]!);
+    try {
+      const entry = lstatSync(next);
+      if (entry.isSymbolicLink() || !entry.isDirectory())
+        throw new Error(
+          'External progress storage escapes its configured root',
+        );
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error;
+      if (!create) return join(current, ...segments.slice(index));
+      mkdirSync(next, { mode: 0o700 });
+    }
+    current = next;
+  }
+  return current;
+}
+
+type BoundedFile = {
+  contents: string;
+  dev: number | bigint;
+  ino: number | bigint;
+  mtimeMs: number;
+};
+
+function readBoundedRegularFile(file: string, maxBytes: number): BoundedFile {
+  if (lstatSync(file).isSymbolicLink())
+    throw new Error('Symlinks are not allowed');
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  const descriptor = openSync(
+    file,
+    constants.O_RDONLY | constants.O_NONBLOCK | noFollow,
+  );
   try {
-    if (fstatSync(descriptor).size > MAX_SNAPSHOT_BYTES)
+    const fileStat = fstatSync(descriptor, { bigint: true });
+    if (!fileStat.isFile())
+      throw new Error('Storage entry is not a regular file');
+    if (fileStat.size > BigInt(maxBytes))
       throw new Error('Snapshot exceeds the size limit');
-    return parseIssueImplementationProgressSnapshot(
-      JSON.parse(readFileSync(descriptor, 'utf8')),
-    );
+    const buffer = Buffer.alloc(maxBytes + 1);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const count = readSync(
+        descriptor,
+        buffer,
+        bytesRead,
+        buffer.length - bytesRead,
+        bytesRead,
+      );
+      if (count === 0) break;
+      bytesRead += count;
+    }
+    if (bytesRead > maxBytes)
+      throw new Error('Snapshot exceeds the size limit');
+    return {
+      contents: buffer.subarray(0, bytesRead).toString('utf8'),
+      dev: fileStat.dev,
+      ino: fileStat.ino,
+      mtimeMs: Number(fileStat.mtimeMs),
+    };
   } finally {
     closeSync(descriptor);
   }
+}
+
+function readSnapshotFile(file: string): IssueImplementationProgressSnapshot {
+  return parseIssueImplementationProgressSnapshot(
+    JSON.parse(readBoundedRegularFile(file, MAX_SNAPSHOT_BYTES).contents),
+  );
 }
 
 function persistSnapshot(
@@ -743,7 +841,7 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
         JSON.stringify({ pid: process.pid, token, createdAt: Date.now() }),
         'utf8',
       );
-      if (hasReclaimMarker(lockPath)) {
+      if (hasReclaimMarker(lockPath) || !lockTokenMatches(lockPath, token)) {
         closeSync(descriptor);
         descriptor = undefined;
         releaseOwnedLock(lockPath, token);
@@ -773,26 +871,63 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
 }
 
 function reclaimAbandonedLock(lockPath: string): boolean {
-  let observedToken: string | undefined;
+  if (hasReclaimMarker(lockPath)) return false;
+  let observed: BoundedFile;
+  let observedOwner: { pid?: unknown; token?: unknown } | undefined;
   try {
-    const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
-      pid?: unknown;
-      token?: unknown;
-    };
-    const pid = typeof owner.pid === 'number' ? owner.pid : undefined;
+    observed = readBoundedRegularFile(lockPath, MAX_LOCK_BYTES);
+    try {
+      observedOwner = JSON.parse(observed.contents) as {
+        pid?: unknown;
+        token?: unknown;
+      };
+    } catch {
+      if (Date.now() - observed.mtimeMs <= LOCK_STALE_AFTER_MS) return false;
+    }
+    const pid =
+      typeof observedOwner?.pid === 'number' ? observedOwner.pid : undefined;
     if (pid !== undefined && isProcessAlive(pid)) return false;
-    observedToken = typeof owner.token === 'string' ? owner.token : undefined;
   } catch (error) {
     if (isMissingFileError(error)) return true;
+    try {
+      const lockStat = lstatSync(lockPath, { bigint: true });
+      if (
+        lockStat.isSymbolicLink() ||
+        !lockStat.isFile() ||
+        Date.now() - Number(lockStat.mtimeMs) <= LOCK_STALE_AFTER_MS
+      )
+        return false;
+      observed = {
+        contents: '',
+        dev: lockStat.dev,
+        ino: lockStat.ino,
+        mtimeMs: Number(lockStat.mtimeMs),
+      };
+    } catch {
+      return false;
+    }
   }
 
   const quarantine = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
   try {
     renameSync(lockPath, quarantine);
-    const moved = JSON.parse(readFileSync(quarantine, 'utf8')) as {
-      token?: unknown;
-    };
-    if (observedToken !== undefined && moved.token !== observedToken) {
+    const moved = readBoundedRegularFile(quarantine, MAX_LOCK_BYTES);
+    const observedToken =
+      typeof observedOwner?.token === 'string'
+        ? observedOwner.token
+        : undefined;
+    let movedToken: string | undefined;
+    try {
+      const movedOwner = JSON.parse(moved.contents) as { token?: unknown };
+      movedToken =
+        typeof movedOwner.token === 'string' ? movedOwner.token : undefined;
+    } catch {
+      // Generation comparison below still fences malformed lock files.
+    }
+    if (
+      !sameGeneration(observed, moved) ||
+      (observedToken !== undefined && movedToken !== observedToken)
+    ) {
       renameSync(quarantine, lockPath);
       return false;
     }
@@ -807,12 +942,23 @@ function reclaimAbandonedLock(lockPath: string): boolean {
 function hasReclaimMarker(lockPath: string): boolean {
   const prefix = `${basename(lockPath)}.reclaim-`;
   try {
-    return readdirSync(dirname(lockPath)).some((name) =>
-      name.startsWith(prefix),
-    );
+    for (const name of readdirSync(dirname(lockPath))) {
+      if (!name.startsWith(prefix)) continue;
+      const markerPath = join(dirname(lockPath), name);
+      const pidText = name.slice(prefix.length).split('-', 1)[0];
+      const pid = Number(pidText);
+      if (Number.isSafeInteger(pid) && pid > 0 && isProcessAlive(pid))
+        return true;
+      rmSync(markerPath, { force: true });
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+function sameGeneration(left: BoundedFile, right: BoundedFile): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -824,12 +970,20 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+function lockTokenMatches(lockPath: string, token: string): boolean {
+  try {
+    const owner = JSON.parse(
+      readBoundedRegularFile(lockPath, MAX_LOCK_BYTES).contents,
+    ) as { token?: unknown };
+    return owner.token === token;
+  } catch {
+    return false;
+  }
+}
+
 function releaseOwnedLock(lockPath: string, token: string): void {
   try {
-    const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as {
-      token?: unknown;
-    };
-    if (owner.token === token) rmSync(lockPath, { force: true });
+    if (lockTokenMatches(lockPath, token)) rmSync(lockPath, { force: true });
   } catch {
     // Another process reclaimed the lease or cleanup already completed.
   }

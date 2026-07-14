@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -339,7 +340,7 @@ test('writes only outside the checkout and uses atomic per-run files', () => {
       cwd: fixture.cwd,
       homeDir: fixture.homeDir,
     });
-    assert.ok(runsDir.startsWith(fixture.homeDir));
+    assert.ok(realpathSync(runsDir).startsWith(realpathSync(fixture.homeDir)));
     assert.ok(existsSync(join(runsDir, `${run.runId}.json`)));
     assert.equal(
       readdirSync(runsDir).filter((name) => name.includes('.tmp-')).length,
@@ -449,6 +450,10 @@ test('competing processes safely reclaim an abandoned start lock', async () => {
         createdAt: Date.now(),
       }),
     );
+    writeFileSync(
+      `${lockPath}.reclaim-${Number.MAX_SAFE_INTEGER}-abandoned`,
+      'orphaned quarantine',
+    );
     const script = `
       import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
       const run = startExternalProgress({
@@ -526,6 +531,38 @@ test('never steals an old lock owned by a live process', async () => {
   }
 });
 
+test('does not reclaim a freshly created lock before metadata publication', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }),
+      '.start.lock',
+    );
+    writeFileSync(lockPath, '');
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir], 250);
+    assert.notEqual(result.code, 0);
+    assert.equal(existsSync(lockPath), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('raw snapshot creation cannot overwrite an immutable terminal run', () => {
   const fixture = setup();
   try {
@@ -593,6 +630,7 @@ test('rejects traversal keys and symlinked storage outside the configured root',
         }),
       /escapes its configured root/,
     );
+    assert.equal(existsSync(join(outside, 'runs')), false);
   } finally {
     fixture.cleanup();
   }
