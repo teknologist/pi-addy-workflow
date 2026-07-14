@@ -27,6 +27,7 @@ type DashboardOptions = {
   port?: number;
   stateDir?: string;
   externalProgressHomeDir?: string;
+  externalProgressCacheMs?: number;
 };
 
 type StoredState = {
@@ -473,17 +474,33 @@ function dashboardExternalRun({
   };
 }
 
+type DashboardExternalProgress = Pick<
+  DashboardSnapshot,
+  'externalRuns' | 'externalProgressWarning'
+>;
+
+const dashboardExternalProgressCache = new Map<
+  string,
+  { expiresAt: number; value: DashboardExternalProgress }
+>();
+
 function dashboardExternalProgress(
   cwd: string,
   homeDir: string | undefined,
-): Pick<DashboardSnapshot, 'externalRuns' | 'externalProgressWarning'> {
+  cacheMs: number,
+): DashboardExternalProgress {
+  const cacheKey = `${homeDir ?? ''}\0${cwd}`;
+  const now = Date.now();
+  const cached = dashboardExternalProgressCache.get(cacheKey);
+  if (cacheMs > 0 && cached && cached.expiresAt > now) return cached.value;
+  let value: DashboardExternalProgress;
   try {
     const selected = selectExternalProgress({ cwd, homeDir });
     const runs = [
       ...selected.active,
       ...(selected.terminal === undefined ? [] : [selected.terminal]),
     ].map(dashboardExternalRun);
-    return {
+    value = {
       ...(runs.length === 0 ? {} : { externalRuns: runs }),
       ...(selected.diagnostics.length === 0
         ? {}
@@ -493,8 +510,16 @@ function dashboardExternalProgress(
           }),
     };
   } catch {
-    return {};
+    value = {
+      externalProgressWarning: 'Issue workflow progress is unavailable.',
+    };
   }
+  if (cacheMs > 0)
+    dashboardExternalProgressCache.set(cacheKey, {
+      expiresAt: now + cacheMs,
+      value,
+    });
+  return value;
 }
 
 export function dashboardSnapshot(
@@ -515,6 +540,7 @@ export function dashboardSnapshot(
   const externalProgress = dashboardExternalProgress(
     cwd,
     options.externalProgressHomeDir,
+    options.externalProgressCacheMs ?? 1_000,
   );
 
   return {
@@ -754,7 +780,10 @@ function dashboardHtml(): string {
       return '<div class="panel progress-card"><div class="progress-head"><div class="metric-label">Plan performance</div><strong>' + escapeHtml(selected.duration) + '</strong></div><div class="metric-note">avg ' + escapeHtml(selected.averageTaskDuration) + ' / timed task · ' + selected.timedTaskCount + ' timed · ' + selected.turns + ' turns</div><div class="metric-note">' + selected.verifyRuns + ' verify · ' + selected.reviewRuns + ' review · ' + selected.issues + ' issues</div></div>';
     }
     function issueWorkflowProgress(run) {
-      if (run.progressUnit && Number.isInteger(run.completed) && Number.isInteger(run.total)) return run.completed + ' / ' + run.total + ' ' + run.progressUnit;
+      const unit = run.progressUnit ? ' ' + run.progressUnit : '';
+      if (Number.isInteger(run.completed) && Number.isInteger(run.total)) return run.completed + ' / ' + run.total + unit;
+      if (Number.isInteger(run.completed)) return run.completed + ' completed' + unit;
+      if (Number.isInteger(run.total)) return run.total + ' total' + unit;
       return run.progressUnit || '';
     }
     function issueWorkflow(run) {

@@ -138,6 +138,7 @@ test('dashboard projects issue workflows without changing empty dashboard data',
       cwd,
       stateDir,
       externalProgressHomeDir: homeDir,
+      externalProgressCacheMs: 0,
     }) as DashboardSnapshot;
     assert.deepEqual(Object.keys(baseline).sort(), [
       'activePlan',
@@ -236,6 +237,7 @@ test('dashboard projects issue workflows without changing empty dashboard data',
       cwd,
       stateDir,
       externalProgressHomeDir: homeDir,
+      externalProgressCacheMs: 0,
     }) as DashboardSnapshot;
     assert.deepEqual(
       snapshot.externalRuns?.map((entry) => entry.status),
