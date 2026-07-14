@@ -939,9 +939,12 @@ function reclaimAbandonedLock(lockPath: string): boolean {
     renameSync(lockPath, quarantine);
     const moved = readBoundedRegularFile(quarantine, MAX_LOCK_BYTES);
     const observedToken = observedOwner?.token;
-    const movedToken = parseLockOwner(moved.contents)?.token;
+    const movedOwner = parseLockOwner(moved.contents);
+    const movedToken = movedOwner?.token;
     if (
       !sameGeneration(observed, moved) ||
+      moved.contents !== observed.contents ||
+      (movedOwner !== undefined && isProcessAlive(movedOwner.pid)) ||
       (observedToken !== undefined && movedToken !== observedToken)
     ) {
       renameSync(quarantine, lockPath);
