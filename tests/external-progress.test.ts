@@ -79,6 +79,45 @@ function snapshot(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const EXTERNAL_PROGRESS_MODULE_URL = pathToFileURL(
+  join(process.cwd(), 'extensions', 'workflow-monitor', 'external-progress.ts'),
+).href;
+
+function runChild(
+  script: string,
+  args: string[],
+): Promise<{
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        '--input-type=module',
+        '--eval',
+        script,
+        ...args,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => resolvePromise({ code, stdout, stderr }));
+  });
+}
+
 test('strictly parses schema-v1 snapshots and rejects invalid or unknown fields', () => {
   assert.deepEqual(
     parseIssueImplementationProgressSnapshot(snapshot()),
@@ -339,16 +378,8 @@ test('concurrent starts reuse one active run per project and source', () => {
 test('separate processes serialize concurrent starts to one active run', async () => {
   const fixture = setup();
   try {
-    const moduleUrl = pathToFileURL(
-      join(
-        process.cwd(),
-        'extensions',
-        'workflow-monitor',
-        'external-progress.ts',
-      ),
-    ).href;
     const script = `
-      import { startExternalProgress } from ${JSON.stringify(moduleUrl)};
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
       const run = startExternalProgress({
         cwd: process.argv[1],
         homeDir: process.argv[2],
@@ -356,48 +387,219 @@ test('separate processes serialize concurrent starts to one active run', async (
       });
       process.stdout.write(run.runId);
     `;
-    const runIds = await Promise.all(
-      Array.from(
-        { length: 8 },
-        () =>
-          new Promise<string>((resolvePromise, reject) => {
-            const child = spawn(
-              process.execPath,
-              [
-                '--experimental-strip-types',
-                '--input-type=module',
-                '--eval',
-                script,
-                fixture.cwd,
-                fixture.homeDir,
-              ],
-              { stdio: ['ignore', 'pipe', 'pipe'] },
-            );
-            let stdout = '';
-            let stderr = '';
-            child.stdout.setEncoding('utf8');
-            child.stderr.setEncoding('utf8');
-            child.stdout.on('data', (chunk: string) => {
-              stdout += chunk;
-            });
-            child.stderr.on('data', (chunk: string) => {
-              stderr += chunk;
-            });
-            child.on('error', reject);
-            child.on('close', (code) => {
-              if (code === 0) resolvePromise(stdout);
-              else reject(new Error(stderr || `child exited ${code}`));
-            });
-          }),
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        runChild(script, [fixture.cwd, fixture.homeDir]),
       ),
     );
-    assert.equal(new Set(runIds).size, 1);
+    assert.equal(
+      results.every((result) => result.code === 0),
+      true,
+    );
+    assert.equal(new Set(results.map((result) => result.stdout)).size, 1);
     assert.equal(
       readExternalProgressProject({
         cwd: fixture.cwd,
         homeDir: fixture.homeDir,
       }).snapshots.filter((entry) => entry.status === 'running').length,
       1,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('reclaims an abandoned start lock without creating duplicate active runs', () => {
+  const fixture = setup();
+  try {
+    const first = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    finishExternalProgress({
+      runId: first.runId,
+      homeDir: fixture.homeDir,
+      status: 'completed',
+      now: new Date(TIME.getTime() + 1),
+    });
+    const lockPath = join(
+      externalProgressRunsDir({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }),
+      '.start.lock',
+    );
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: Number.MAX_SAFE_INTEGER,
+        token: 'abandoned',
+        createdAt: Date.now(),
+      }),
+    );
+    const second = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    assert.notEqual(second.runId, first.runId);
+    assert.equal(existsSync(lockPath), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('raw snapshot creation cannot overwrite an immutable terminal run', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    const finished = finishExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      status: 'completed',
+      now: new Date(TIME.getTime() + 1),
+    });
+    const { finishedAt: _finishedAt, ...withoutFinishedAt } = finished;
+    assert.throws(() =>
+      writeExternalProgressSnapshot(
+        {
+          ...withoutFinishedAt,
+          status: 'running',
+          updatedAt: new Date(TIME.getTime() + 2).toISOString(),
+        },
+        { homeDir: fixture.homeDir },
+      ),
+    );
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots[0]?.status,
+      'completed',
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('start fails safely when corrupt files prevent active-run ownership checks', () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    const runsDir = externalProgressRunsDir({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    });
+    writeFileSync(join(runsDir, 'corrupt.json'), '{');
+    assert.throws(
+      () =>
+        startExternalProgress({
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+          source: 'implement-from-issues',
+        }),
+      /Cannot establish external progress run ownership/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('concurrent process updates cannot lower counters or resurrect a terminal run', async () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      completed: 0,
+      total: 8,
+      now: TIME,
+    });
+    const updateScript = `
+      import { updateExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      updateExternalProgress({
+        runId: process.argv[1],
+        cwd: process.argv[2],
+        source: 'df-implement-issues',
+        homeDir: process.argv[3],
+        patch: { completed: Number(process.argv[4]) },
+      });
+    `;
+    const updates = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        runChild(updateScript, [
+          run.runId,
+          fixture.cwd,
+          fixture.homeDir,
+          String(index + 1),
+        ]),
+      ),
+    );
+    assert.equal(
+      updates.some((result) => result.code === 0),
+      true,
+    );
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots[0]?.completed,
+      8,
+    );
+
+    const raceRun = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'implement-from-issues',
+    });
+    const mutationScript = `
+      import { finishExternalProgress, updateExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      const base = {
+        runId: process.argv[2],
+        cwd: process.argv[3],
+        source: 'implement-from-issues',
+        homeDir: process.argv[4],
+      };
+      if (process.argv[1] === 'finish')
+        finishExternalProgress({ ...base, status: 'completed' });
+      else updateExternalProgress({ ...base, patch: { loopPhase: 'queue' } });
+    `;
+    const [finishedResult] = await Promise.all([
+      runChild(mutationScript, [
+        'finish',
+        raceRun.runId,
+        fixture.cwd,
+        fixture.homeDir,
+      ]),
+      ...Array.from({ length: 7 }, () =>
+        runChild(mutationScript, [
+          'update',
+          raceRun.runId,
+          fixture.cwd,
+          fixture.homeDir,
+        ]),
+      ),
+    ]);
+    assert.equal(finishedResult?.code, 0);
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots.find((entry) => entry.runId === raceRun.runId)?.status,
+      'completed',
     );
   } finally {
     fixture.cleanup();
