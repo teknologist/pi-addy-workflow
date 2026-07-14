@@ -136,8 +136,17 @@ async function installShim(
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 
-  const executable =
+  let executable =
     previousContent === content && (await isExecutable(shimPath));
+  if (executable) {
+    const current = await lstat(shimPath);
+    executable =
+      !current.isSymbolicLink() &&
+      current.isFile() &&
+      current.dev === previousIdentity?.dev &&
+      current.ino === previousIdentity?.ino &&
+      (await readFile(shimPath, 'utf8')) === content;
+  }
   let changed = false;
   if (!executable) {
     const temporaryPath = join(
@@ -167,18 +176,35 @@ async function installShim(
             throw new Error(`concurrent ${command} shim install conflicted`);
         }
       } else {
-        const current = await lstat(shimPath);
-        const currentContent = await readFile(shimPath, 'utf8');
-        if (
-          current.isSymbolicLink() ||
-          !current.isFile() ||
-          current.dev !== previousIdentity?.dev ||
-          current.ino !== previousIdentity?.ino ||
-          currentContent.split('\n')[1] !== notice
-        )
-          throw new Error(`${command} shim changed during installation`);
-        await rename(temporaryPath, shimPath);
-        changed = true;
+        const quarantinePath = join(
+          binDir,
+          `.${command}.${process.pid}.${randomUUID()}.previous`,
+        );
+        await rename(shimPath, quarantinePath);
+        try {
+          const quarantined = await lstat(quarantinePath);
+          const quarantinedContent = await readFile(quarantinePath, 'utf8');
+          if (
+            quarantined.isSymbolicLink() ||
+            !quarantined.isFile() ||
+            quarantined.dev !== previousIdentity?.dev ||
+            quarantined.ino !== previousIdentity?.ino ||
+            quarantinedContent.split('\n')[1] !== notice
+          )
+            throw new Error(`${command} shim changed during installation`);
+          await link(temporaryPath, shimPath);
+          await rm(quarantinePath, { force: true });
+          changed = true;
+        } catch (error) {
+          try {
+            await link(quarantinePath, shimPath);
+            await rm(quarantinePath, { force: true });
+          } catch (restoreError) {
+            if ((restoreError as NodeJS.ErrnoException).code !== 'EEXIST')
+              throw restoreError;
+          }
+          throw error;
+        }
       }
     } finally {
       await rm(temporaryPath, { force: true });
