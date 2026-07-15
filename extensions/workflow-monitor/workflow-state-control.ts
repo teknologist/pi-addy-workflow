@@ -31,6 +31,9 @@ export const PROJECT_FALLBACK_CONTROL_FIELDS = [
 ] as const satisfies readonly (keyof WorkflowState)[];
 
 const TRANSITION_CONTROL_FIELDS = [
+  'executionSource',
+  'ticketRun',
+  'ticketRecovery',
   'autoMode',
   ...AUTO_CONTROL_FIELDS,
   ...REVIEW_CONTROL_FIELDS,

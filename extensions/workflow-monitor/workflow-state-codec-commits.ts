@@ -84,13 +84,19 @@ export function backfillCommittedTasksFromStats(
       )
         continue;
 
+      const taskId =
+        typeof candidate.taskId === 'string' && candidate.taskId.length > 0
+          ? candidate.taskId
+          : undefined;
       const key = workflowTaskCommitKey(
         candidate.plan,
         candidate.taskIndex,
         candidate.taskTitle,
+        taskId,
       );
       committedTasks[key] = {
         plan: candidate.plan,
+        ...(taskId ? { taskId } : {}),
         sliceIndex: isPositiveSafeInteger(candidate.sliceIndex)
           ? candidate.sliceIndex
           : undefined,

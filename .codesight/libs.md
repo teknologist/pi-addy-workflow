@@ -35,11 +35,13 @@
 - `extensions/workflow-monitor/agent-end-handler.ts` — function createAgentEndHandler: (deps) => void
 - `extensions/workflow-monitor/agent-end-review-stats.ts` — function stateWithAgentEndReviewIssues: (state, event, reviewText) => WorkflowState
 - `extensions/workflow-monitor/auto-action-keys.ts`
+  - function ticketOperationFromPrompt: (prompt) => TicketOperation | undefined
   - function idleUserMessageKey: (ctx, message) => string
+  - function ticketAutoWorkflowActionKey: (identity, operation, attemptMarker) => string
+  - function ticketPendingActionMatches: (pending, run, operation) => boolean
   - function autoWorkflowActionKey: (prompt, details) => string
   - function autoWorkflowActionKeyForAction: (state, action) => string | undefined
-  - function autoWorkflowActionKeyForPromptState: (prompt, state, target) => string
-  - function currentAutoWorkflowActionKey: (state, target?) => string | undefined
+  - _...2 more_
 - `extensions/workflow-monitor/auto-agent-end.ts` — function createAutoAgentEnd: (deps) => void
 - `extensions/workflow-monitor/auto-agent-finish.ts`
   - function finishTextReportsComplete: (text) => boolean
@@ -60,7 +62,7 @@
   - function completedPlanAutoContinuation: (state, action, baseCwd?) => |
   - function latestCompletedActiveStatsTarget: (state, baseCwd?) => WorkflowStatsTarget | undefined
   - function autoPauseWarning: (prompt, action) => string
-  - _...3 more_
+  - _...4 more_
 - `extensions/workflow-monitor/auto-loop.ts` — function createAutoLoopDispatchPort: () => void
 - `extensions/workflow-monitor/auto-prompt-dispatcher.ts` — function createAutoPromptDispatcher: (deps) => void
 - `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` — function addAutoRecoveryGuidance: (message, prompt) => string
@@ -86,12 +88,12 @@
   - _...2 more_
 - `extensions/workflow-monitor/command-intake.ts`
   - function registeredFreshStepCommandNames: () => string[]
-  - function planFreshStepCommand: (command, event) => void
+  - function planFreshStepCommand: (command, event) => |
   - function planAutoContinueCommand: (event) => |
-  - function planStatsCommand: (event) => void
+  - function planStatsCommand: (event) => TicketCommandIntent
+  - function planTicketManagementCommand: (event) => TicketCommandIntent
   - function planWorkflowNextCommand: (event) => |
-  - const AUTO_CONTINUE_USAGE
-  - _...1 more_
+  - _...2 more_
 - `extensions/workflow-monitor/command-registry.ts` — function registerWorkflowCommands: (pi, deps) => void
 - `extensions/workflow-monitor/command-router.ts`
   - function workflowTextFromInput: (text) => string
@@ -216,6 +218,13 @@
   - function withPlanTaskId: (target, baseCwd?) => WorkflowStatsTarget | undefined
   - function recordCommittedTask: (state, target, commitSha) => WorkflowState
   - function actionCommitTarget: (state, action) => WorkflowStatsTarget | undefined
+- `extensions/workflow-monitor/ticket-command.ts`
+  - function parseTicketCommand: (command, args) => TicketCommandIntent
+  - type TicketLifecycleCommand
+  - type TicketCommandIntent
+  - const TICKET_COMMAND_USAGE
+  - const TICKET_LIFECYCLE_COMMANDS
+- `extensions/workflow-monitor/ticket-source-switch.ts` — function ticketStateBlocksReset: (state) => boolean, function ticketClaimSafetyWarning: (state, input) => string | undefined
 - `extensions/workflow-monitor/workflow-core.ts`
   - function createInitialWorkflowState: () => WorkflowState
   - type WorkflowIssueStats
@@ -223,7 +232,7 @@
   - type WorkflowTaskCommitRecord
   - type WorkflowStatsSession
   - type WorkflowStats
-  - _...6 more_
+  - _...11 more_
 - `extensions/workflow-monitor/workflow-delivery.ts` — function createWorkflowDelivery: (deps) => void, type WorkflowDeliveryOptions
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
@@ -231,13 +240,13 @@
   - function resetWorkflow: (ctx, appendEntry?) => WorkflowState
   - function openNextWorkflowPrompt: (ctx, phase, artifact?) => string
 - `extensions/workflow-monitor/workflow-host-events.ts`
+  - function tokenizeCommandLine: (input) => string[]
   - function parseCommandArgs: (event) => string[]
+  - function quoteCommandArg: (arg) => string
+  - function commandFromArgs: (command, args) => string
   - function inputTextFromEvent: (event) => string
   - function parseAutoFreshReason: (event) => AutoFreshReason | undefined
-  - function isSubagentChildSession: () => boolean
-  - function extractWriteArtifact: (event) => string | undefined
-  - function subagentNameFromEvent: (event) => string | undefined
-  - _...6 more_
+  - _...9 more_
 - `extensions/workflow-monitor/workflow-phases.ts`
   - function phaseIndex: (phase) => number
   - type WorkflowPhase
@@ -289,6 +298,14 @@
   - type WorkflowStateShape
   - type PersistedWorkflowCurrent
 - `extensions/workflow-monitor/workflow-state-codec-tasks.ts` — function coerceWorkflowTaskProgress: (candidate) => WorkflowTaskProgressFields | undefined
+- `extensions/workflow-monitor/workflow-state-codec-ticket.ts`
+  - function isTicketSourceKind: (value) => value is TicketRunState['source']['kind']
+  - function isTicketOperation: (value) => value is TicketOperation
+  - function coerceTicketRun: (value) => TicketRunState | undefined
+  - function hasTicketAssociation: (value) => boolean
+  - function coerceTicketExecution: (candidate, unknown>, base) => WorkflowState | undefined
+  - function ticketRecoveryWarning: (recovery) => string
+  - _...1 more_
 - `extensions/workflow-monitor/workflow-state-coercer.ts` — function coerceWorkflowState: (value) => WorkflowState | undefined
 - `extensions/workflow-monitor/workflow-state-control.ts`
   - function clearReviewControlUpdates: () => Partial<WorkflowState>
@@ -352,8 +369,9 @@
   - function legacyTaskIdentityMatches: (identity, candidate) => boolean
   - function taskIdForIdentity: (identity, candidates) => string | undefined
   - function taskIdentityKeyParts: (identity) => string[]
+  - function workflowSourceIdentityKey: (identity) => string
   - function workflowTaskIdentityKey: (identity, options) => string
-  - type WorkflowTaskIdentity
+  - _...4 more_
 - `extensions/workflow-monitor/workflow-task-summary.ts`
   - function parseWorkflowTaskSummaryResponse: (text, state) => Pick<WorkflowState, 'currentTaskSummary' | 'nextTaskSummary'>
   - function summarizeWorkflowTasks: (ctx, state) => Promise<WorkflowState>

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorkflowDelivery } from '../extensions/workflow-monitor/workflow-delivery.ts';
+import { ticketAutoWorkflowActionKey } from '../extensions/workflow-monitor/auto-action-keys.ts';
 import {
   createInitialWorkflowState,
   type WorkflowState,
@@ -114,4 +115,60 @@ test('workflow delivery preserves pending auto action after delivery failure', (
   assert.equal(harness.state.autoPendingAction?.prompt, '/addy-review PLAN.md');
   assert.match(harness.warnings[0], /network down/);
   assert.match(harness.warnings[0], /preserved/);
+});
+
+test('repeated ticket fresh-continuation delivery failures preserve one idempotency key', () => {
+  const identity = {
+    source: 'ticket' as const,
+    sourceKind: 'github' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'claim-1',
+  };
+  const harness = createHarness({
+    ...createInitialWorkflowState(),
+    autoMode: true,
+    executionSource: 'ticket',
+    ticketRun: {
+      schemaVersion: 1,
+      source: { kind: identity.sourceKind, ref: identity.ticketRef },
+      runId: identity.runId,
+      claim: {
+        id: identity.claimId,
+        owner: 'eric',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+    autoFreshPrompt: '/addy-verify --ticket ENG-42',
+    autoFreshReason: 'before-step',
+  });
+
+  harness.delivery.handleUserMessageDeliveryFailure(
+    {},
+    '/addy-verify --ticket ENG-42',
+    new Error('first failure'),
+  );
+  const first = harness.state.autoPendingAction;
+  harness.delivery.handleUserMessageDeliveryFailure(
+    {},
+    '/addy-verify --ticket ENG-42',
+    new Error('second failure'),
+  );
+  const second = harness.state.autoPendingAction;
+
+  assert.equal(first?.executionSource, 'ticket');
+  assert.equal(second?.executionSource, 'ticket');
+  if (
+    first?.executionSource !== 'ticket' ||
+    second?.executionSource !== 'ticket'
+  )
+    assert.fail('expected ticket pending actions');
+  assert.equal(second.attemptMarker, first.attemptMarker);
+  assert.equal(second.key, first.key);
+  assert.equal(
+    second.key,
+    ticketAutoWorkflowActionKey(identity, 'verify', second.attemptMarker),
+  );
 });

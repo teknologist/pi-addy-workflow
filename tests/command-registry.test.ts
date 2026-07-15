@@ -131,3 +131,83 @@ test('addy-stats preserves supplied plan and explicit all-history mode', () => {
   harness.commands.get('addy-stats')?.handler({ args: ['--all'] }, {});
   assert.equal(harness.statsPlanPath, undefined);
 });
+
+test('addy-stats preserves an opaque ticket ref', () => {
+  const harness = createHarness();
+
+  harness.commands
+    .get('addy-stats')
+    ?.handler({ args: ['--ticket', 'local tickets/01.md'] }, {});
+
+  assert.deepEqual(harness.sent, [
+    '/addy-stats --ticket "local tickets/01.md"',
+  ]);
+});
+
+test('addy-ticket preserves opaque args and blocks mutation of another live claim', () => {
+  const harness = createHarness();
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'local', ref: 'local tickets/01.md' },
+    runId: 'run-1',
+    claim: {
+      id: 'claim-1',
+      owner: 'eric',
+      claimedAt: '2026-07-15T00:00:00.000Z',
+    },
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+  };
+
+  harness.commands
+    .get('addy-ticket')
+    ?.handler(
+      { args: ['add-repository', 'local tickets/01.md', '../companion repo'] },
+      {},
+    );
+  assert.deepEqual(harness.sent, [
+    '/addy-ticket add-repository "local tickets/01.md" "../companion repo"',
+  ]);
+
+  harness.commands
+    .get('addy-ticket')
+    ?.handler({ args: ['release', 'ENG-43'] }, {});
+  assert.equal(harness.sent.length, 1);
+  assert.match(harness.notifications.at(-1)!, /local tickets\/01\.md/);
+});
+
+test('addy-workflow-next blocks every plan-oriented phase under a live claim', () => {
+  const harness = createHarness();
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'github', ref: 'ENG-42' },
+    runId: 'run-1',
+    claim: {
+      id: 'claim-1',
+      owner: 'eric',
+      claimedAt: '2026-07-15T00:00:00.000Z',
+    },
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+  };
+
+  for (const phase of [
+    'define',
+    'plan',
+    'build',
+    'simplify',
+    'verify',
+    'review',
+    'finish',
+  ])
+    harness.commands
+      .get('addy-workflow-next')
+      ?.handler({ args: [phase, 'docs/plans/new.md'] }, {});
+
+  assert.equal(harness.sent.length, 0);
+  assert.equal(harness.events.length, 0);
+  assert.equal(harness.notifications.length, 7);
+  assert.match(harness.notifications[0], /Ticket ENG-42 has a live claim/);
+});

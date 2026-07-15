@@ -3,6 +3,7 @@ import { commandFromPrompt } from './command-router.ts';
 import type { WorkflowAction } from './auto-lifecycle.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
+import { ticketClaimSafetyWarning } from './ticket-source-switch.ts';
 
 type ManualFrontierGuardOptions = {
   appendEntry?: boolean;
@@ -48,9 +49,13 @@ export function createManualFrontierGuard(deps: ManualFrontierGuardDeps) {
     options: ManualFrontierGuardOptions = {},
   ): Promise<boolean> {
     const command = commandFromPrompt(input);
-    if (command !== '/addy-build') return false;
-
     const state = deps.getState(ctx);
+    const ticketWarning = ticketClaimSafetyWarning(state, input);
+    if (ticketWarning) {
+      deps.notify(ctx, ticketWarning, 'warning');
+      return true;
+    }
+    if (command !== '/addy-build') return false;
     if (!state.activePlan) return false;
     const action = deps.nextActionForState(state, deps.baseCwd(ctx));
     const requiredCommand = commandFromPrompt(action?.prompt);

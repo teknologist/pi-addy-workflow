@@ -1,11 +1,17 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { commandFromPrompt } from './command-router.ts';
-import { parseCommandArgs, type CommandEvent } from './workflow-host-events.ts';
+import {
+  commandFromArgs,
+  parseCommandArgs,
+  type CommandEvent,
+} from './workflow-host-events.ts';
 import type { FreshContinuationDispatchOptions } from './fresh-continuation.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
 import { latestActiveStatsTarget } from './workflow-stats-target.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
 import { ADDY_AUTO_TASK_COMMIT_PROMPT } from './workflow-tracker.ts';
+import { parseTicketCommand, TICKET_COMMAND_USAGE } from './ticket-command.ts';
+import { ticketClaimSafetyWarning } from './ticket-source-switch.ts';
 
 type ContinueResult = { action: 'continue' };
 type PendingFreshResumeResult = 'none' | 'stale-cleared' | 'delivered';
@@ -94,11 +100,26 @@ export async function handleAddyAutoCommand(
   ctx: unknown,
   deps: AddyAutoCommandDeps,
 ): Promise<ContinueResult> {
-  const args = parseCommandArgs(event);
-  const desiredPlan =
-    args[0] === 'stop' ? undefined : args.join(' ') || undefined;
+  let args: string[];
+  try {
+    args = parseCommandArgs(event);
+  } catch {
+    deps.notify(ctx, TICKET_COMMAND_USAGE, 'warning');
+    return { action: 'continue' };
+  }
+  const intent = parseTicketCommand('/addy-auto', args);
+  if (intent.kind === 'error') {
+    deps.notify(ctx, intent.message, 'warning');
+    return { action: 'continue' };
+  }
+  const stopping = intent.kind === 'auto-stop';
+  const desiredPlan = intent.kind === 'plan-auto' ? intent.artifact : undefined;
+  const text =
+    intent.kind === 'ticket-queue'
+      ? commandFromArgs('/addy-auto', args)
+      : `/addy-auto${args.length ? ` ${args.join(' ')}` : ''}`;
 
-  if (args[0] === 'stop') {
+  if (stopping) {
     const stopIntent = deps.recordAutoRunnerStopIntent?.(ctx);
     if (stopIntent === 'recorded') {
       deps.notify(
@@ -118,8 +139,13 @@ export async function handleAddyAutoCommand(
     }
   }
 
-  if (args[0] !== 'stop') {
+  if (!stopping) {
     const pending = deps.getState(ctx);
+    const ticketWarning = ticketClaimSafetyWarning(pending, text);
+    if (ticketWarning) {
+      deps.notify(ctx, ticketWarning, 'warning');
+      return { action: 'continue' };
+    }
     if (
       desiredPlan &&
       pending.autoMode &&
@@ -144,33 +170,35 @@ export async function handleAddyAutoCommand(
       ))
     )
       return { action: 'continue' };
-    const pendingFreshResult = await resumePendingFreshContinuation(
-      pi,
-      ctx,
-      pending,
-      deps,
-    );
-    if (pendingFreshResult === 'delivered') return { action: 'continue' };
-    if (
-      pendingFreshResult === 'none' &&
-      (await resumePendingTaskCommit(pi, ctx, pending, deps))
-    )
-      return { action: 'continue' };
+    const resumesPendingPlan =
+      intent.kind === 'plan-auto' && pending.executionSource !== 'ticket';
+    if (resumesPendingPlan) {
+      const pendingFreshResult = await resumePendingFreshContinuation(
+        pi,
+        ctx,
+        pending,
+        deps,
+      );
+      if (pendingFreshResult === 'delivered') return { action: 'continue' };
+      if (
+        pendingFreshResult === 'none' &&
+        (await resumePendingTaskCommit(pi, ctx, pending, deps))
+      )
+        return { action: 'continue' };
+    }
   }
-
-  const text = `/addy-auto${args.length ? ` ${args.join(' ')}` : ''}`;
 
   deps.handleWorkflowEvent(
     ctx,
     {
       source: 'command',
       text,
-      artifact: args[0] === 'stop' ? undefined : args.join(' ') || undefined,
+      artifact: intent.kind === 'plan-auto' ? intent.artifact : undefined,
     },
     deps.appendEntry(pi),
   );
 
-  if (args[0] !== 'stop')
+  if (!stopping)
     await deps.maybeRunAutoWatchdog(pi, ctx, 'addy-auto-command', {
       disableFreshSession: true,
       disableCompaction: true,
@@ -180,7 +208,7 @@ export async function handleAddyAutoCommand(
     deps.showWorkflowStats(pi, ctx, deps.getState(ctx), {
       heading: 'Addy auto stopped.',
     });
-  if (args[0] === 'stop') deps.releaseAutoRunnerLock?.(ctx);
+  if (stopping) deps.releaseAutoRunnerLock?.(ctx);
 
   return { action: 'continue' };
 }

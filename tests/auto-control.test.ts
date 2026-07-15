@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  pendingAutoActionForPrompt,
   sanitizedProjectFallbackAutoControl,
   withProjectAutoControl,
 } from '../extensions/workflow-monitor/auto-control.ts';
@@ -40,6 +41,63 @@ test('auto control project fallback preserves pending fresh prompt and clears st
   assert.equal(state.autoReviewTaskIndex, undefined);
   assert.equal(state.reviewStatsKey, undefined);
   assert.equal(state.reviewStatsAgent, undefined);
+});
+
+test('ticket pending action carries source-neutral retry identity', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: 'ENG-42' },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'eric',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+  };
+
+  const pending = pendingAutoActionForPrompt(
+    '/addy-verify --ticket ENG-42',
+    state,
+    undefined,
+    'idle-retry',
+    'ticket-key',
+  );
+
+  assert.deepEqual(
+    {
+      executionSource: pending.executionSource,
+      sourceKind:
+        pending.executionSource === 'ticket' ? pending.sourceKind : undefined,
+      ticketRef:
+        pending.executionSource === 'ticket' ? pending.ticketRef : undefined,
+      runId: pending.executionSource === 'ticket' ? pending.runId : undefined,
+      claimId:
+        pending.executionSource === 'ticket' ? pending.claimId : undefined,
+      operation:
+        pending.executionSource === 'ticket' ? pending.operation : undefined,
+      attemptMarker:
+        pending.executionSource === 'ticket'
+          ? pending.attemptMarker
+          : undefined,
+      plan: pending.plan,
+    },
+    {
+      executionSource: 'ticket',
+      sourceKind: 'github',
+      ticketRef: 'ENG-42',
+      runId: 'run-1',
+      claimId: 'claim-1',
+      operation: 'verify',
+      attemptMarker: 'attempt-0',
+      plan: undefined,
+    },
+  );
 });
 
 test('auto control project fallback revives live project auto unless branch explicitly stopped', () => {

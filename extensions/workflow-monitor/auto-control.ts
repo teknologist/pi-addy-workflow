@@ -3,6 +3,11 @@ import {
   clearReviewControl,
   PROJECT_FALLBACK_CONTROL_FIELDS,
 } from './workflow-state-control.ts';
+import {
+  ticketAutoWorkflowActionKey,
+  ticketOperationFromPrompt,
+  ticketPendingActionMatches,
+} from './auto-action-keys.ts';
 import { taskIdentityKeyParts } from './workflow-task-identity.ts';
 import type {
   AutoFreshReason,
@@ -101,6 +106,16 @@ export function autoFreshContinuationKey(
     state.autoReviewTaskIndex ?? '',
     state.autoRetryKey ?? '',
     state.autoRetryCount ?? '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.source.kind ?? '')
+      : '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.source.ref ?? '')
+      : '',
+    state.executionSource === 'ticket' ? (state.ticketRun?.runId ?? '') : '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.claim?.id ?? '')
+      : '',
   ].join('\u001f');
 }
 
@@ -194,6 +209,45 @@ export function pendingAutoActionForPrompt(
       target?.taskIndex ?? state.autoReviewTaskIndex ?? state.currentTaskIndex,
     taskTitle: target?.taskTitle ?? state.autoReviewTask ?? state.currentTask,
   };
+  const attempts = (state.autoPendingAction?.attempts ?? -1) + 1;
+  if (state.executionSource === 'ticket' && state.ticketRun) {
+    const operation = ticketOperationFromPrompt(prompt);
+    if (!operation)
+      throw new Error(
+        `Cannot identify Ticket operation for pending action: ${prompt}`,
+      );
+    const identity = {
+      source: 'ticket' as const,
+      sourceKind: state.ticketRun.source.kind,
+      ticketRef: state.ticketRun.source.ref,
+      runId: state.ticketRun.runId,
+      claimId: state.ticketRun.claim?.id,
+    };
+    const pending = state.autoPendingAction;
+    const sameAction =
+      pending?.executionSource === 'ticket' &&
+      ticketPendingActionMatches(pending, state.ticketRun, operation);
+    const attemptMarker = sameAction
+      ? pending.attemptMarker
+      : `attempt-${attempts}`;
+    return {
+      executionSource: 'ticket',
+      key: ticketAutoWorkflowActionKey(identity, operation, attemptMarker),
+      prompt,
+      ...(deliveryPrompt !== undefined
+        ? { expandedPrompt: deliveryPrompt }
+        : {}),
+      sourceKind: identity.sourceKind,
+      ticketRef: identity.ticketRef,
+      runId: identity.runId,
+      ...(identity.claimId ? { claimId: identity.claimId } : {}),
+      operation,
+      attemptMarker,
+      reason,
+      attempts,
+      createdAt: new Date().toISOString(),
+    };
+  }
   return {
     key,
     prompt,
@@ -204,7 +258,7 @@ export function pendingAutoActionForPrompt(
     taskIndex: details.taskIndex,
     taskTitle: details.taskTitle,
     reason,
-    attempts: (state.autoPendingAction?.attempts ?? -1) + 1,
+    attempts,
     createdAt: new Date().toISOString(),
   };
 }

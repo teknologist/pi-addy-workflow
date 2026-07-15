@@ -6,6 +6,18 @@ export type WorkflowTaskIdentity = {
   taskTitle?: string;
 };
 
+export type PlanTaskIdentity = WorkflowTaskIdentity & { source: 'plan' };
+
+export type TicketSliceIdentity = {
+  source: 'ticket';
+  sourceKind: 'github' | 'linear' | 'local';
+  ticketRef: string;
+  runId: string;
+  claimId?: string;
+};
+
+export type WorkflowSourceIdentity = PlanTaskIdentity | TicketSliceIdentity;
+
 const TASK_ID_KEY_MARKER = 'task-id';
 const TASK_KEY_SEPARATOR = '\u001f';
 
@@ -41,6 +53,20 @@ export function taskIdentityKeyParts(identity: WorkflowTaskIdentity): string[] {
   return identity.taskId
     ? [TASK_ID_KEY_MARKER, identity.taskId]
     : [`${identity.taskIndex ?? ''}`, identity.taskTitle ?? ''];
+}
+
+export function workflowSourceIdentityKey(
+  identity: WorkflowSourceIdentity,
+): string {
+  if (identity.source === 'ticket')
+    return [
+      'ticket',
+      identity.sourceKind,
+      identity.ticketRef,
+      identity.runId,
+      identity.claimId ?? '',
+    ].join(TASK_KEY_SEPARATOR);
+  return ['plan', workflowTaskIdentityKey(identity)].join(TASK_KEY_SEPARATOR);
 }
 
 export function workflowTaskIdentityKey(

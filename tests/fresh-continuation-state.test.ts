@@ -5,6 +5,7 @@ import {
   currentSessionFallbackOptions,
   pendingFreshInputMatches,
 } from '../extensions/workflow-monitor/fresh-continuation-state.ts';
+import { autoFreshContinuationKey } from '../extensions/workflow-monitor/auto-control.ts';
 import type { WorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
 
 const pendingState: WorkflowState = {
@@ -53,6 +54,78 @@ test('fresh continuation state matches invocation and expanded prompt text', () 
     true,
   );
   assert.equal(pendingFreshInputMatches('/addy-review', pendingState), false);
+});
+
+test('fresh continuation preserves ticket identity and claim state', () => {
+  const state: WorkflowState = {
+    ...pendingState,
+    executionSource: 'ticket',
+    ticketRun: {
+      schemaVersion: 1,
+      source: { kind: 'github', ref: 'ENG-42' },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'eric',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+  };
+  const consumed = consumedPendingFreshPromptState(state);
+  assert.equal(consumed?.executionSource, 'ticket');
+  assert.deepEqual(consumed?.ticketRun, state.ticketRun);
+});
+
+test('fresh continuation keys include ticket run and claim identity', () => {
+  const ticketState: WorkflowState = {
+    ...pendingState,
+    executionSource: 'ticket',
+    ticketRun: {
+      schemaVersion: 1,
+      source: { kind: 'github', ref: 'ENG-42' },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'eric',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+  };
+  const key = autoFreshContinuationKey(
+    ticketState.autoFreshPrompt!,
+    ticketState.autoFreshReason!,
+    ticketState,
+  );
+
+  assert.notEqual(
+    key,
+    autoFreshContinuationKey(
+      ticketState.autoFreshPrompt!,
+      ticketState.autoFreshReason!,
+      {
+        ...ticketState,
+        ticketRun: { ...ticketState.ticketRun!, runId: 'run-2' },
+      },
+    ),
+  );
+  assert.notEqual(
+    key,
+    autoFreshContinuationKey(
+      ticketState.autoFreshPrompt!,
+      ticketState.autoFreshReason!,
+      {
+        ...ticketState,
+        ticketRun: {
+          ...ticketState.ticketRun!,
+          claim: { ...ticketState.ticketRun!.claim!, id: 'claim-2' },
+        },
+      },
+    ),
+  );
 });
 
 test('current session fallback options disables default delivery without idle signal', () => {

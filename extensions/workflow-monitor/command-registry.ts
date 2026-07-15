@@ -3,16 +3,21 @@ import {
   planAutoContinueCommand,
   planFreshStepCommand,
   planStatsCommand,
+  planTicketManagementCommand,
   planWorkflowNextCommand,
   registeredFreshStepCommandNames,
 } from './command-intake.ts';
-import type { CommandEvent } from './workflow-host-events.ts';
+import { commandFromArgs, type CommandEvent } from './workflow-host-events.ts';
 import type { FreshContinuationDispatchOptions } from './fresh-continuation.ts';
 import type { WorkflowAction } from './auto-lifecycle.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
 import { latestActiveStatsTarget } from './workflow-stats-target.ts';
 import type { WorkflowPhase, WorkflowState } from './workflow-transitions.ts';
 import { handleAddyAutoCommand } from './addy-auto-command.ts';
+import {
+  ticketClaimSafetyWarning,
+  ticketStateBlocksReset,
+} from './ticket-source-switch.ts';
 
 type ContinueResult = { action: 'continue' };
 
@@ -143,6 +148,10 @@ export function registerWorkflowCommands(
       description: `Run ${command} in a fresh session when Addy fresh context is enabled.`,
       handler: async (event: CommandEvent, ctx: unknown) => {
         const plan = planFreshStepCommand(command, event);
+        if (plan.kind === 'warn') {
+          deps.notify(ctx, plan.message, 'warning');
+          return { action: 'continue' } satisfies ContinueResult;
+        }
         const input = plan.input;
         if (await deps.dispatchManualFrontierGuard(pi, input, ctx))
           return { action: 'continue' } satisfies ContinueResult;
@@ -179,13 +188,41 @@ export function registerWorkflowCommands(
 
   pi.registerCommand?.('addy-stats', {
     description:
-      'Show Addy workflow stats for the active plan, supplied plan, or --all.',
+      'Show Addy workflow stats for the active plan, supplied plan, ticket, or --all.',
     handler: (event: CommandEvent, ctx: unknown) => {
       const plan = planStatsCommand(event);
-      const state = deps.getState(ctx);
-      deps.showWorkflowStats(pi, ctx, state, {
-        planPath: plan.all ? undefined : (plan.planPath ?? state.activePlan),
-      });
+      if (plan.kind === 'error') deps.notify(ctx, plan.message, 'warning');
+      else if (plan.kind === 'ticket-stats')
+        deps.sendUserMessage(
+          pi,
+          ctx,
+          commandFromArgs('/addy-stats', ['--ticket', plan.ticketRef]),
+        );
+      else if (plan.kind === 'plan-stats') {
+        const state = deps.getState(ctx);
+        deps.showWorkflowStats(pi, ctx, state, {
+          planPath: plan.all ? undefined : (plan.planPath ?? state.activePlan),
+        });
+      }
+      return { action: 'continue' } satisfies ContinueResult;
+    },
+  });
+
+  pi.registerCommand?.('addy-ticket', {
+    description: 'Inspect or manage an Addy Ticket Slice claim.',
+    handler: (event: CommandEvent, ctx: unknown) => {
+      const plan = planTicketManagementCommand(event);
+      if (plan.kind === 'error') deps.notify(ctx, plan.message, 'warning');
+      else if (plan.kind === 'ticket-management') {
+        const input = commandFromArgs('/addy-ticket', [
+          plan.operation,
+          plan.ticketRef,
+          ...(plan.operation === 'add-repository' ? [plan.repository] : []),
+        ]);
+        const warning = ticketClaimSafetyWarning(deps.getState(ctx), input);
+        if (warning) deps.notify(ctx, warning, 'warning');
+        else deps.sendUserMessage(pi, ctx, input);
+      }
       return { action: 'continue' } satisfies ContinueResult;
     },
   });
@@ -193,6 +230,15 @@ export function registerWorkflowCommands(
   pi.registerCommand?.('addy-workflow-reset', {
     description: 'Reset Addy workflow state and clear the widget.',
     handler: (_event: CommandEvent, ctx: unknown) => {
+      const state = deps.getState(ctx);
+      if (ticketStateBlocksReset(state)) {
+        deps.notify(
+          ctx,
+          ticketClaimSafetyWarning(state, '/addy-workflow-reset')!,
+          'warning',
+        );
+        return { action: 'continue' } satisfies ContinueResult;
+      }
       deps.resetWorkflow(ctx, deps.appendEntry(pi));
       return { action: 'continue' } satisfies ContinueResult;
     },
@@ -204,6 +250,13 @@ export function registerWorkflowCommands(
       const plan = planWorkflowNextCommand(event);
       if (plan.kind === 'warn') {
         deps.notify(ctx, plan.message, 'warning');
+        return { action: 'continue' } satisfies ContinueResult;
+      }
+
+      const state = deps.getState(ctx);
+      if (ticketStateBlocksReset(state)) {
+        const warning = ticketClaimSafetyWarning(state, '/addy-workflow-next');
+        deps.notify(ctx, warning!, 'warning');
         return { action: 'continue' } satisfies ContinueResult;
       }
 

@@ -17,6 +17,8 @@ import {
 } from './workflow-state-control.ts';
 import { createInitialWorkflowState } from './workflow-core.ts';
 import type { WorkflowEvent, WorkflowState } from './workflow-core.ts';
+import { parseTicketCommand } from './ticket-command.ts';
+import { tokenizeCommandLine } from './workflow-host-events.ts';
 
 export {
   ENFORCED_WORKFLOW_PHASES,
@@ -28,6 +30,9 @@ export { createInitialWorkflowState } from './workflow-core.ts';
 export type {
   AutoFreshReason,
   AutoPendingActionReason,
+  TicketOperation,
+  TicketRecoveryState,
+  TicketRunState,
   WorkflowAutoPausedReason,
   WorkflowAutoPendingAction,
   WorkflowEvent,
@@ -169,21 +174,44 @@ function isLikelySpecArgument(value: string): boolean {
 
 function artifactFromText(text: string | undefined): string | undefined {
   if (!text) return undefined;
-  const parts = text.trim().split(/\s+/);
-  if (!parts[0]?.startsWith('/addy-')) return undefined;
-  if (parts[0] === '/addy-workflow-next')
-    return parts.slice(2).join(' ') || undefined;
-  return parts.slice(1).join(' ') || undefined;
+  const rawParts = text.trim().split(/\s+/);
+  let parsedParts: string[];
+  try {
+    parsedParts = tokenizeCommandLine(text.trim());
+  } catch {
+    return undefined;
+  }
+  if (!parsedParts[0]?.startsWith('/addy-')) return undefined;
+  const ticketIntent = parseTicketCommand(parsedParts[0], parsedParts.slice(1));
+  if (
+    ticketIntent.kind === 'ticket-lifecycle' ||
+    ticketIntent.kind === 'ticket-queue' ||
+    ticketIntent.kind === 'ticket-stats' ||
+    ticketIntent.kind === 'ticket-management'
+  )
+    return undefined;
+  if (rawParts[0] === '/addy-workflow-next')
+    return rawParts.slice(2).join(' ') || undefined;
+  return rawParts.slice(1).join(' ') || undefined;
 }
 
 function autoModeArtifactFromText(
   text: string | undefined,
+  artifact: string | undefined,
 ): string | undefined {
   if (!text) return undefined;
-  const parts = text.trim().split(/\s+/);
+  let parts: string[];
+  try {
+    parts = tokenizeCommandLine(text.trim());
+  } catch {
+    return undefined;
+  }
   if (parts[0] !== '/addy-auto') return undefined;
-  if (parts[1] === 'stop') return undefined;
-  return validAutoModeArtifact(parts.slice(1).join(' ') || undefined);
+  const intent = parseTicketCommand('/addy-auto', parts.slice(1));
+  return intent.kind === 'plan-auto'
+    ? (validAutoModeArtifact(artifact) ??
+        validAutoModeArtifact(intent.artifact))
+    : undefined;
 }
 
 function validAutoModeArtifact(
@@ -215,9 +243,7 @@ function applyAutoModeEvent(
     ...state,
     ...enterAutoModeControlUpdates(state),
     activePlan:
-      validAutoModeArtifact(event.artifact) ??
-      autoModeArtifactFromText(text) ??
-      state.activePlan,
+      autoModeArtifactFromText(text, event.artifact) ?? state.activePlan,
     lastTrigger,
     lastArtifact: event.artifact ?? state.lastArtifact,
   };

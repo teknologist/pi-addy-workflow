@@ -4,7 +4,11 @@ import { planTaskTargetIsComplete } from './plan-task-reader.ts';
 import { statsTargetFromTask } from './workflow-stats-target.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
 import { stateForNextSlicePlan } from './workflow-plan-continuation.ts';
-import type { WorkflowState } from './workflow-transitions.ts';
+import type {
+  TicketOperation,
+  TicketRunState,
+  WorkflowState,
+} from './workflow-transitions.ts';
 import {
   allTasksInCurrentPlanAreClosed,
   nextPromptForPhase,
@@ -12,9 +16,34 @@ import {
   nextWorkflowActionForActivePlanLifecycle,
 } from './workflow-tracker.ts';
 
-export type WorkflowAction = ReturnType<
-  typeof nextWorkflowActionForActivePlanLifecycle
->;
+type PlanWorkflowAction = Exclude<
+  ReturnType<typeof nextWorkflowActionForActivePlanLifecycle>,
+  undefined
+> & { executionSource?: 'plan' };
+
+export type TicketWorkflowAction = {
+  executionSource: 'ticket';
+  source: 'ticket';
+  prompt: string;
+  sourceKind: TicketRunState['source']['kind'];
+  ticketRef: string;
+  runId: string;
+  claimId?: string;
+  operation: TicketOperation;
+  attemptMarker: string;
+  plan?: undefined;
+  taskTitle?: undefined;
+  taskId?: undefined;
+  taskIndex?: undefined;
+  currentSliceIndex?: undefined;
+  missingStatuses?: undefined;
+  requiresCommit?: false;
+};
+
+export type WorkflowAction =
+  | PlanWorkflowAction
+  | TicketWorkflowAction
+  | undefined;
 
 export function reviewedTaskWasCompleted(
   previousState: WorkflowState,

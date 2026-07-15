@@ -1,0 +1,322 @@
+import {
+  ticketAutoWorkflowActionKey,
+  ticketOperationFromPrompt,
+  ticketPendingActionMatches,
+} from './auto-action-keys.ts';
+import { exitAutoModeControlUpdates } from './workflow-state-control.ts';
+import type {
+  TicketOperation,
+  TicketRecoveryState,
+  TicketRunState,
+  WorkflowState,
+} from './workflow-core.ts';
+
+const SOURCE_KINDS = ['github', 'linear', 'local'] as const;
+const SELECTOR_KINDS = ['label', 'status'] as const;
+const OPERATIONS = [
+  'select',
+  'claim',
+  'build',
+  'simplify',
+  'verify',
+  'review',
+  'fix-all',
+  'finish',
+  'status',
+  'release',
+  'reclaim',
+  'add-repository',
+  'repository-scope-approval',
+] as const;
+const OUTCOMES = ['succeeded', 'reconciled', 'blocked', 'failed'] as const;
+const COMPLETED_PHASES = [
+  'build',
+  'simplify',
+  'verify',
+  'review',
+  'fix-all',
+  'finish',
+] as const;
+
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) => key in value) &&
+    Object.keys(value).every((key) => allowed.has(key))
+  );
+}
+
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function optionalString(value: unknown): value is string | undefined {
+  return value === undefined || nonEmptyString(value);
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  values: readonly T[],
+): value is T {
+  return typeof value === 'string' && values.includes(value as T);
+}
+
+export function isTicketSourceKind(
+  value: unknown,
+): value is TicketRunState['source']['kind'] {
+  return oneOf(value, SOURCE_KINDS);
+}
+
+export function isTicketOperation(value: unknown): value is TicketOperation {
+  return oneOf(value, OPERATIONS);
+}
+
+export function coerceTicketRun(value: unknown): TicketRunState | undefined {
+  if (
+    !record(value) ||
+    !exactKeys(
+      value,
+      ['schemaVersion', 'source', 'runId', 'lifecycle', 'repositoryScope'],
+      [
+        'claim',
+        'revision',
+        'queueSelector',
+        'activityMarker',
+        'pendingClarification',
+        'pendingScopeRequest',
+        'lastValidatedResult',
+      ],
+    ) ||
+    value.schemaVersion !== 1 ||
+    !record(value.source) ||
+    !exactKeys(value.source, ['kind', 'ref']) ||
+    !isTicketSourceKind(value.source.kind) ||
+    !nonEmptyString(value.source.ref) ||
+    !nonEmptyString(value.runId) ||
+    !Array.isArray(value.repositoryScope) ||
+    value.repositoryScope.length === 0 ||
+    !value.repositoryScope.every(nonEmptyString)
+  )
+    return undefined;
+
+  if (value.claim !== undefined) {
+    if (
+      !record(value.claim) ||
+      !exactKeys(value.claim, ['id', 'owner', 'claimedAt']) ||
+      !nonEmptyString(value.claim.id) ||
+      !nonEmptyString(value.claim.owner) ||
+      !nonEmptyString(value.claim.claimedAt)
+    )
+      return undefined;
+  }
+  if (!optionalString(value.revision) || !optionalString(value.activityMarker))
+    return undefined;
+  if (value.queueSelector !== undefined) {
+    if (
+      !record(value.queueSelector) ||
+      !exactKeys(value.queueSelector, ['kind', 'value']) ||
+      !oneOf(value.queueSelector.kind, SELECTOR_KINDS) ||
+      !nonEmptyString(value.queueSelector.value)
+    )
+      return undefined;
+  }
+  if (
+    !record(value.lifecycle) ||
+    !exactKeys(
+      value.lifecycle,
+      ['implemented', 'verified', 'reviewed'],
+      ['lastCompletedPhase'],
+    ) ||
+    typeof value.lifecycle.implemented !== 'boolean' ||
+    typeof value.lifecycle.verified !== 'boolean' ||
+    typeof value.lifecycle.reviewed !== 'boolean' ||
+    (value.lifecycle.lastCompletedPhase !== undefined &&
+      !oneOf(value.lifecycle.lastCompletedPhase, COMPLETED_PHASES))
+  )
+    return undefined;
+  if (value.pendingClarification !== undefined) {
+    if (
+      !record(value.pendingClarification) ||
+      !exactKeys(value.pendingClarification, ['kind', 'prompt']) ||
+      !oneOf(value.pendingClarification.kind, [
+        'tracker-routing',
+        'completion-transition',
+      ] as const) ||
+      !nonEmptyString(value.pendingClarification.prompt)
+    )
+      return undefined;
+  }
+  if (value.pendingScopeRequest !== undefined) {
+    if (
+      !record(value.pendingScopeRequest) ||
+      !exactKeys(value.pendingScopeRequest, ['repository']) ||
+      !nonEmptyString(value.pendingScopeRequest.repository)
+    )
+      return undefined;
+  }
+  if (value.lastValidatedResult !== undefined) {
+    const result = value.lastValidatedResult;
+    if (
+      !record(result) ||
+      !exactKeys(
+        result,
+        ['operation', 'outcome', 'actionKey', 'attempt'],
+        ['revision'],
+      ) ||
+      !isTicketOperation(result.operation) ||
+      !oneOf(result.outcome, OUTCOMES) ||
+      !nonEmptyString(result.actionKey) ||
+      !Number.isSafeInteger(result.attempt) ||
+      (result.attempt as number) < 0 ||
+      !optionalString(result.revision)
+    )
+      return undefined;
+  }
+  return value as TicketRunState;
+}
+
+function coerceRecovery(value: unknown): TicketRecoveryState | undefined {
+  if (
+    !record(value) ||
+    !exactKeys(value, ['possibleClaim', 'reason'], ['ticketRef']) ||
+    value.possibleClaim !== true ||
+    !nonEmptyString(value.reason) ||
+    !optionalString(value.ticketRef)
+  )
+    return undefined;
+  return value as TicketRecoveryState;
+}
+
+function possibleTicketRef(value: unknown): string | undefined {
+  if (!record(value)) return undefined;
+  if (record(value.source) && nonEmptyString(value.source.ref))
+    return value.source.ref;
+  if (nonEmptyString(value.ticketRef)) return value.ticketRef;
+  return undefined;
+}
+
+export function hasTicketAssociation(value: unknown): boolean {
+  if (!record(value)) return false;
+  return Boolean(
+    value.executionSource === 'ticket' ||
+    value.ticketRun !== undefined ||
+    value.ticketRecovery !== undefined ||
+    (record(value.autoPendingAction) &&
+      value.autoPendingAction.executionSource === 'ticket'),
+  );
+}
+
+function withRecoveryWarning(
+  warnings: string[],
+  recovery: TicketRecoveryState,
+): string[] {
+  const warning = ticketRecoveryWarning(recovery);
+  return warnings.includes(warning) ? warnings : [warning, ...warnings];
+}
+
+function ticketPendingActionMatchesRun(
+  state: WorkflowState,
+  run: TicketRunState,
+): boolean {
+  const pending = state.autoPendingAction;
+  if (!pending) return true;
+  if (pending.executionSource !== 'ticket') return false;
+
+  return (
+    ticketPendingActionMatches(pending, run, pending.operation) &&
+    ticketOperationFromPrompt(pending.prompt) === pending.operation &&
+    pending.key ===
+      ticketAutoWorkflowActionKey(
+        {
+          source: 'ticket',
+          sourceKind: pending.sourceKind,
+          ticketRef: pending.ticketRef,
+          runId: pending.runId,
+          claimId: pending.claimId,
+        },
+        pending.operation,
+        pending.attemptMarker,
+      )
+  );
+}
+
+export function coerceTicketExecution(
+  candidate: Record<string, unknown>,
+  base: WorkflowState,
+): WorkflowState | undefined {
+  const hasTicketData =
+    candidate.ticketRun !== undefined || candidate.ticketRecovery !== undefined;
+  if (
+    candidate.ticketRun !== undefined &&
+    candidate.ticketRecovery !== undefined
+  )
+    return corruptTicketExecution(candidate, base);
+  if (
+    candidate.executionSource !== undefined &&
+    candidate.executionSource !== 'plan' &&
+    candidate.executionSource !== 'ticket'
+  )
+    return hasTicketData ? corruptTicketExecution(candidate, base) : undefined;
+  if (candidate.executionSource === 'plan')
+    return hasTicketData ? corruptTicketExecution(candidate, base) : base;
+  if (candidate.executionSource !== 'ticket')
+    return hasTicketData ? corruptTicketExecution(candidate, base) : base;
+
+  const ticketRun = coerceTicketRun(candidate.ticketRun);
+  if (ticketRun) {
+    if (!ticketPendingActionMatchesRun(base, ticketRun))
+      return corruptTicketExecution(candidate, base);
+    return {
+      ...base,
+      executionSource: 'ticket',
+      ticketRun,
+      ticketRecovery: undefined,
+    };
+  }
+  const recovery = coerceRecovery(candidate.ticketRecovery);
+  if (candidate.ticketRun === undefined && recovery)
+    return {
+      ...base,
+      executionSource: 'ticket',
+      ticketRun: undefined,
+      ticketRecovery: recovery,
+      warnings: withRecoveryWarning(base.warnings, recovery),
+    };
+  return corruptTicketExecution(candidate, base);
+}
+
+export function ticketRecoveryWarning(recovery: TicketRecoveryState): string {
+  const ref = recovery.ticketRef ? ` ${recovery.ticketRef}` : '';
+  return `Addy Ticket state${ref} is corrupt and may own a live claim. Use /addy-ticket status${ref} and repair or release the claim before switching execution source.`;
+}
+
+export function corruptTicketExecution(
+  candidate: Record<string, unknown>,
+  base: WorkflowState,
+): WorkflowState {
+  const ticketRef =
+    possibleTicketRef(candidate.ticketRun) ??
+    possibleTicketRef(candidate.ticketRecovery) ??
+    possibleTicketRef(candidate.autoPendingAction);
+  const recovery: TicketRecoveryState = {
+    possibleClaim: true,
+    reason: 'Persisted Ticket state failed strict validation.',
+    ...(ticketRef ? { ticketRef } : {}),
+  };
+  return {
+    ...base,
+    ...exitAutoModeControlUpdates(),
+    executionSource: 'ticket',
+    ticketRun: undefined,
+    ticketRecovery: recovery,
+    warnings: withRecoveryWarning(base.warnings, recovery),
+  };
+}

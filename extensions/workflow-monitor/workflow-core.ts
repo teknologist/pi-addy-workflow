@@ -53,13 +53,69 @@ export type WorkflowStats = {
 
 export type AutoFreshReason = 'between-tasks' | 'before-step' | 'before-review';
 
+export type TicketOperation =
+  | 'select'
+  | 'claim'
+  | 'build'
+  | 'simplify'
+  | 'verify'
+  | 'review'
+  | 'fix-all'
+  | 'finish'
+  | 'status'
+  | 'release'
+  | 'reclaim'
+  | 'add-repository'
+  | 'repository-scope-approval';
+
+export type TicketRunState = {
+  schemaVersion: 1;
+  source: { kind: 'github' | 'linear' | 'local'; ref: string };
+  runId: string;
+  claim?: { id: string; owner: string; claimedAt: string };
+  revision?: string;
+  queueSelector?: { kind: 'label' | 'status'; value: string };
+  lifecycle: {
+    implemented: boolean;
+    verified: boolean;
+    reviewed: boolean;
+    lastCompletedPhase?:
+      | 'build'
+      | 'simplify'
+      | 'verify'
+      | 'review'
+      | 'fix-all'
+      | 'finish';
+  };
+  repositoryScope: string[];
+  activityMarker?: string;
+  pendingClarification?: {
+    kind: 'tracker-routing' | 'completion-transition';
+    prompt: string;
+  };
+  pendingScopeRequest?: { repository: string };
+  lastValidatedResult?: {
+    operation: TicketOperation;
+    outcome: 'succeeded' | 'reconciled' | 'blocked' | 'failed';
+    actionKey: string;
+    attempt: number;
+    revision?: string;
+  };
+};
+
+export type TicketRecoveryState = {
+  possibleClaim: true;
+  ticketRef?: string;
+  reason: string;
+};
+
 export type AutoPendingActionReason =
   | 'next-action'
   | 'fresh-fallback'
   | 'idle-retry'
   | 'commit-frontier';
 
-export type WorkflowAutoPendingAction = {
+type WorkflowAutoPendingActionBase = {
   key: string;
   prompt: string;
   expandedPrompt?: string;
@@ -73,6 +129,24 @@ export type WorkflowAutoPendingAction = {
   createdAt: string;
 };
 
+export type WorkflowPlanPendingAction = WorkflowAutoPendingActionBase & {
+  executionSource?: 'plan';
+};
+
+export type WorkflowTicketPendingAction = WorkflowAutoPendingActionBase & {
+  executionSource: 'ticket';
+  sourceKind: TicketRunState['source']['kind'];
+  ticketRef: string;
+  runId: string;
+  claimId?: string;
+  operation: TicketOperation;
+  attemptMarker: string;
+};
+
+export type WorkflowAutoPendingAction =
+  | WorkflowPlanPendingAction
+  | WorkflowTicketPendingAction;
+
 export type WorkflowAutoPausedReason =
   | 'max-review-fix-loops'
   | 'repeated-review-finding'
@@ -81,6 +155,9 @@ export type WorkflowAutoPausedReason =
 
 export type WorkflowState = {
   current?: WorkflowPhase;
+  executionSource?: 'plan' | 'ticket';
+  ticketRun?: TicketRunState;
+  ticketRecovery?: TicketRecoveryState;
   phases: Record<WorkflowPhase, PhaseStatus>;
   warnings: string[];
   stats?: WorkflowStats;

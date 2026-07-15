@@ -1,4 +1,11 @@
-import type { WorkflowAutoPendingAction } from './workflow-core.ts';
+import type {
+  WorkflowAutoPendingAction,
+  WorkflowTicketPendingAction,
+} from './workflow-core.ts';
+import {
+  isTicketOperation,
+  isTicketSourceKind,
+} from './workflow-state-codec-ticket.ts';
 import {
   isNonNegativeSafeInteger,
   isOptionalString,
@@ -23,7 +30,9 @@ export function coerceAutoPendingAction(
   if (typeof value !== 'object' || value === null || Array.isArray(value))
     return undefined;
 
-  const candidate = value as Partial<WorkflowAutoPendingAction>;
+  const candidate = value as Partial<
+    Omit<WorkflowTicketPendingAction, 'executionSource'>
+  > & { executionSource?: 'plan' | 'ticket' };
   if (
     typeof candidate.key !== 'string' ||
     candidate.key.length === 0 ||
@@ -35,6 +44,12 @@ export function coerceAutoPendingAction(
   )
     return undefined;
   if (!isOptionalString(candidate.expandedPrompt)) return undefined;
+  if (
+    candidate.executionSource !== undefined &&
+    candidate.executionSource !== 'plan' &&
+    candidate.executionSource !== 'ticket'
+  )
+    return undefined;
   if (!isOptionalString(candidate.plan)) return undefined;
   if (!isOptionalString(candidate.taskId)) return undefined;
   if (
@@ -49,17 +64,63 @@ export function coerceAutoPendingAction(
   )
     return undefined;
 
-  return {
+  const common = {
     key: candidate.key,
     prompt: candidate.prompt,
-    expandedPrompt: candidate.expandedPrompt,
-    plan: candidate.plan,
-    taskId: candidate.taskId,
-    taskIndex: candidate.taskIndex,
-    taskTitle: candidate.taskTitle,
-    sliceIndex: candidate.sliceIndex,
+    ...(candidate.expandedPrompt !== undefined
+      ? { expandedPrompt: candidate.expandedPrompt }
+      : {}),
     reason: candidate.reason,
     attempts: candidate.attempts,
     createdAt: candidate.createdAt,
+  };
+  if (candidate.executionSource === 'ticket') {
+    if (
+      !isTicketSourceKind(candidate.sourceKind) ||
+      !isOptionalString(candidate.claimId) ||
+      typeof candidate.ticketRef !== 'string' ||
+      candidate.ticketRef.length === 0 ||
+      typeof candidate.runId !== 'string' ||
+      candidate.runId.length === 0 ||
+      !isTicketOperation(candidate.operation) ||
+      typeof candidate.attemptMarker !== 'string' ||
+      candidate.attemptMarker.length === 0 ||
+      candidate.plan !== undefined ||
+      candidate.taskId !== undefined ||
+      candidate.taskIndex !== undefined ||
+      candidate.taskTitle !== undefined ||
+      candidate.sliceIndex !== undefined
+    )
+      return undefined;
+    return {
+      ...common,
+      executionSource: 'ticket',
+      sourceKind: candidate.sourceKind,
+      ticketRef: candidate.ticketRef,
+      runId: candidate.runId,
+      ...(candidate.claimId !== undefined
+        ? { claimId: candidate.claimId }
+        : {}),
+      operation: candidate.operation,
+      attemptMarker: candidate.attemptMarker,
+    };
+  }
+
+  return {
+    ...common,
+    ...(candidate.executionSource === 'plan'
+      ? { executionSource: 'plan' as const }
+      : {}),
+    ...(candidate.plan !== undefined ? { plan: candidate.plan } : {}),
+    ...(candidate.taskId !== undefined ? { taskId: candidate.taskId } : {}),
+    ...(candidate.taskIndex !== undefined
+      ? { taskIndex: candidate.taskIndex }
+      : {}),
+    ...(candidate.taskTitle !== undefined
+      ? { taskTitle: candidate.taskTitle }
+      : {}),
+    ...(candidate.sliceIndex !== undefined
+      ? { sliceIndex: candidate.sliceIndex }
+      : {}),
   };
 }
