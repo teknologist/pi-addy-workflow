@@ -2,9 +2,9 @@
 
 > **Navigation aid.** Library inventory extracted via AST. Read the source files listed here before modifying exported functions.
 
-**101 library files** across 1 module
+**102 library files** across 1 module
 
-## Extensions (101 files)
+## Extensions (102 files)
 
 - `extensions/workflow-monitor/external-progress.ts` — canonicalGitCommonDir, externalProgressProjectKey, externalProgressRoot, externalProgressRunsDir, parseIssueImplementationProgressSnapshot, startExternalProgress, …
 - `extensions/workflow-monitor/auto-runner-lock.ts` — getAutoRunnerInstanceId, autoRunnerLockDir, acquireAutoRunnerLock, verifyAutoRunnerLock, renewAutoRunnerLock, releaseAutoRunnerLock, …
@@ -31,7 +31,7 @@
 - `extensions/workflow-monitor/workflow-widget-presenter.ts` — renderWorkflowStrip, workflowArtifactForFooter, workflowArtifactName, workflowTaskFooterLine, renderWorkflowWidget, WORKFLOW_WIDGET_KEY
 - `extensions/workflow-monitor/auto-action-keys.ts` — idleUserMessageKey, autoWorkflowActionKey, autoWorkflowActionKeyForAction, autoWorkflowActionKeyForPromptState, currentAutoWorkflowActionKey
 - `extensions/workflow-monitor/prompt-template.ts` — expandPackagedPromptTemplate, parseTemplateArgs, stripFrontmatter, substituteTemplateArgs, PromptTemplateDeps
-- _…and 76 more files_
+- _…and 77 more files_
 
 ---
 _Back to [overview.md](./overview.md)_

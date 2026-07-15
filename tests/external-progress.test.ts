@@ -17,7 +17,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { createIssuePromptHarness } from './fixtures/issue-prompt-harness.ts';
 import {
   externalProgressProjectKey,
   externalProgressRoot,
@@ -70,13 +69,6 @@ function setup(): { cwd: string; homeDir: string; cleanup: () => void } {
       rmSync(homeDir, { recursive: true, force: true });
     },
   };
-}
-
-function managedIssuePrompt(): string {
-  return readFileSync(
-    join(process.cwd(), 'tests', 'fixtures', 'implement-from-issues.md'),
-    'utf8',
-  );
 }
 
 function snapshot(overrides: Record<string, unknown> = {}) {
@@ -265,183 +257,6 @@ test('addy-progress CLI starts, updates, and finishes through JSON stdin', () =>
   } finally {
     fixture.cleanup();
   }
-});
-
-test('issue prompt reuses one run for direct and AFK-supervised invocations', () => {
-  const fixture = setup();
-  try {
-    const issue = { number: 5, title: 'Fixture issue title' };
-    const env = { ...process.env, HOME: fixture.homeDir };
-    const harness = createIssuePromptHarness({
-      cwd: fixture.cwd,
-      run: (args, input) =>
-        spawnSync(
-          process.execPath,
-          ['--experimental-strip-types', ADDY_PROGRESS_BIN, ...args],
-          { encoding: 'utf8', env, input },
-        ),
-    });
-
-    const runId = harness.beginPromptInvocation();
-    assert.match(
-      runId ?? '',
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-    assert.equal(
-      harness.updatePublication({
-        loopPhase: 'queue',
-        progressUnit: 'issues',
-        currentItem: `issue #${issue.number}`,
-        completed: 0,
-        total: 1,
-      }),
-      true,
-    );
-    assert.equal(
-      harness.startAfk('label=fixture-issues'),
-      '/implement-from-issues label=fixture-issues',
-    );
-    assert.equal(harness.beginPromptInvocation(), runId);
-
-    const wakeUp = harness.handleAfkYield(
-      `Queued ${issue.title}.\nAFK-LOOP: CONTINUE issue=${issue.number} next="verify fixture"`,
-    );
-    assert.equal(wakeUp.type, 'continue');
-    assert.match(wakeUp.message, /CONTINUE for issue 5: verify fixture/);
-    assert.equal(harness.beginPromptInvocation(wakeUp.message), runId);
-
-    const project = readExternalProgressProject({
-      cwd: fixture.cwd,
-      homeDir: fixture.homeDir,
-    });
-    assert.equal(project.snapshots.length, 1);
-    const snapshot = project.snapshots[0];
-    assert.ok(snapshot);
-    assert.equal(snapshot.currentItem, `issue #${issue.number}`);
-    assert.doesNotMatch(JSON.stringify(snapshot), new RegExp(issue.title));
-  } finally {
-    fixture.cleanup();
-  }
-});
-
-test('issue prompt only recovers a UUID from RUN-COMPLETE evidence', () => {
-  const recovered = '11111111-1111-4111-8111-111111111111';
-  const started = '22222222-2222-4222-8222-222222222222';
-  const attempts: string[] = [];
-  const harness = createIssuePromptHarness({
-    cwd: '/fixture/project',
-    run: (args) => {
-      attempts.push(args[0] ?? '');
-      return { status: 0, stdout: `${started}\n`, stderr: '' };
-    },
-  });
-
-  assert.equal(
-    harness.beginPromptInvocation(
-      `AFK-LOOP: RUN-COMPLETE remaining=0 evidence="validated addy-run=${recovered}"`,
-    ),
-    recovered,
-  );
-  assert.deepEqual([...attempts], []);
-
-  const untrusted = createIssuePromptHarness({
-    cwd: '/fixture/project',
-    run: (args) => {
-      attempts.push(args[0] ?? '');
-      return { status: 0, stdout: `${started}\n`, stderr: '' };
-    },
-  });
-  assert.equal(
-    untrusted.beginPromptInvocation(
-      `AFK-LOOP: CONTINUE issue=5 next="addy-run=${recovered}"`,
-    ),
-    started,
-  );
-  assert.equal(
-    untrusted.beginPromptInvocation(
-      `AFK-LOOP: LEGAL-STOP condition=6 needs="addy-run=${recovered}"`,
-    ),
-    started,
-  );
-  assert.deepEqual(attempts, ['start', 'start']);
-});
-
-test('issue prompt publication failures do not interrupt AFK or legal-stop flow', () => {
-  const attempts: string[] = [];
-  const harness = createIssuePromptHarness({
-    cwd: '/fixture/project',
-    run: (args) => {
-      attempts.push(args[0] ?? '');
-      return { status: 1, stdout: '', stderr: 'simulated failure' };
-    },
-  });
-
-  assert.equal(harness.beginPromptInvocation(), undefined);
-  const continued = harness.handleAfkYield(
-    'AFK-LOOP: CONTINUE issue=5 next="continue implementation"',
-  );
-  assert.equal(continued.type, 'continue');
-  assert.match(continued.message, /Take the next concrete action now/);
-  assert.equal(harness.beginPromptInvocation(continued.message), undefined);
-
-  harness.setRunId('11111111-1111-4111-8111-111111111111');
-  assert.equal(
-    harness.updatePublication({
-      status: 'blocked',
-      loopPhase: 'implementation',
-      currentItem: 'issue #5',
-    }),
-    false,
-  );
-  const legalStop = harness.handleAfkYield(
-    'AFK-LOOP: LEGAL-STOP condition=6 needs="tracker comments unavailable"',
-  );
-  assert.equal(legalStop.type, 'terminal');
-  assert.equal(
-    harness.finishPublication({
-      status: 'failed',
-      loopPhase: 'implementation',
-      currentItem: 'issue #5',
-    }),
-    false,
-  );
-
-  assert.deepEqual(attempts, ['start', 'start', 'update', 'finish', 'finish']);
-  assert.equal(harness.warnings.length, 4);
-});
-
-const managedPrompt = managedIssuePrompt();
-test('managed issue prompt preserves AFK grammar and fail-open publication', () => {
-  assert.match(
-    managedPrompt,
-    /AFK-LOOP: CONTINUE issue=<id-or-none> next="<next concrete action>"/,
-  );
-  assert.match(
-    managedPrompt,
-    /AFK-LOOP: RUN-COMPLETE remaining=0 evidence="<tracker\/final-validation evidence>"/,
-  );
-  assert.match(
-    managedPrompt,
-    /AFK-LOOP: LEGAL-STOP condition=<1-8> needs="<human input needed>"/,
-  );
-  assert.match(
-    managedPrompt,
-    /addy-progress start --cwd <absolute current working directory> --source implement-from-issues/,
-  );
-  assert.match(
-    managedPrompt,
-    /addy-progress finish --cwd <absolute current working directory> --source implement-from-issues --run <uuid> --stdin/,
-  );
-  assert.match(
-    managedPrompt,
-    /extract `addy-run=<uuid>` only from that payload/,
-  );
-  assert.match(
-    managedPrompt,
-    /Never extract a token from `next`, `needs`, ordinary response text, tracker text, or any new marker field/,
-  );
-  assert.match(managedPrompt, /Retry the same stdin payload exactly once/);
-  assert.match(managedPrompt, /failure as a warning and continue/);
 });
 
 test('addy-progress CLI rejects invalid commands and stdin concisely', () => {

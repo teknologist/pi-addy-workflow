@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 1 routes (1 inferred) | 0 models | 0 components | 101 lib files | 7 env vars | 2 middleware | 100% test coverage
-> **Token savings:** this file is ~9,200 tokens. Without it, AI exploration would cost ~37,300 tokens. **Saves ~28,100 tokens per conversation.**
-> **Last scanned:** 2026-07-15 07:54 — re-run after significant changes
+> 1 routes (1 inferred) | 0 models | 0 components | 102 lib files | 7 env vars | 2 middleware | 1 events | 100% test coverage
+> **Token savings:** this file is ~9,300 tokens. Without it, AI exploration would cost ~37,800 tokens. **Saves ~28,500 tokens per conversation.**
+> **Last scanned:** 2026-07-15 11:06 — re-run after significant changes
 
 ---
 
@@ -40,6 +40,7 @@
   - function dashboardShimContent: (sourcePath) => string
   - function progressShimContent: (sourcePath) => string
   - _...9 more_
+- `extensions/implement-afk-issues/index.ts` — function parseAfkMarker: (text) => AfkMarker | null, function reduceAfkState: (current, marker) => AfkState
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string
@@ -464,10 +465,16 @@
 
 ---
 
+# Events & Queues
+
+- `agent_end` [event] — `tests/implement-issues-integration.test.ts`
+
+---
+
 # Test Coverage
 
 > **100%** of routes and models are covered by tests
-> 85 test files found
+> 83 test files found
 
 ## Covered Routes
 

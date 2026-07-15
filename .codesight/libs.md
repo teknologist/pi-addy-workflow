@@ -24,6 +24,7 @@
   - function dashboardShimContent: (sourcePath) => string
   - function progressShimContent: (sourcePath) => string
   - _...9 more_
+- `extensions/implement-afk-issues/index.ts` — function parseAfkMarker: (text) => AfkMarker | null, function reduceAfkState: (current, marker) => AfkState
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string
