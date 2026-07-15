@@ -29,9 +29,11 @@ const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const TERMINAL_STATUSES = new Set<ExternalProgressTerminalStatus>([
   'completed',
   'failed',
+  'aborted',
 ]);
 const ACTIVE_STATUSES = new Set<ExternalProgressActiveStatus>([
   'running',
+  'paused',
   'blocked',
 ]);
 const SOURCES = new Set<ExternalProgressSource>([
@@ -77,8 +79,8 @@ const UUID_PATTERN =
 const PROJECT_KEY_PATTERN = /^[0-9a-f]{24}$/;
 
 type ExternalProgressSource = 'df-implement-issues' | 'implement-from-issues';
-type ExternalProgressActiveStatus = 'running' | 'blocked';
-type ExternalProgressTerminalStatus = 'completed' | 'failed';
+type ExternalProgressActiveStatus = 'running' | 'paused' | 'blocked';
+type ExternalProgressTerminalStatus = 'completed' | 'failed' | 'aborted';
 type ExternalProgressStatus =
   | ExternalProgressActiveStatus
   | ExternalProgressTerminalStatus;

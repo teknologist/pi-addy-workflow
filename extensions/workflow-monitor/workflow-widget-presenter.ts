@@ -331,11 +331,14 @@ function externalProgressLines(baseCwd: string | undefined): string[] {
       ...selection.active.map(externalProgressLine),
       ...(selection.terminal ? [externalProgressLine(selection.terminal)] : []),
     ];
-    externalProgressLineCache.set(cacheKey, { expiresAt: now + 1_000, lines });
+    externalProgressLineCache.set(cacheKey, {
+      expiresAt: Date.now() + 1_000,
+      lines,
+    });
     return lines;
   } catch {
     externalProgressLineCache.set(cacheKey, {
-      expiresAt: now + 1_000,
+      expiresAt: Date.now() + 1_000,
       lines: [],
     });
     return [];
