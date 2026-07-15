@@ -1072,7 +1072,59 @@ test('does not steal a Windows lock owned by a matching live instance', async ()
   }
 });
 
-test('does not steal a macOS lock when same-second process identity is ambiguous', async () => {
+test('reclaims an abandoned macOS lock after same-second PID reuse', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    const script = `
+      import childProcess from 'node:child_process';
+      import { utimesSync, writeFileSync } from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'ps'
+          ? 'Wed Jul 14 12:00:00 2026\\n'
+          : originalExecFileSync(file, args, options);
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      writeFileSync(process.argv[3], JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: 'Wed Jul 14 12:00:00 2026',
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }));
+      utimesSync(process.argv[3], new Date(0), new Date(0));
+      process.stdout.write('LOCK_OWNER_PUBLISHED\\n');
+      await new Promise((resolve) => process.stdin.once('data', resolve));
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(
+      script,
+      [fixture.cwd, fixture.homeDir, lockPath],
+      undefined,
+      'LOCK_OWNER_PUBLISHED',
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(lockPath), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('does not steal a fresh macOS lock with a matching live identity', async () => {
   const fixture = setup();
   try {
     startExternalProgress({
@@ -1100,12 +1152,10 @@ test('does not steal a macOS lock when same-second process identity is ambiguous
         pid: process.pid,
         pidStartedAt: 'Wed Jul 14 12:00:00 2026',
         token: '11111111-1111-4111-8111-111111111111',
-        createdAt: 0,
+        createdAt: Date.now(),
       }));
       process.stdout.write('LOCK_OWNER_PUBLISHED\\n');
       await new Promise((resolve) => process.stdin.once('data', resolve));
-      let dateNowCalls = 0;
-      Date.now = () => (dateNowCalls++ === 0 ? 0 : 5_000);
       startExternalProgress({
         cwd: process.argv[1],
         homeDir: process.argv[2],
@@ -1121,6 +1171,85 @@ test('does not steal a macOS lock when same-second process identity is ambiguous
     assert.notEqual(result.code, 0);
     assert.match(result.stderr, /Could not acquire external progress lock/);
     assert.equal(existsSync(lockPath), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('a reclaimed macOS lease fences a resumed stale owner before publication', async () => {
+  const fixture = setup();
+  try {
+    const runsDir = externalProgressRunsDir({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    });
+    const lockPath = join(runsDir, '.start.lock');
+    const contender = `
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'ps'
+          ? 'Wed Jul 14 12:00:00 2026\\n'
+          : originalExecFileSync(file, args, options);
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const script = `
+      import childProcess from 'node:child_process';
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'ps'
+          ? 'Wed Jul 14 12:00:00 2026\\n'
+          : originalExecFileSync(file, args, options);
+      const originalWriteFileSync = fs.writeFileSync;
+      let raced = false;
+      fs.writeFileSync = (path, data, options) => {
+        originalWriteFileSync(path, data, options);
+        if (!raced && typeof path === 'string' && path.includes('.json.tmp-')) {
+          raced = true;
+          fs.utimesSync(process.argv[3], new Date(0), new Date(0));
+          const result = childProcess.spawnSync(process.execPath, [
+            '--experimental-strip-types',
+            '--input-type=module',
+            '--eval',
+            process.argv[4],
+            process.argv[1],
+            process.argv[2],
+          ], { encoding: 'utf8' });
+          if (result.status !== 0) throw new Error(result.stderr);
+        }
+      };
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [
+      fixture.cwd,
+      fixture.homeDir,
+      lockPath,
+      contender,
+    ]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /External progress lock lease was lost/);
+    const snapshots = readExternalProgressProject({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    }).snapshots.filter((entry) => entry.source === 'implement-from-issues');
+    assert.equal(snapshots.length, 1);
   } finally {
     fixture.cleanup();
   }
