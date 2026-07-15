@@ -314,10 +314,13 @@ test('dashboard client escapes issue workflow text and renders partial counters'
   assert.match(totalOnly, /8 total/);
 });
 
-test('dashboard external progress cache hits then expires', async () => {
+test('dashboard external progress cache hits then expires', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-cache-'));
   const stateDir = join(cwd, 'state');
   const homeDir = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-cache-home-'));
+  const originalDateNow = Date.now;
+  const cacheTimes = [0, 100, 101, 151];
+  Date.now = () => cacheTimes.shift() ?? 151;
   try {
     writeFileSync(join(cwd, 'README.md'), 'fixture\n', 'utf8');
     execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
@@ -343,9 +346,9 @@ test('dashboard external progress cache hits then expires', async () => {
       { homeDir },
     );
     assert.equal(dashboardSnapshot(options).externalRuns, undefined);
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 75));
     assert.equal(dashboardSnapshot(options).externalRuns?.length, 1);
   } finally {
+    Date.now = originalDateNow;
     rmSync(cwd, { recursive: true, force: true });
     rmSync(homeDir, { recursive: true, force: true });
   }
