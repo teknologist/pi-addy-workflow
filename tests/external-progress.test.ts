@@ -628,6 +628,54 @@ test('concurrent starts reuse one active run per project and source', () => {
   }
 });
 
+test('blocked runs are reused and resume without resetting progress', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'implement-from-issues',
+      now: TIME,
+    });
+    const blocked = updateExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      patch: {
+        status: 'blocked',
+        loopPhase: 'queue',
+        progressUnit: 'issues',
+        currentItem: 'Issue two',
+        completed: 1,
+        total: 3,
+      },
+      now: new Date(TIME.getTime() + 1),
+    });
+
+    const reused = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'implement-from-issues',
+      now: new Date(TIME.getTime() + 2),
+    });
+    assert.deepEqual(reused, blocked);
+
+    const resumed = updateExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      patch: { status: 'running' },
+      now: new Date(TIME.getTime() + 3),
+    });
+    assert.equal(resumed.runId, run.runId);
+    assert.equal(resumed.status, 'running');
+    assert.equal(resumed.loopPhase, 'queue');
+    assert.equal(resumed.currentItem, 'Issue two');
+    assert.equal(resumed.completed, 1);
+    assert.equal(resumed.total, 3);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('separate processes serialize concurrent starts to one active run', async () => {
   const fixture = setup();
   try {
