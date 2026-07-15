@@ -40,7 +40,6 @@
       "extensions/bootstrap.ts",
       "extensions/agent-installer.ts",
       "extensions/dashboard-installer.ts",
-      "extensions/implement-afk-issues/index.ts",
       "extensions/workflow-monitor.ts"
     ],
     "skills": [

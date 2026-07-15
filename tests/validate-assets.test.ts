@@ -64,7 +64,6 @@ test('package manifest exposes Pi resources but not native agents', async () => 
     'extensions/bootstrap.ts',
     'extensions/agent-installer.ts',
     'extensions/dashboard-installer.ts',
-    'extensions/implement-afk-issues/index.ts',
     'extensions/workflow-monitor.ts',
   ]);
   assert.equal(manifest.pi.agents, undefined);

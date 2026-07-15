@@ -4,6 +4,4 @@ node_modules/
 .codesight/
 .lean-ctx/
 .worktrees/
-extensions/implement-afk-issues/index.ts
-prompts/implement-from-issues.md
 *.tgz

@@ -259,6 +259,39 @@ test('addy-progress CLI starts, updates, and finishes through JSON stdin', () =>
   }
 });
 
+test('addy-progress CLI reuses the active implement-from-issues publication', () => {
+  const fixture = setup();
+  try {
+    const env = { ...process.env, HOME: fixture.homeDir };
+    const args = [
+      '--experimental-strip-types',
+      ADDY_PROGRESS_BIN,
+      'start',
+      '--cwd',
+      fixture.cwd,
+      '--source',
+      'implement-from-issues',
+    ];
+
+    const direct = spawnSync(process.execPath, args, { encoding: 'utf8', env });
+    assert.equal(direct.status, 0, direct.stderr);
+
+    const wakeUp = spawnSync(process.execPath, args, { encoding: 'utf8', env });
+    assert.equal(wakeUp.status, 0, wakeUp.stderr);
+    assert.equal(wakeUp.stdout, direct.stdout);
+
+    const project = readExternalProgressProject({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    });
+    assert.equal(project.snapshots.length, 1);
+    assert.equal(project.snapshots[0]?.source, 'implement-from-issues');
+    assert.equal(project.snapshots[0]?.runId, direct.stdout.trim());
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('addy-progress CLI rejects invalid commands and stdin concisely', () => {
   const fixture = setup();
   try {

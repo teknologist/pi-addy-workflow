@@ -11,7 +11,7 @@ declare module '@earendil-works/pi-coding-agent' {
       event: string,
       handler: (event: any, ctx: any) => unknown | Promise<unknown>,
     ): void;
-    registerCommand(
+    registerCommand?(
       name: string,
       config: { description?: string; handler: CommandHandler },
     ): void;
@@ -19,7 +19,7 @@ declare module '@earendil-works/pi-coding-agent' {
       customType: string,
       renderer: (message: any, options: any, theme: any) => unknown,
     ): void;
-    sendMessage(
+    sendMessage?(
       message: {
         customType: string;
         content: string | unknown[];
@@ -28,7 +28,7 @@ declare module '@earendil-works/pi-coding-agent' {
       },
       options?: Record<string, unknown>,
     ): void;
-    appendEntry(type: string, data: unknown): void;
-    sendUserMessage(message: string, options?: Record<string, unknown>): void;
+    appendEntry?(type: string, data: unknown): void;
+    sendUserMessage?(message: string, options?: Record<string, unknown>): void;
   };
 }

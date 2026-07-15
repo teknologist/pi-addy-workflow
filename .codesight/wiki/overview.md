@@ -6,13 +6,13 @@
 
 ## Scale
 
-1 API routes · 102 library files · 2 middleware layers · 7 environment variables
+1 API routes · 101 library files · 2 middleware layers · 7 environment variables
 
 ## Subsystems
 
 - **[Dashboard-server](./dashboard-server.md)** — 1 routes — touches: auth, cache, queue
 
-**Libraries:** 102 files — see [libraries.md](./libraries.md)
+**Libraries:** 101 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
