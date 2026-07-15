@@ -516,7 +516,7 @@ function dashboardExternalProgress(
   }
   if (cacheMs > 0)
     dashboardExternalProgressCache.set(cacheKey, {
-      expiresAt: now + cacheMs,
+      expiresAt: Date.now() + cacheMs,
       value,
     });
   return value;
