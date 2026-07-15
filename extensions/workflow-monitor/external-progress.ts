@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  readFileSync,
   readSync,
   realpathSync,
   renameSync,
@@ -180,30 +181,46 @@ export type FinishExternalProgressInput = StorageOptions & {
   now?: Date;
 };
 
+class NotGitRepositoryError extends Error {}
+
 /** Returns the canonical Git common directory shared by a checkout and its worktrees. */
 export function canonicalGitCommonDir({
   cwd,
 }: Pick<ProjectOptions, 'cwd'>): string {
+  let commonDir: string;
   try {
-    const commonDir = execFileSync(
+    commonDir = execFileSync(
       'git',
       ['rev-parse', '--path-format=absolute', '--git-common-dir'],
       { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     ).trim();
-    if (!commonDir || !isAbsolute(commonDir)) {
-      throw new Error('Git did not return an absolute common directory');
+  } catch (error) {
+    const stderr = String((error as { stderr?: string | Buffer }).stderr ?? '');
+    if (/not a git repository/i.test(stderr)) {
+      throw new NotGitRepositoryError(
+        `External progress requires a Git checkout: ${cwd}`,
+      );
     }
-    return resolve(commonDir);
-  } catch {
-    throw new Error(`External progress requires a Git checkout: ${cwd}`);
+    throw error;
   }
+  if (!commonDir || !isAbsolute(commonDir)) {
+    throw new Error('Git did not return an absolute common directory');
+  }
+  return resolve(commonDir);
 }
 
 /** Derives the stable project key from the Git common directory, never a worktree path. */
 export function externalProgressProjectKey({
   cwd,
 }: Pick<ProjectOptions, 'cwd'>): string {
-  return projectWorkflowStateKey({ cwd: canonicalGitCommonDir({ cwd }) });
+  let projectRoot: string;
+  try {
+    projectRoot = canonicalGitCommonDir({ cwd });
+  } catch (error) {
+    if (!(error instanceof NotGitRepositoryError)) throw error;
+    projectRoot = resolve(cwd);
+  }
+  return projectWorkflowStateKey({ cwd: projectRoot });
 }
 
 export function externalProgressRoot({ homeDir }: StorageOptions = {}): string {
@@ -219,7 +236,19 @@ export function externalProgressRunsDir({
   cwd,
   homeDir,
 }: ProjectOptions): string {
-  return runsDirForKey(externalProgressProjectKey({ cwd }), { homeDir });
+  const projectKey = externalProgressProjectKey({ cwd });
+  return safeStorageDirectory(
+    { homeDir },
+    [
+      '.pi',
+      'addy-workflow',
+      'external-progress',
+      'projects',
+      projectKey,
+      'runs',
+    ],
+    false,
+  );
 }
 
 /** Strictly decodes one schema-v1 snapshot and returns normalized display text. */
@@ -298,46 +327,51 @@ export function startExternalProgress(
   input: StartExternalProgressInput,
 ): IssueImplementationProgressSnapshot {
   const projectKey = externalProgressProjectKey(input);
-  const runsDir = ensureRunsDir(projectKey, input);
-  return withFileLock(join(runsDir, '.start.lock'), () => {
-    const stored = readProjectByKey(projectKey, input);
-    if (stored.diagnostics.length > 0) {
-      throw new Error('Cannot establish external progress run ownership');
-    }
-    const existing = stored.snapshots
-      .filter(
-        (snapshot) =>
-          snapshot.source === input.source &&
-          ACTIVE_STATUSES.has(snapshot.status as ExternalProgressActiveStatus),
-      )
-      .sort(compareSnapshots)[0];
-    if (existing) return existing;
+  return withRunsDirectory(projectKey, input, true, () =>
+    withFileLock('.start.lock', () => {
+      const stored = readProjectFromRunsDirectory(projectKey);
+      if (stored.diagnostics.length > 0) {
+        throw new Error('Cannot establish external progress run ownership');
+      }
+      const existing = stored.snapshots
+        .filter(
+          (snapshot) =>
+            snapshot.source === input.source &&
+            ACTIVE_STATUSES.has(
+              snapshot.status as ExternalProgressActiveStatus,
+            ),
+        )
+        .sort(compareSnapshots)[0];
+      if (existing) return existing;
 
-    const timestamp = isoNow(input.now);
-    const snapshot = parseIssueImplementationProgressSnapshot({
-      schemaVersion: SCHEMA_VERSION,
-      projectKey,
-      runId: randomUUID(),
-      ...(input.parentRunId === undefined
-        ? {}
-        : { parentRunId: input.parentRunId }),
-      source: input.source,
-      status: 'running',
-      loopPhase: input.loopPhase ?? 'pre-loop',
-      ...(input.progressUnit === undefined
-        ? {}
-        : { progressUnit: input.progressUnit }),
-      ...(input.currentItem === undefined
-        ? {}
-        : { currentItem: input.currentItem }),
-      ...(input.completed === undefined ? {} : { completed: input.completed }),
-      ...(input.total === undefined ? {} : { total: input.total }),
-      startedAt: timestamp,
-      updatedAt: timestamp,
-    });
-    persistSnapshot(snapshot, input, false);
-    return snapshot;
-  });
+      const timestamp = isoNow(input.now);
+      const snapshot = parseIssueImplementationProgressSnapshot({
+        schemaVersion: SCHEMA_VERSION,
+        projectKey,
+        runId: randomUUID(),
+        ...(input.parentRunId === undefined
+          ? {}
+          : { parentRunId: input.parentRunId }),
+        source: input.source,
+        status: 'running',
+        loopPhase: input.loopPhase ?? 'pre-loop',
+        ...(input.progressUnit === undefined
+          ? {}
+          : { progressUnit: input.progressUnit }),
+        ...(input.currentItem === undefined
+          ? {}
+          : { currentItem: input.currentItem }),
+        ...(input.completed === undefined
+          ? {}
+          : { completed: input.completed }),
+        ...(input.total === undefined ? {} : { total: input.total }),
+        startedAt: timestamp,
+        updatedAt: timestamp,
+      });
+      persistSnapshot(snapshot, false);
+      return snapshot;
+    }),
+  );
 }
 
 /** Applies a validated merge patch to one active run. */
@@ -346,28 +380,30 @@ export function updateExternalProgress(
 ): IssueImplementationProgressSnapshot {
   validatePatch(input.patch, false);
   const located = locateRun(input.runId, input);
-  return withFileLock(runLockPath(located.file, input.runId), () => {
-    const previous = locateRun(input.runId, input).snapshot;
-    if (
-      TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
-    ) {
-      throw new Error('Terminal external progress runs are immutable');
-    }
-    if (
-      input.patch.status !== undefined &&
-      !ACTIVE_STATUSES.has(input.patch.status as ExternalProgressActiveStatus)
-    ) {
-      throw new Error('Use finishExternalProgress for terminal statuses');
-    }
-    const next = applyPatch(
-      previous,
-      input.patch,
-      isoNowAfter(input.now, previous.updatedAt),
-    );
-    validateTransition(previous, next);
-    persistSnapshot(next, input, true);
-    return next;
-  });
+  return withRunsDirectory(located.projectKey, input, false, () =>
+    withFileLock(runLockPath(located.file, input.runId), () => {
+      const previous = readSnapshotFile(located.file);
+      if (
+        TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
+      ) {
+        throw new Error('Terminal external progress runs are immutable');
+      }
+      if (
+        input.patch.status !== undefined &&
+        !ACTIVE_STATUSES.has(input.patch.status as ExternalProgressActiveStatus)
+      ) {
+        throw new Error('Use finishExternalProgress for terminal statuses');
+      }
+      const next = applyPatch(
+        previous,
+        input.patch,
+        isoNowAfter(input.now, previous.updatedAt),
+      );
+      validateTransition(previous, next);
+      persistSnapshot(next, true);
+      return next;
+    }),
+  );
 }
 
 /** Marks one active run terminal, then best-effort retains the newest ten terminals. */
@@ -378,24 +414,26 @@ export function finishExternalProgress(
   if (!TERMINAL_STATUSES.has(input.status))
     throw new Error('Invalid terminal status');
   const located = locateRun(input.runId, input);
-  const next = withFileLock(runLockPath(located.file, input.runId), () => {
-    const previous = locateRun(input.runId, input).snapshot;
-    if (
-      TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
-    ) {
-      throw new Error('Terminal external progress runs are immutable');
-    }
-    const timestamp = isoNowAfter(input.now, previous.updatedAt);
-    const finished = parseIssueImplementationProgressSnapshot({
-      ...applyPatch(previous, input.patch ?? {}, timestamp),
-      status: input.status,
-      updatedAt: timestamp,
-      finishedAt: timestamp,
-    });
-    validateTransition(previous, finished);
-    persistSnapshot(finished, input, true);
-    return finished;
-  });
+  const next = withRunsDirectory(located.projectKey, input, false, () =>
+    withFileLock(runLockPath(located.file, input.runId), () => {
+      const previous = readSnapshotFile(located.file);
+      if (
+        TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
+      ) {
+        throw new Error('Terminal external progress runs are immutable');
+      }
+      const timestamp = isoNowAfter(input.now, previous.updatedAt);
+      const finished = parseIssueImplementationProgressSnapshot({
+        ...applyPatch(previous, input.patch ?? {}, timestamp),
+        status: input.status,
+        updatedAt: timestamp,
+        finishedAt: timestamp,
+      });
+      validateTransition(previous, finished);
+      persistSnapshot(finished, true);
+      return finished;
+    }),
+  );
   retainTerminalExternalProgress({
     projectKey: next.projectKey,
     homeDir: input.homeDir,
@@ -409,8 +447,10 @@ export function writeExternalProgressSnapshot(
   options: StorageOptions = {},
 ): IssueImplementationProgressSnapshot {
   const snapshot = parseIssueImplementationProgressSnapshot(snapshotValue);
-  persistSnapshot(snapshot, options, false);
-  return snapshot;
+  return withRunsDirectory(snapshot.projectKey, options, true, () => {
+    persistSnapshot(snapshot, false);
+    return snapshot;
+  });
 }
 
 /** Reads valid snapshots for the current Git project; malformed files become diagnostics. */
@@ -469,36 +509,38 @@ export function retainTerminalExternalProgress(
       ? undefined
       : externalProgressProjectKey({ cwd: options.cwd }));
   if (!projectKey) throw new Error('Retention requires cwd or projectKey');
-  const runsDir = runsDirForKey(projectKey, options);
+  validateProjectKey(projectKey);
   try {
-    withFileLock(join(runsDir, '.retention.lock'), () => {
-      const terminal = readProjectByKey(projectKey, options)
-        .snapshots.filter((snapshot) =>
-          TERMINAL_STATUSES.has(
-            snapshot.status as ExternalProgressTerminalStatus,
-          ),
-        )
-        .sort(compareTerminalSnapshots);
-      for (const snapshot of terminal.slice(10)) {
-        const file = join(runsDir, `${snapshot.runId}.json`);
-        try {
-          withFileLock(runLockPath(file, snapshot.runId), () => {
-            const current = readSnapshotFile(file);
-            if (
-              current.projectKey === projectKey &&
-              current.runId === snapshot.runId &&
-              TERMINAL_STATUSES.has(
-                current.status as ExternalProgressTerminalStatus,
-              )
-            ) {
-              rmSync(file, { force: true });
-            }
-          });
-        } catch {
-          // A racing mutation or deletion is non-fatal; never delete without revalidation.
+    withRunsDirectory(projectKey, options, false, () =>
+      withFileLock('.retention.lock', () => {
+        const terminal = readProjectFromRunsDirectory(projectKey)
+          .snapshots.filter((snapshot) =>
+            TERMINAL_STATUSES.has(
+              snapshot.status as ExternalProgressTerminalStatus,
+            ),
+          )
+          .sort(compareTerminalSnapshots);
+        for (const snapshot of terminal.slice(10)) {
+          const file = `${snapshot.runId}.json`;
+          try {
+            withFileLock(runLockPath(file, snapshot.runId), () => {
+              const current = readSnapshotFile(file);
+              if (
+                current.projectKey === projectKey &&
+                current.runId === snapshot.runId &&
+                TERMINAL_STATUSES.has(
+                  current.status as ExternalProgressTerminalStatus,
+                )
+              ) {
+                rmSync(file, { force: true });
+              }
+            });
+          } catch {
+            // A racing mutation or deletion is non-fatal; never delete without revalidation.
+          }
         }
-      }
-    });
+      }),
+    );
   } catch {
     // Retention is best-effort and never blocks a successful terminal write.
   }
@@ -508,34 +550,35 @@ function readProjectByKey(
   projectKey: string,
   options: StorageOptions,
 ): ExternalProgressReadResult {
-  let runsDir: string | undefined;
-  let names: string[];
   try {
-    runsDir = runsDirForKey(projectKey, options);
-    names = readdirSync(runsDir).filter((name) => name.endsWith('.json'));
+    return withRunsDirectory(projectKey, options, false, () =>
+      readProjectFromRunsDirectory(projectKey),
+    );
   } catch (error) {
     if (isMissingFileError(error)) return { snapshots: [], diagnostics: [] };
     return {
       snapshots: [],
       diagnostics: [
         {
-          file: runsDir ?? externalProgressRoot(options),
+          file: externalProgressRoot(options),
           message: 'External progress storage is unreadable',
         },
       ],
     };
   }
-  if (runsDir === undefined) return { snapshots: [], diagnostics: [] };
+}
+
+function readProjectFromRunsDirectory(
+  projectKey: string,
+): ExternalProgressReadResult {
   const snapshots: IssueImplementationProgressSnapshot[] = [];
   const diagnostics: ExternalProgressDiagnostic[] = [];
-  for (const name of names) {
-    const file = join(runsDir, name);
+  for (const file of readdirSync('.').filter((name) =>
+    name.endsWith('.json'),
+  )) {
     try {
       const parsed = readSnapshotFile(file);
-      if (
-        parsed.projectKey !== projectKey ||
-        basename(file) !== `${parsed.runId}.json`
-      ) {
+      if (parsed.projectKey !== projectKey || file !== `${parsed.runId}.json`) {
         throw new Error('Snapshot does not belong to this project/path');
       }
       snapshots.push(parsed);
@@ -549,30 +592,36 @@ function readProjectByKey(
 function locateRun(
   runId: string,
   options: StorageOptions & { cwd?: string; source?: ExternalProgressSource },
-): { snapshot: IssueImplementationProgressSnapshot; file: string } {
+): {
+  snapshot: IssueImplementationProgressSnapshot;
+  projectKey: string;
+  file: string;
+} {
   validateUuid(runId, 'runId');
   let projectKeys: string[];
   try {
     projectKeys = options.cwd
       ? [externalProgressProjectKey({ cwd: options.cwd })]
-      : readdirSync(
-          safeStorageDirectory(
-            options,
-            ['.pi', 'addy-workflow', 'external-progress', 'projects'],
-            false,
-          ),
-        ).filter((key) => PROJECT_KEY_PATTERN.test(key));
+      : withAnchoredStorageDirectory(
+          options,
+          ['.pi', 'addy-workflow', 'external-progress', 'projects'],
+          false,
+          () => readdirSync('.').filter((key) => PROJECT_KEY_PATTERN.test(key)),
+        );
   } catch {
     throw new Error(`Unknown external progress run: ${runId}`);
   }
   const matches: {
     snapshot: IssueImplementationProgressSnapshot;
+    projectKey: string;
     file: string;
   }[] = [];
   for (const projectKey of projectKeys) {
-    const file = join(runsDirForKey(projectKey, options), `${runId}.json`);
+    const file = `${runId}.json`;
     try {
-      const snapshot = readSnapshotFile(file);
+      const snapshot = withRunsDirectory(projectKey, options, false, () =>
+        readSnapshotFile(file),
+      );
       if (
         snapshot.projectKey !== projectKey ||
         snapshot.runId !== runId ||
@@ -580,7 +629,7 @@ function locateRun(
       ) {
         throw new Error('Run ownership mismatch');
       }
-      matches.push({ snapshot, file });
+      matches.push({ snapshot, projectKey, file });
     } catch (error) {
       if (isMissingFileError(error)) continue;
       throw new Error(`Cannot read external progress run: ${runId}`);
@@ -677,9 +726,14 @@ function validatePatch(
   }
 }
 
-function ensureRunsDir(projectKey: string, options: StorageOptions): string {
+function withRunsDirectory<T>(
+  projectKey: string,
+  options: StorageOptions,
+  create: boolean,
+  operation: () => T,
+): T {
   validateProjectKey(projectKey);
-  return safeStorageDirectory(
+  return withAnchoredStorageDirectory(
     options,
     [
       '.pi',
@@ -689,24 +743,86 @@ function ensureRunsDir(projectKey: string, options: StorageOptions): string {
       projectKey,
       'runs',
     ],
-    true,
+    create,
+    operation,
   );
 }
 
-function runsDirForKey(projectKey: string, options: StorageOptions): string {
-  validateProjectKey(projectKey);
-  return safeStorageDirectory(
-    options,
-    [
-      '.pi',
-      'addy-workflow',
-      'external-progress',
-      'projects',
-      projectKey,
-      'runs',
-    ],
-    false,
+function withAnchoredStorageDirectory<T>(
+  options: StorageOptions,
+  segments: string[],
+  create: boolean,
+  operation: () => T,
+): T {
+  const originalCwd = process.cwd();
+  const homeDir = realpathSync(resolve(options.homeDir ?? homedir()));
+  const expectedHome = directoryIdentity(homeDir);
+  process.chdir(homeDir);
+  try {
+    assertCurrentDirectory(expectedHome);
+    for (const [index, segment] of segments.entries()) {
+      const requirePrivate = index >= 2;
+      let expected: DirectoryIdentity;
+      try {
+        expected = storageDirectoryIdentity(segment, requirePrivate);
+      } catch (error) {
+        if (!isMissingFileError(error) || !create) throw error;
+        try {
+          mkdirSync(segment, { mode: 0o700 });
+        } catch (createError) {
+          if (!isAlreadyExistsError(createError)) throw createError;
+        }
+        expected = storageDirectoryIdentity(segment, requirePrivate);
+      }
+      process.chdir(segment);
+      assertCurrentDirectory(expected);
+    }
+    return operation();
+  } finally {
+    process.chdir(originalCwd);
+  }
+}
+
+type DirectoryIdentity = { dev: number | bigint; ino: number | bigint };
+
+function directoryIdentity(path: string): DirectoryIdentity {
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | (constants.O_DIRECTORY ?? 0),
   );
+  try {
+    const stat = fstatSync(descriptor, { bigint: true });
+    if (!stat.isDirectory())
+      throw new Error('Storage entry is not a directory');
+    return { dev: stat.dev, ino: stat.ino };
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function storageDirectoryIdentity(
+  segment: string,
+  requirePrivate: boolean,
+): DirectoryIdentity {
+  const entry = lstatSync(segment, { bigint: true });
+  if (entry.isSymbolicLink() || !entry.isDirectory())
+    throw new Error('External progress storage escapes its configured root');
+  if (
+    requirePrivate &&
+    process.platform !== 'win32' &&
+    (entry.mode & BigInt(0o077)) !== 0n
+  )
+    throw new Error('External progress storage must be private');
+  const effectiveUid = process.geteuid?.();
+  if (effectiveUid !== undefined && entry.uid !== BigInt(effectiveUid))
+    throw new Error('External progress storage must be owned by this user');
+  return { dev: entry.dev, ino: entry.ino };
+}
+
+function assertCurrentDirectory(expected: DirectoryIdentity): void {
+  const current = directoryIdentity('.');
+  if (current.dev !== expected.dev || current.ino !== expected.ino)
+    throw new Error('External progress storage changed while being opened');
 }
 
 function validateProjectKey(projectKey: string): void {
@@ -802,15 +918,10 @@ function readSnapshotFile(file: string): IssueImplementationProgressSnapshot {
 
 function persistSnapshot(
   snapshot: IssueImplementationProgressSnapshot,
-  options: StorageOptions,
   overwrite: boolean,
 ): void {
-  const runsDir = ensureRunsDir(snapshot.projectKey, options);
-  const destination = join(runsDir, `${snapshot.runId}.json`);
-  const temp = join(
-    runsDir,
-    `.${basename(destination)}.tmp-${process.pid}-${randomUUID()}`,
-  );
+  const destination = `${snapshot.runId}.json`;
+  const temp = `.${destination}.tmp-${process.pid}-${randomUUID()}`;
   try {
     writeFileSync(temp, `${JSON.stringify(snapshot)}\n`, {
       encoding: 'utf8',
@@ -847,7 +958,12 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
       descriptor = openSync(lockPath, 'wx', 0o600);
       writeFileSync(
         descriptor,
-        JSON.stringify({ pid: process.pid, token, createdAt: Date.now() }),
+        JSON.stringify({
+          pid: process.pid,
+          pidStartedAt: pidStartedAt(process.pid),
+          token,
+          createdAt: Date.now(),
+        }),
         'utf8',
       );
       if (hasReclaimMarker(lockPath) || !lockTokenMatches(lockPath, token)) {
@@ -879,7 +995,12 @@ function withFileLock<T>(lockPath: string, operation: () => T): T {
   }
 }
 
-type LockOwner = { pid: number; token: string; createdAt: number };
+type LockOwner = {
+  pid: number;
+  pidStartedAt?: string;
+  token: string;
+  createdAt: number;
+};
 
 function parseLockOwner(contents: string): LockOwner | undefined {
   try {
@@ -887,6 +1008,8 @@ function parseLockOwner(contents: string): LockOwner | undefined {
     if (
       !Number.isSafeInteger(owner.pid) ||
       (owner.pid as number) <= 0 ||
+      (owner.pidStartedAt !== undefined &&
+        typeof owner.pidStartedAt !== 'string') ||
       typeof owner.token !== 'string' ||
       !UUID_PATTERN.test(owner.token) ||
       !Number.isSafeInteger(owner.createdAt) ||
@@ -911,7 +1034,7 @@ function reclaimAbandonedLock(lockPath: string): boolean {
       Date.now() - observed.mtimeMs <= LOCK_STALE_AFTER_MS
     )
       return false;
-    if (observedOwner !== undefined && isProcessAlive(observedOwner.pid))
+    if (observedOwner !== undefined && lockOwnerIsLive(observedOwner))
       return false;
   } catch (error) {
     if (isMissingFileError(error)) return true;
@@ -934,7 +1057,8 @@ function reclaimAbandonedLock(lockPath: string): boolean {
     }
   }
 
-  const quarantine = `${lockPath}.reclaim-${process.pid}-${randomUUID()}`;
+  const reclaimerIdentity = markerIdentity(pidStartedAt(process.pid));
+  const quarantine = `${lockPath}.reclaim-${process.pid}-${reclaimerIdentity}-${randomUUID()}`;
   try {
     renameSync(lockPath, quarantine);
     const moved = readBoundedRegularFile(quarantine, MAX_LOCK_BYTES);
@@ -944,7 +1068,7 @@ function reclaimAbandonedLock(lockPath: string): boolean {
     if (
       !sameGeneration(observed, moved) ||
       moved.contents !== observed.contents ||
-      (movedOwner !== undefined && isProcessAlive(movedOwner.pid)) ||
+      (movedOwner !== undefined && lockOwnerIsLive(movedOwner)) ||
       (observedToken !== undefined && movedToken !== observedToken)
     ) {
       renameSync(quarantine, lockPath);
@@ -964,18 +1088,21 @@ function hasReclaimMarker(lockPath: string): boolean {
     for (const name of readdirSync(dirname(lockPath))) {
       if (!name.startsWith(prefix)) continue;
       const markerPath = join(dirname(lockPath), name);
-      const pidText = name.slice(prefix.length).split('-', 1)[0];
-      const reclaimerPid = Number(pidText);
+      const markerParts = name.slice(prefix.length).split('-');
+      const reclaimerPid = Number(markerParts[0]);
+      const reclaimerIdentity = /^[a-f0-9]{16}$/.test(markerParts[1] ?? '')
+        ? markerParts[1]
+        : undefined;
       if (
         Number.isSafeInteger(reclaimerPid) &&
         reclaimerPid > 0 &&
-        isProcessAlive(reclaimerPid)
+        markerProcessIsLive(reclaimerPid, reclaimerIdentity)
       )
         return true;
       try {
         const quarantined = readBoundedRegularFile(markerPath, MAX_LOCK_BYTES);
         const owner = parseLockOwner(quarantined.contents);
-        if (owner !== undefined && isProcessAlive(owner.pid)) {
+        if (owner !== undefined && lockOwnerIsLive(owner)) {
           try {
             linkSync(markerPath, lockPath);
             rmSync(markerPath, { force: true });
@@ -997,6 +1124,75 @@ function hasReclaimMarker(lockPath: string): boolean {
 
 function sameGeneration(left: BoundedFile, right: BoundedFile): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function markerIdentity(identity: string | undefined): string {
+  return identity === undefined
+    ? 'unknown'
+    : createHash('sha256').update(identity).digest('hex').slice(0, 16);
+}
+
+function markerProcessIsLive(
+  pid: number,
+  markerIdentityValue?: string,
+): boolean {
+  if (!isProcessAlive(pid)) return false;
+  const currentIdentity = pidStartedAt(pid);
+  return !(
+    markerIdentityValue !== undefined &&
+    markerIdentityValue !== 'unknown' &&
+    currentIdentity !== undefined &&
+    markerIdentityValue !== markerIdentity(currentIdentity)
+  );
+}
+
+function lockOwnerIsLive(owner: LockOwner): boolean {
+  if (!isProcessAlive(owner.pid)) return false;
+  const currentIdentity = pidStartedAt(owner.pid);
+  if (owner.pidStartedAt === undefined || currentIdentity === undefined)
+    return true;
+  // macOS exposes process start time only to the second. Equal identities are
+  // therefore ambiguous and must fail closed rather than steal a live lock.
+  return owner.pidStartedAt === currentIdentity;
+}
+
+function pidStartedAt(pid: number): string | undefined {
+  try {
+    if (process.platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return stat
+        .slice(stat.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/)[19];
+    }
+    if (process.platform === 'darwin') {
+      return (
+        execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim() || undefined
+      );
+    }
+    if (process.platform === 'win32') {
+      const startedAt = execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
+        ],
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      ).trim();
+      return /^\d+$/.test(startedAt) ? startedAt : undefined;
+    }
+  } catch {
+    // Process start identities are unavailable on this platform.
+  }
+  return undefined;
 }
 
 function isProcessAlive(pid: number): boolean {
