@@ -781,6 +781,52 @@ test('workflow widget appends selected external runs after unchanged Addy lines'
   }
 });
 
+test('workflow widget cache lifetime starts after snapshot selection', () => {
+  const fixture = externalProgressFixture();
+  const realNow = Date.now;
+  try {
+    const runId = '55555555-5555-4555-8555-555555555555';
+    writeExternalProgressSnapshot(
+      {
+        schemaVersion: 1,
+        projectKey: externalProgressProjectKey({ cwd: fixture.cwd }),
+        runId,
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'implementation',
+        startedAt: '2026-07-14T12:00:00.000Z',
+        updatedAt: '2026-07-14T12:00:00.000Z',
+      },
+      { homeDir: fixture.homeDir },
+    );
+    const times = [0, 2_000, 2_000];
+    let calls = 0;
+    Date.now = () => times[Math.min(calls++, times.length - 1)]!;
+    const state = createInitialWorkflowState();
+
+    const first = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+    rmSync(
+      join(
+        externalProgressRunsDir({
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+        }),
+        `${runId}.json`,
+      ),
+    );
+    const second = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+
+    assert.deepEqual(second, first);
+  } finally {
+    Date.now = realNow;
+    fixture.cleanup();
+  }
+});
+
 test('workflow widget preserves baseline lines for missing or corrupt external snapshots', () => {
   const fixture = externalProgressFixture();
   try {
