@@ -328,7 +328,7 @@ export function startExternalProgress(
 ): IssueImplementationProgressSnapshot {
   const projectKey = externalProgressProjectKey(input);
   return withRunsDirectory(projectKey, input, true, () =>
-    withFileLock('.start.lock', (assertOwned) => {
+    withFileLock('.start.lock', () => {
       const stored = readProjectFromRunsDirectory(projectKey);
       if (stored.diagnostics.length > 0) {
         throw new Error('Cannot establish external progress run ownership');
@@ -368,7 +368,7 @@ export function startExternalProgress(
         startedAt: timestamp,
         updatedAt: timestamp,
       });
-      persistSnapshot(snapshot, false, assertOwned);
+      persistSnapshot(snapshot, false);
       return snapshot;
     }),
   );
@@ -381,7 +381,7 @@ export function updateExternalProgress(
   validatePatch(input.patch, false);
   const located = locateRun(input.runId, input);
   return withRunsDirectory(located.projectKey, input, false, () =>
-    withFileLock(runLockPath(located.file, input.runId), (assertOwned) => {
+    withFileLock(runLockPath(located.file, input.runId), () => {
       const previous = readSnapshotFile(located.file);
       if (
         TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
@@ -400,7 +400,7 @@ export function updateExternalProgress(
         isoNowAfter(input.now, previous.updatedAt),
       );
       validateTransition(previous, next);
-      persistSnapshot(next, true, assertOwned);
+      persistSnapshot(next, true);
       return next;
     }),
   );
@@ -415,7 +415,7 @@ export function finishExternalProgress(
     throw new Error('Invalid terminal status');
   const located = locateRun(input.runId, input);
   const next = withRunsDirectory(located.projectKey, input, false, () =>
-    withFileLock(runLockPath(located.file, input.runId), (assertOwned) => {
+    withFileLock(runLockPath(located.file, input.runId), () => {
       const previous = readSnapshotFile(located.file);
       if (
         TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
@@ -430,7 +430,7 @@ export function finishExternalProgress(
         finishedAt: timestamp,
       });
       validateTransition(previous, finished);
-      persistSnapshot(finished, true, assertOwned);
+      persistSnapshot(finished, true);
       return finished;
     }),
   );
@@ -523,7 +523,7 @@ export function retainTerminalExternalProgress(
         for (const snapshot of terminal.slice(10)) {
           const file = `${snapshot.runId}.json`;
           try {
-            withFileLock(runLockPath(file, snapshot.runId), (assertOwned) => {
+            withFileLock(runLockPath(file, snapshot.runId), () => {
               const current = readSnapshotFile(file);
               if (
                 current.projectKey === projectKey &&
@@ -532,7 +532,6 @@ export function retainTerminalExternalProgress(
                   current.status as ExternalProgressTerminalStatus,
                 )
               ) {
-                assertOwned();
                 rmSync(file, { force: true });
               }
             });
@@ -920,7 +919,6 @@ function readSnapshotFile(file: string): IssueImplementationProgressSnapshot {
 function persistSnapshot(
   snapshot: IssueImplementationProgressSnapshot,
   overwrite: boolean,
-  assertOwned?: () => void,
 ): void {
   const destination = `${snapshot.runId}.json`;
   const temp = `.${destination}.tmp-${process.pid}-${randomUUID()}`;
@@ -930,7 +928,6 @@ function persistSnapshot(
       mode: 0o600,
       flag: 'wx',
     });
-    assertOwned?.();
     if (overwrite) renameSync(temp, destination);
     else linkSync(temp, destination);
   } finally {
@@ -946,10 +943,7 @@ function runLockPath(file: string, runId: string): string {
   return join(dirname(file), `.run-${runId}.lock`);
 }
 
-function withFileLock<T>(
-  lockPath: string,
-  operation: (assertOwned: () => void) => T,
-): T {
+function withFileLock<T>(lockPath: string, operation: () => T): T {
   const token = randomUUID();
   const deadline = Date.now() + 5_000;
   let descriptor: number | undefined;
@@ -993,14 +987,8 @@ function withFileLock<T>(
       Atomics.wait(SLEEP_BUFFER, 0, 0, 10);
     }
   }
-  const assertOwned = (): void => {
-    if (!lockTokenMatches(lockPath, token))
-      throw new Error('External progress lock lease was lost');
-  };
   try {
-    const result = operation(assertOwned);
-    assertOwned();
-    return result;
+    return operation();
   } finally {
     closeSync(descriptor);
     releaseOwnedLock(lockPath, token);
@@ -1046,7 +1034,7 @@ function reclaimAbandonedLock(lockPath: string): boolean {
       Date.now() - observed.mtimeMs <= LOCK_STALE_AFTER_MS
     )
       return false;
-    if (observedOwner !== undefined && lockOwnerIsLive(observedOwner, observed))
+    if (observedOwner !== undefined && lockOwnerIsLive(observedOwner))
       return false;
   } catch (error) {
     if (isMissingFileError(error)) return true;
@@ -1080,7 +1068,7 @@ function reclaimAbandonedLock(lockPath: string): boolean {
     if (
       !sameGeneration(observed, moved) ||
       moved.contents !== observed.contents ||
-      (movedOwner !== undefined && lockOwnerIsLive(movedOwner, moved)) ||
+      (movedOwner !== undefined && lockOwnerIsLive(movedOwner)) ||
       (observedToken !== undefined && movedToken !== observedToken)
     ) {
       renameSync(quarantine, lockPath);
@@ -1114,7 +1102,7 @@ function hasReclaimMarker(lockPath: string): boolean {
       try {
         const quarantined = readBoundedRegularFile(markerPath, MAX_LOCK_BYTES);
         const owner = parseLockOwner(quarantined.contents);
-        if (owner !== undefined && lockOwnerIsLive(owner, quarantined)) {
+        if (owner !== undefined && lockOwnerIsLive(owner)) {
           try {
             linkSync(markerPath, lockPath);
             rmSync(markerPath, { force: true });
@@ -1158,20 +1146,14 @@ function markerProcessIsLive(
   );
 }
 
-function lockOwnerIsLive(owner: LockOwner, lock?: BoundedFile): boolean {
+function lockOwnerIsLive(owner: LockOwner): boolean {
   if (!isProcessAlive(owner.pid)) return false;
   const currentIdentity = pidStartedAt(owner.pid);
   if (owner.pidStartedAt === undefined || currentIdentity === undefined)
     return true;
-  if (owner.pidStartedAt !== currentIdentity) return false;
-  // macOS exposes process start time only to the second. After a bounded grace
-  // period, equal identities may be a reused PID; token checks fence a resumed
-  // stale owner from publishing after this generation is reclaimed.
-  return !(
-    process.platform === 'darwin' &&
-    lock !== undefined &&
-    Date.now() - lock.mtimeMs > LOCK_STALE_AFTER_MS
-  );
+  // macOS exposes process start time only to the second. Equal identities are
+  // therefore ambiguous and must fail closed rather than steal a live lock.
+  return owner.pidStartedAt === currentIdentity;
 }
 
 function pidStartedAt(pid: number): string | undefined {
