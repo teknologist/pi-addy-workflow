@@ -36,4 +36,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor/auto-runner-lock.ts`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-07-14_
+_Back to [index.md](./index.md) · Generated 2026-07-15_
