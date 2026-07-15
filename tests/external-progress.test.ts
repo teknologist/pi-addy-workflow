@@ -13,7 +13,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { pathToFileURL } from 'node:url';
@@ -69,6 +69,22 @@ function setup(): { cwd: string; homeDir: string; cleanup: () => void } {
       rmSync(homeDir, { recursive: true, force: true });
     },
   };
+}
+
+function managedIssuePrompt(): string | undefined {
+  const target = join(
+    homedir(),
+    '.pi',
+    'agent',
+    'prompts',
+    'implement-from-issues.md',
+  );
+  const source = spawnSync('chezmoi', ['source-path', target], {
+    encoding: 'utf8',
+  });
+  if (source.status !== 0) return undefined;
+  const path = source.stdout.trim();
+  return path ? readFileSync(path, 'utf8') : undefined;
 }
 
 function snapshot(overrides: Record<string, unknown> = {}) {
@@ -258,6 +274,138 @@ test('addy-progress CLI starts, updates, and finishes through JSON stdin', () =>
     fixture.cleanup();
   }
 });
+
+test('issue-prompt publication reuses one CLI run across direct and AFK wake-ups', () => {
+  const fixture = setup();
+  try {
+    const env = { ...process.env, HOME: fixture.homeDir };
+    const direct = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'start',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'implement-from-issues',
+      ],
+      { encoding: 'utf8', env },
+    );
+    assert.equal(direct.status, 0, direct.stderr);
+    const runId = direct.stdout.trim();
+    assert.match(
+      runId,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+
+    const queue = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'update',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'implement-from-issues',
+        '--run',
+        runId,
+        '--stdin',
+      ],
+      {
+        encoding: 'utf8',
+        env,
+        input: JSON.stringify({
+          loopPhase: 'queue',
+          progressUnit: 'issues',
+          currentItem: 'issue queue',
+          completed: 0,
+          total: 1,
+        }),
+      },
+    );
+    assert.equal(queue.status, 0, queue.stderr);
+
+    const afkWakeUp = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'start',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'implement-from-issues',
+      ],
+      { encoding: 'utf8', env },
+    );
+    assert.equal(afkWakeUp.status, 0, afkWakeUp.stderr);
+    assert.equal(afkWakeUp.stdout.trim(), runId);
+
+    const snapshot = readExternalProgressProject({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    }).snapshots[0];
+    assert.ok(snapshot);
+    assert.deepEqual(Object.keys(snapshot).sort(), [
+      'completed',
+      'currentItem',
+      'loopPhase',
+      'progressUnit',
+      'projectKey',
+      'runId',
+      'schemaVersion',
+      'source',
+      'startedAt',
+      'status',
+      'total',
+      'updatedAt',
+    ]);
+    assert.equal(snapshot.currentItem, 'issue queue');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+const managedPrompt = managedIssuePrompt();
+test(
+  'managed issue prompt preserves AFK grammar and fail-open publication',
+  { skip: managedPrompt === undefined },
+  () => {
+    assert.ok(managedPrompt);
+    assert.match(
+      managedPrompt,
+      /AFK-LOOP: CONTINUE issue=<id-or-none> next="<next concrete action>"/,
+    );
+    assert.match(
+      managedPrompt,
+      /AFK-LOOP: RUN-COMPLETE remaining=0 evidence="<tracker\/final-validation evidence>"/,
+    );
+    assert.match(
+      managedPrompt,
+      /AFK-LOOP: LEGAL-STOP condition=<1-8> needs="<human input needed>"/,
+    );
+    assert.match(
+      managedPrompt,
+      /addy-progress start --cwd <absolute current working directory> --source implement-from-issues/,
+    );
+    assert.match(
+      managedPrompt,
+      /addy-progress finish --cwd <absolute current working directory> --source implement-from-issues --run <uuid> --stdin/,
+    );
+    assert.match(
+      managedPrompt,
+      /extract `addy-run=<uuid>` only from that payload/,
+    );
+    assert.match(
+      managedPrompt,
+      /Never extract a token from `next`, `needs`, ordinary response text, tracker text, or any new marker field/,
+    );
+    assert.match(managedPrompt, /Retry the same stdin payload exactly once/);
+    assert.match(managedPrompt, /failure as a warning and continue/);
+  },
+);
 
 test('addy-progress CLI rejects invalid commands and stdin concisely', () => {
   const fixture = setup();
