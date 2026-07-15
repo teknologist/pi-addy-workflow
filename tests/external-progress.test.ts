@@ -9,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -94,6 +95,7 @@ function runChild(
   script: string,
   args: string[],
   killAfterMs?: number,
+  readinessLine?: string,
 ): Promise<{
   code: number | null;
   stdout: string;
@@ -109,25 +111,59 @@ function runChild(
         script,
         ...args,
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdio: ['pipe', 'pipe', 'pipe'] },
     );
     let stdout = '';
     let stderr = '';
+    let stdoutBuffer = '';
+    let ready = readinessLine === undefined;
+    let timeoutError: Error | undefined;
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
+      stdoutBuffer += chunk;
+      if (!ready && stdoutBuffer.includes(`${readinessLine}\n`)) {
+        ready = true;
+        clearTimeout(readinessTimer);
+        child.stdin.end('CONTINUE\n');
+      }
     });
     child.stderr.on('data', (chunk: string) => {
       stderr += chunk;
     });
-    const timer =
+    const readinessTimer = setTimeout(() => {
+      if (ready) return;
+      timeoutError = new Error(
+        `Timed out waiting for child readiness line ${readinessLine}`,
+      );
+      child.kill('SIGTERM');
+    }, 15_000);
+    const completionTimer = setTimeout(() => {
+      timeoutError = new Error('Timed out waiting for child completion');
+      child.kill('SIGTERM');
+    }, 30_000);
+    const killTimer =
       killAfterMs === undefined
         ? undefined
         : setTimeout(() => child.kill('SIGTERM'), killAfterMs);
     child.on('error', reject);
     child.on('close', (code) => {
-      if (timer !== undefined) clearTimeout(timer);
+      clearTimeout(readinessTimer);
+      clearTimeout(completionTimer);
+      if (killTimer !== undefined) clearTimeout(killTimer);
+      if (timeoutError !== undefined) {
+        reject(timeoutError);
+        return;
+      }
+      if (!ready) {
+        reject(
+          new Error(
+            `Child exited before publishing readiness line ${readinessLine}`,
+          ),
+        );
+        return;
+      }
       resolvePromise({ code, stdout, stderr });
     });
   });
@@ -371,6 +407,29 @@ test('addy-progress CLI rejects invalid commands and stdin concisely', () => {
   }
 });
 
+function processStartIdentity(pid: number): string | undefined {
+  try {
+    if (process.platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return stat
+        .slice(stat.lastIndexOf(')') + 2)
+        .trim()
+        .split(/\s+/)[19];
+    }
+    if (process.platform === 'darwin') {
+      return (
+        execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim() || undefined
+      );
+    }
+  } catch {
+    // Process start identities are unavailable on this platform.
+  }
+  return undefined;
+}
+
 test('strictly parses schema-v1 snapshots and rejects invalid or unknown fields', () => {
   assert.deepEqual(
     parseIssueImplementationProgressSnapshot(snapshot()),
@@ -503,6 +562,65 @@ test('updates use merge-patch semantics and enforce counter invariants', () => {
   }
 });
 
+test('active status can move from running to blocked and back', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    const blocked = updateExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      patch: { status: 'blocked' },
+      now: new Date(TIME.getTime() + 1),
+    });
+    const resumed = updateExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      patch: { status: 'running' },
+      now: new Date(TIME.getTime() + 2),
+    });
+    assert.equal(blocked.status, 'blocked');
+    assert.equal(resumed.status, 'running');
+    assert.equal(resumed.updatedAt, '2026-07-14T12:00:00.002Z');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('terminal status patches are rejected without mutating active snapshots', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    assert.throws(
+      () =>
+        updateExternalProgress({
+          runId: run.runId,
+          homeDir: fixture.homeDir,
+          patch: { status: 'completed' },
+          now: new Date(TIME.getTime() + 1),
+        }),
+      /Use finishExternalProgress/,
+    );
+    const stored = readExternalProgressProject({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    }).snapshots[0];
+    assert.equal(stored?.status, 'running');
+    assert.equal(stored?.finishedAt, undefined);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('terminal snapshots require timestamps and cannot change afterwards', () => {
   assert.throws(() =>
     parseIssueImplementationProgressSnapshot(
@@ -540,6 +658,91 @@ test('terminal snapshots require timestamps and cannot change afterwards', () =>
     );
   } finally {
     fixture.cleanup();
+  }
+});
+
+test('non-repository paths use a stable project key', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'addy-external-progress-non-git-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'addy-external-progress-home-'));
+  try {
+    assert.equal(
+      externalProgressProjectKey({ cwd }),
+      externalProgressProjectKey({ cwd: join(cwd, '.') }),
+    );
+    const run = startExternalProgress({
+      cwd,
+      homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    assert.equal(
+      readExternalProgressProject({ cwd, homeDir }).snapshots[0]?.runId,
+      run.runId,
+    );
+    assert.equal(
+      selectExternalProgress({ cwd: join(cwd, '.'), homeDir }).active[0]
+        ?.snapshot.runId,
+      run.runId,
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('propagates invalid Git common-directory output instead of falling back to cwd', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'addy-external-progress-git-output-'));
+  try {
+    const script = `
+      import assert from 'node:assert/strict';
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'git' && args?.join(' ') === 'rev-parse --path-format=absolute --git-common-dir'
+          ? 'relative/.git\\n'
+          : originalExecFileSync(file, args, options);
+      syncBuiltinESMExports();
+      const { externalProgressProjectKey } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      assert.throws(
+        () => externalProgressProjectKey({ cwd: process.argv[1] }),
+        /Git did not return an absolute common directory/,
+      );
+    `;
+    const result = await runChild(script, [cwd]);
+    assert.equal(result.code, 0, result.stderr);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('propagates Git command failures other than not-a-repository', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'addy-external-progress-git-error-'));
+  try {
+    const script = `
+      import assert from 'node:assert/strict';
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) => {
+        if (file === 'git' && args?.join(' ') === 'rev-parse --path-format=absolute --git-common-dir') {
+          const error = new Error('Git command failed');
+          error.stderr = 'fatal: unable to read repository\\n';
+          throw error;
+        }
+        return originalExecFileSync(file, args, options);
+      };
+      syncBuiltinESMExports();
+      const { externalProgressProjectKey } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      assert.throws(
+        () => externalProgressProjectKey({ cwd: process.argv[1] }),
+        /Git command failed/,
+      );
+    `;
+    const result = await runChild(script, [cwd]);
+    assert.equal(result.code, 0, result.stderr);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
 
@@ -723,6 +926,206 @@ test('competing processes safely reclaim an abandoned start lock', async () => {
   }
 });
 
+test('reclaims a lock when a live PID has been reused', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: 'reused-process',
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }),
+    );
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(lockPath), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('reclaims a Windows lock when its live PID has a different instance identity', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    const script = `
+      import childProcess from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'powershell.exe'
+          ? '638000000000000001\\n'
+          : originalExecFileSync(file, args, options);
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      writeFileSync(process.argv[3], JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: '638000000000000000',
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }));
+      process.stdout.write('LOCK_OWNER_PUBLISHED\\n');
+      await new Promise((resolve) => process.stdin.once('data', resolve));
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(
+      script,
+      [fixture.cwd, fixture.homeDir, lockPath],
+      undefined,
+      'LOCK_OWNER_PUBLISHED',
+    );
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(lockPath), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('does not steal a Windows lock owned by a matching live instance', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    const script = `
+      import childProcess from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'powershell.exe'
+          ? '638000000000000001\\n'
+          : originalExecFileSync(file, args, options);
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      writeFileSync(process.argv[3], JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: '638000000000000001',
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }));
+      process.stdout.write('LOCK_OWNER_PUBLISHED\\n');
+      await new Promise((resolve) => process.stdin.once('data', resolve));
+      let dateNowCalls = 0;
+      Date.now = () => (dateNowCalls++ === 0 ? 0 : 5_000);
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(
+      script,
+      [fixture.cwd, fixture.homeDir, lockPath],
+      undefined,
+      'LOCK_OWNER_PUBLISHED',
+    );
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /Could not acquire external progress lock/);
+    assert.equal(existsSync(lockPath), true);
+    const lockedOwner = JSON.parse(readFileSync(lockPath, 'utf8'));
+    assert.equal(lockedOwner.pidStartedAt, '638000000000000001');
+    assert.equal(lockedOwner.token, '11111111-1111-4111-8111-111111111111');
+    assert.equal(Number.isSafeInteger(lockedOwner.pid), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('does not steal a macOS lock when same-second process identity is ambiguous', async () => {
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    const script = `
+      import childProcess from 'node:child_process';
+      import { writeFileSync } from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      const originalExecFileSync = childProcess.execFileSync;
+      childProcess.execFileSync = (file, args, options) =>
+        file === 'ps'
+          ? 'Wed Jul 14 12:00:00 2026\\n'
+          : originalExecFileSync(file, args, options);
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      writeFileSync(process.argv[3], JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: 'Wed Jul 14 12:00:00 2026',
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }));
+      process.stdout.write('LOCK_OWNER_PUBLISHED\\n');
+      await new Promise((resolve) => process.stdin.once('data', resolve));
+      let dateNowCalls = 0;
+      Date.now = () => (dateNowCalls++ === 0 ? 0 : 5_000);
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(
+      script,
+      [fixture.cwd, fixture.homeDir, lockPath],
+      undefined,
+      'LOCK_OWNER_PUBLISHED',
+    );
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /Could not acquire external progress lock/);
+    assert.equal(existsSync(lockPath), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('never steals an old lock owned by a live process', async () => {
   const fixture = setup();
   try {
@@ -810,6 +1213,128 @@ test('restores a live owner quarantined by a dead reclaimer', async () => {
     assert.notEqual(result.code, 0);
     assert.equal(existsSync(marker), false);
     assert.equal(readFileSync(lockPath, 'utf8'), owner);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('never steals a matching live PID identity even when the lock is old', async (t) => {
+  const identity = processStartIdentity(process.pid);
+  if (identity === undefined) {
+    t.skip('process start identities are unavailable');
+    return;
+  }
+  const fixture = setup();
+  try {
+    startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    writeFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: identity,
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }),
+    );
+    utimesSync(lockPath, new Date(0), new Date(0));
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir], 250);
+    assert.notEqual(result.code, 0);
+    assert.equal(existsSync(lockPath), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('reused reclaimer PID markers do not block recovery', async () => {
+  const fixture = setup();
+  try {
+    const first = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    finishExternalProgress({
+      runId: first.runId,
+      homeDir: fixture.homeDir,
+      status: 'completed',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    const marker = `${lockPath}.reclaim-${process.pid}-0000000000000000-dead`;
+    writeFileSync(marker, 'orphaned quarantine');
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(marker), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('quarantined owners are restored only when their process identity matches', async () => {
+  const fixture = setup();
+  try {
+    const first = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    finishExternalProgress({
+      runId: first.runId,
+      homeDir: fixture.homeDir,
+      status: 'completed',
+    });
+    const lockPath = join(
+      externalProgressRunsDir({ cwd: fixture.cwd, homeDir: fixture.homeDir }),
+      '.start.lock',
+    );
+    const marker = `${lockPath}.reclaim-${Number.MAX_SAFE_INTEGER}-dead`;
+    writeFileSync(
+      marker,
+      JSON.stringify({
+        pid: process.pid,
+        pidStartedAt: 'reused-owner',
+        token: '11111111-1111-4111-8111-111111111111',
+        createdAt: 0,
+      }),
+    );
+    const script = `
+      import { startExternalProgress } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'implement-from-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(marker), false);
+    assert.equal(existsSync(lockPath), false);
   } finally {
     fixture.cleanup();
   }
@@ -925,6 +1450,85 @@ test('raw snapshot creation cannot overwrite an immutable terminal run', () => {
   }
 });
 
+test('allows ordinary shared Pi ancestors while keeping external progress storage private', () => {
+  const fixture = setup();
+  try {
+    const piDir = join(fixture.homeDir, '.pi');
+    const addyDir = join(piDir, 'addy-workflow');
+    mkdirSync(addyDir, { recursive: true, mode: 0o755 });
+    chmodSync(piDir, 0o755);
+    chmodSync(addyDir, 0o755);
+
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+    });
+    const projectKey = externalProgressProjectKey({ cwd: fixture.cwd });
+    const externalProgressDir = join(addyDir, 'external-progress');
+    const directories = [
+      externalProgressDir,
+      join(externalProgressDir, 'projects'),
+      join(externalProgressDir, 'projects', projectKey),
+      join(externalProgressDir, 'projects', projectKey, 'runs'),
+    ];
+
+    assert.equal(statSync(piDir).mode & 0o777, 0o755);
+    for (const directory of directories) {
+      assert.equal(statSync(directory).mode & 0o077, 0, directory);
+    }
+    assert.equal(
+      existsSync(join(directories.at(-1)!, `${run.runId}.json`)),
+      true,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('accepts synthetic group-readable storage modes on win32 without weakening path anchoring', async () => {
+  const fixture = setup();
+  try {
+    const script = `
+      import fs from 'node:fs';
+      import { resolve } from 'node:path';
+      import { syncBuiltinESMExports } from 'node:module';
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const originalLstatSync = fs.lstatSync;
+      fs.lstatSync = (path, options) => {
+        const stat = originalLstatSync(path, options);
+        const absolutePath = resolve(process.cwd(), String(path));
+        if (!absolutePath.includes('external-progress')) return stat;
+        return new Proxy(stat, {
+          get(target, property) {
+            if (property === 'mode') return target.mode | 0o077n;
+            const value = Reflect.get(target, property);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      };
+      syncBuiltinESMExports();
+      const { startExternalProgress } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      startExternalProgress({
+        cwd: process.argv[1],
+        homeDir: process.argv[2],
+        source: 'df-implement-issues',
+      });
+    `;
+    const result = await runChild(script, [fixture.cwd, fixture.homeDir]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots.length,
+      1,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('rejects traversal keys and symlinked storage outside the configured root', () => {
   const fixture = setup();
   try {
@@ -942,7 +1546,7 @@ test('rejects traversal keys and symlinked storage outside the configured root',
       'projects',
     );
     const outside = join(fixture.homeDir, 'outside-storage');
-    mkdirSync(projectsDir, { recursive: true });
+    mkdirSync(projectsDir, { recursive: true, mode: 0o700 });
     mkdirSync(outside);
     symlinkSync(outside, join(projectsDir, projectKey));
     assert.throws(
@@ -956,6 +1560,62 @@ test('rejects traversal keys and symlinked storage outside the configured root',
     );
     assert.equal(existsSync(join(outside, 'runs')), false);
   } finally {
+    fixture.cleanup();
+  }
+});
+
+test('ancestor replacement cannot redirect snapshot writes outside the configured home', async () => {
+  const fixture = setup();
+  const outside = mkdtempSync(
+    join(tmpdir(), 'addy-external-progress-outside-'),
+  );
+  try {
+    const projectKey = externalProgressProjectKey({ cwd: fixture.cwd });
+    const runsDir = externalProgressRunsDir({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    });
+    mkdirSync(runsDir, { recursive: true, mode: 0o700 });
+    const storageAncestor = join(
+      fixture.homeDir,
+      '.pi',
+      'addy-workflow',
+      'external-progress',
+    );
+    const script = `
+      import fs from 'node:fs';
+      import { renameSync, symlinkSync } from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      let swapped = false;
+      const originalWrite = fs.writeFileSync;
+      fs.writeFileSync = (...args) => {
+        if (!swapped && typeof args[0] === 'string' && args[0].includes('.tmp-')) {
+          swapped = true;
+          renameSync(process.argv[1], process.argv[1] + '.moved');
+          symlinkSync(process.argv[2], process.argv[1]);
+        }
+        return originalWrite(...args);
+      };
+      syncBuiltinESMExports();
+      process.on('exit', () => process.stdout.write(JSON.stringify({ swapped })));
+      const { writeExternalProgressSnapshot } = await import(${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)});
+      writeExternalProgressSnapshot(JSON.parse(process.argv[3]), { homeDir: process.argv[4] });
+    `;
+    const result = await runChild(script, [
+      storageAncestor,
+      outside,
+      JSON.stringify(
+        snapshot({
+          projectKey,
+          runId: '22222222-2222-4222-8222-222222222222',
+        }),
+      ),
+      fixture.homeDir,
+    ]);
+    assert.deepEqual(JSON.parse(result.stdout), { swapped: true });
+    assert.deepEqual(readdirSync(outside), []);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
     fixture.cleanup();
   }
 });
