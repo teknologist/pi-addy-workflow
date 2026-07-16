@@ -12,6 +12,10 @@ import {
   readSlicePlanProgress,
 } from './slice-plan-progress.ts';
 import {
+  boundedTicketDisplay,
+  ticketLifecycleFrontier,
+} from './ticket-presentation.ts';
+import {
   selectExternalProgress,
   type SelectedExternalProgress,
 } from './external-progress.ts';
@@ -277,6 +281,27 @@ function shouldRenderTaskFooter(state: WorkflowState): boolean {
   );
 }
 
+function ticketFooterLine(state: WorkflowState): string | undefined {
+  const run = state.ticketRun;
+  if (!run) return undefined;
+  const selector = run.queueSelector ?? state.ticketQueue?.selector;
+  const parts = [
+    `Ticket: ${run.source.kind}:${boundedTicketDisplay(run.source.ref)}`,
+    `Frontier: ${ticketLifecycleFrontier(run.lifecycle)}`,
+    `Claim: ${run.claim ? 'claimed' : 'unclaimed'}`,
+    ...(state.autoPausedReason ? [`Pause: ${state.autoPausedReason}`] : []),
+    ...(selector
+      ? [`Selector: ${selector.kind}:${boundedTicketDisplay(selector.value)}`]
+      : []),
+    ...(run.lastValidatedResult
+      ? [
+          `Last: ${run.lastValidatedResult.operation}/${run.lastValidatedResult.outcome}`,
+        ]
+      : []),
+  ];
+  return parts.join(' | ');
+}
+
 function externalProgressLine({
   snapshot,
   stale,
@@ -331,11 +356,14 @@ function externalProgressLines(baseCwd: string | undefined): string[] {
       ...selection.active.map(externalProgressLine),
       ...(selection.terminal ? [externalProgressLine(selection.terminal)] : []),
     ];
-    externalProgressLineCache.set(cacheKey, { expiresAt: now + 1_000, lines });
+    externalProgressLineCache.set(cacheKey, {
+      expiresAt: Date.now() + 1_000,
+      lines,
+    });
     return lines;
   } catch {
     externalProgressLineCache.set(cacheKey, {
-      expiresAt: now + 1_000,
+      expiresAt: Date.now() + 1_000,
       lines: [],
     });
     return [];
@@ -361,6 +389,18 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
           : undefined;
       const workflowStrip = renderWorkflowStrip(state, theme);
       const line = `${label}${workflowStrip}`;
+      if (state.executionSource === 'ticket') {
+        const lines = [
+          line,
+          ticketFooterLine(state),
+          ...externalProgressLines(baseCwd),
+        ].filter((value): value is string => Boolean(value));
+        return width
+          ? lines.map((value) =>
+              truncateToWidth(value, Math.max(1, width), '', true),
+            )
+          : lines;
+      }
       const artifactName = artifact
         ? workflowArtifactName(artifact)
         : undefined;

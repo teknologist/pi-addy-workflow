@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import { registerWorkflowCommands } from '../extensions/workflow-monitor/command-registry.ts';
 import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
 
+function ticketStats(kind: 'github' | 'linear', ref: string) {
+  return {
+    target: { kind: 'ticket' as const, source: { kind, ref } },
+    turns: 1,
+    verifyRuns: 0,
+    reviewRuns: 0,
+    fixRuns: 0,
+    findings: 0,
+    recordedAttempts: [],
+  };
+}
+
 function createHarness() {
   const commands = new Map<
     string,
@@ -13,6 +25,9 @@ function createHarness() {
   const notifications: string[] = [];
   let statsHeading: string | undefined;
   let statsPlanPath: string | undefined;
+  let statsTicketSource:
+    | { kind: 'github' | 'linear' | 'local'; ref: string }
+    | undefined;
   const state = createInitialWorkflowState();
   registerWorkflowCommands(
     {
@@ -28,6 +43,9 @@ function createHarness() {
       resumePendingFreshContinuation: async () => 'none',
       dispatchManualFrontierGuard: async () => false,
       dispatchManualStepWithFreshContextConfig: () => true,
+      dispatchTicketPrompt: async (_pi, _ctx, prompt) => {
+        sent.push(prompt);
+      },
       dispatchTaskCommitPrompt: async () => {},
       getState: () => state,
       handleWorkflowEvent: (_ctx, event) => events.push(event),
@@ -45,6 +63,7 @@ function createHarness() {
       showWorkflowStats: (_pi, _ctx, _state, options) => {
         statsHeading = options?.heading;
         statsPlanPath = options?.planPath;
+        statsTicketSource = options?.ticketSource;
       },
     },
   );
@@ -58,6 +77,9 @@ function createHarness() {
     },
     get statsPlanPath() {
       return statsPlanPath;
+    },
+    get statsTicketSource() {
+      return statsTicketSource;
     },
     state,
   };
@@ -130,4 +152,127 @@ test('addy-stats preserves supplied plan and explicit all-history mode', () => {
 
   harness.commands.get('addy-stats')?.handler({ args: ['--all'] }, {});
   assert.equal(harness.statsPlanPath, undefined);
+});
+
+test('addy-stats uses the active Ticket source for an opaque ref', () => {
+  const harness = createHarness();
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'local', ref: 'local tickets/01.md' },
+    runId: 'run-1',
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['.'],
+  };
+
+  harness.commands
+    .get('addy-stats')
+    ?.handler({ args: ['--ticket', 'local tickets/01.md'] }, {});
+
+  assert.deepEqual(harness.sent, []);
+  assert.deepEqual(harness.statsTicketSource, {
+    kind: 'local',
+    ref: 'local tickets/01.md',
+  });
+});
+
+test('addy-stats refuses an ambiguous cross-source Ticket ref', () => {
+  const harness = createHarness();
+  harness.state.stats = {
+    active: {
+      tasks: {},
+      tickets: {
+        github: ticketStats('github', '42'),
+        linear: ticketStats('linear', '42'),
+      },
+    },
+    history: [],
+  };
+
+  harness.commands.get('addy-stats')?.handler({ args: ['--ticket', '42'] }, {});
+
+  assert.equal(harness.statsTicketSource, undefined);
+  assert.match(
+    harness.notifications.at(-1) ?? '',
+    /ambiguous.*github.*linear/i,
+  );
+
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'linear', ref: '42' },
+    runId: 'run-1',
+    lifecycle: { implemented: true, verified: false, reviewed: false },
+    repositoryScope: ['.'],
+  };
+  harness.commands.get('addy-stats')?.handler({ args: ['--ticket', '42'] }, {});
+  assert.deepEqual(harness.statsTicketSource, { kind: 'linear', ref: '42' });
+});
+
+test('addy-ticket preserves opaque args and blocks mutation of another live claim', () => {
+  const harness = createHarness();
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'local', ref: 'local tickets/01.md' },
+    runId: 'run-1',
+    claim: {
+      id: 'claim-1',
+      owner: 'eric',
+      claimedAt: '2026-07-15T00:00:00.000Z',
+    },
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+  };
+
+  harness.commands
+    .get('addy-ticket')
+    ?.handler(
+      { args: ['add-repository', 'local tickets/01.md', '../companion repo'] },
+      {},
+    );
+  assert.deepEqual(harness.sent, [
+    '/addy-ticket add-repository "local tickets/01.md" "../companion repo"',
+  ]);
+
+  harness.commands
+    .get('addy-ticket')
+    ?.handler({ args: ['release', 'ENG-43'] }, {});
+  assert.equal(harness.sent.length, 1);
+  assert.match(harness.notifications.at(-1)!, /local tickets\/01\.md/);
+});
+
+test('addy-workflow-next blocks every plan-oriented phase under a live claim', () => {
+  const harness = createHarness();
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'github', ref: 'ENG-42' },
+    runId: 'run-1',
+    claim: {
+      id: 'claim-1',
+      owner: 'eric',
+      claimedAt: '2026-07-15T00:00:00.000Z',
+    },
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+  };
+
+  for (const phase of [
+    'define',
+    'plan',
+    'build',
+    'simplify',
+    'verify',
+    'review',
+    'finish',
+  ])
+    harness.commands
+      .get('addy-workflow-next')
+      ?.handler({ args: [phase, 'docs/plans/new.md'] }, {});
+
+  assert.equal(harness.sent.length, 0);
+  assert.equal(harness.events.length, 0);
+  assert.equal(harness.notifications.length, 7);
+  assert.match(harness.notifications[0], /Ticket ENG-42 has a live claim/);
 });

@@ -28,6 +28,33 @@ Prompts:
 - `/addy-auto [plan-path]` — autonomously build, verify, review, and commit tasks from a slice plan
 - `/addy-finish` — commit current work, continue the next task or slice, or ship when all slices are complete
 
+### Ticket Slices
+
+Addy can run the same lifecycle against GitHub Issues, Linear issues, or local `/to-tickets` markdown configured by `docs/agents/issue-tracker.md`:
+
+```text
+/addy-build --ticket <ticket-ref>
+/addy-code-simplify --ticket <ticket-ref>
+/addy-verify --ticket <ticket-ref>
+/addy-review --ticket <ticket-ref>
+/addy-fix-all --ticket <ticket-ref>
+/addy-finish --ticket <ticket-ref>
+/addy-auto --tickets
+/addy-auto --tickets --label <label>
+/addy-auto --tickets --status <status>
+/addy-stats --ticket <ticket-ref>
+/addy-ticket status <ticket-ref>
+/addy-ticket release <ticket-ref>
+/addy-ticket reclaim <ticket-ref>
+/addy-ticket add-repository <ticket-ref> <repository>
+```
+
+BUILD may create the Ticket claim. Every later lifecycle command requires the same live claim owned by the current Addy run. While a live or possibly corrupt claim exists, Addy refuses switching to another Ticket or Slice Plan, DEFINE, PLAN, reset, or ship; inspect it with `status` and use `release` when safe. `SIMPLIFY` is optional, manual-only, and does not change lifecycle status. Queue Auto runs mandatory BUILD → VERIFY → REVIEW → FINISH and never inserts SIMPLIFY.
+
+External `/implement-from-issues` progress stays read-only presentation data outside Addy Workflow State and cannot create a Ticket claim, action, lifecycle transition, or runner ownership.
+
+See [Tracker contract coverage and authenticated smoke procedures](docs/ticket-tracker-smoke.md).
+
 ## Dashboard
 
 Start a read-only web dashboard for the current project's Addy auto state:

@@ -99,6 +99,59 @@ function committedTasksFor(
   );
 }
 
+test('workflow widget renders bounded Ticket facts without plan traversal', () => {
+  const maliciousRef = `A&B<script>\n\x1b[31m${'x'.repeat(200)}`;
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    activePlan: '/definitely/not/a/plan.md',
+    current: 'verify' as const,
+    ticketQueue: {
+      schemaVersion: 1 as const,
+      selector: {
+        kind: 'label' as const,
+        value: `ready<script>${'y'.repeat(200)}`,
+      },
+      drainId: 'drain-1',
+    },
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: maliciousRef },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'owner',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      queueSelector: {
+        kind: 'label' as const,
+        value: `ready<script>${'y'.repeat(200)}`,
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+      lastValidatedResult: {
+        operation: 'build' as const,
+        outcome: 'succeeded' as const,
+        actionKey: 'key',
+        attempt: 1,
+      },
+    },
+  };
+
+  const lines = renderWorkflowWidget(state)().render();
+  assert.equal(lines.length, 2);
+  assert.match(lines[1], /^Ticket: github:/);
+  assert.match(lines[1], /Frontier: verify/);
+  assert.match(lines[1], /Claim: claimed/);
+  assert.match(lines[1], /Selector: label:/);
+  assert.match(lines[1], /A&B<script>/);
+  assert.doesNotMatch(
+    lines.join('\n'),
+    /Plan:|Current task:|\x1b\[31m|\n<script>/,
+  );
+  assert.ok(lines[1].length < 400);
+});
+
 test('workflow widget presenter renders phase strip', () => {
   const state = transitionWorkflow(createInitialWorkflowState(), {
     source: 'user-input',
@@ -777,6 +830,52 @@ test('workflow widget appends selected external runs after unchanged Addy lines'
       ],
     );
   } finally {
+    fixture.cleanup();
+  }
+});
+
+test('workflow widget cache lifetime starts after snapshot selection', () => {
+  const fixture = externalProgressFixture();
+  const realNow = Date.now;
+  try {
+    const runId = '55555555-5555-4555-8555-555555555555';
+    writeExternalProgressSnapshot(
+      {
+        schemaVersion: 1,
+        projectKey: externalProgressProjectKey({ cwd: fixture.cwd }),
+        runId,
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'implementation',
+        startedAt: '2026-07-14T12:00:00.000Z',
+        updatedAt: '2026-07-14T12:00:00.000Z',
+      },
+      { homeDir: fixture.homeDir },
+    );
+    const times = [0, 2_000, 2_000];
+    let calls = 0;
+    Date.now = () => times[Math.min(calls++, times.length - 1)]!;
+    const state = createInitialWorkflowState();
+
+    const first = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+    rmSync(
+      join(
+        externalProgressRunsDir({
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+        }),
+        `${runId}.json`,
+      ),
+    );
+    const second = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+
+    assert.deepEqual(second, first);
+  } finally {
+    Date.now = realNow;
     fixture.cleanup();
   }
 });

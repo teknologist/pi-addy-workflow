@@ -5,6 +5,7 @@ import {
   freshContextReasonForPrompt,
   planAutoPromptDispatch,
   planManualStepDispatch,
+  stateAfterAutoPrompt,
 } from '../extensions/workflow-monitor/command-dispatch.ts';
 import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
 
@@ -13,6 +14,30 @@ const freshContext = {
   betweenTasks: false,
   beforeReview: false,
 };
+
+test('ticket dispatch keeps its immutable pending claim while BUILD runs', () => {
+  const pending = {
+    executionSource: 'ticket' as const,
+    key: 'ticket-key',
+    prompt: '/addy-build --ticket ENG-42',
+    sourceKind: 'github' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'claim-1',
+    operation: 'build' as const,
+    attemptMarker: 'attempt-0',
+    reason: 'next-action' as const,
+    attempts: 0,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+  const state = stateAfterAutoPrompt(pending.prompt, {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket',
+    autoPendingAction: pending,
+  });
+
+  assert.equal(state.autoPendingAction, pending);
+});
 
 test('command dispatch plans auto current-session prompt state updates', () => {
   const state = {

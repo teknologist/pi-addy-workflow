@@ -1,9 +1,21 @@
+import { randomUUID } from 'node:crypto';
 import {
   AUTO_CONTROL_FIELDS,
   clearReviewControl,
   PROJECT_FALLBACK_CONTROL_FIELDS,
 } from './workflow-state-control.ts';
-import { taskIdentityKeyParts } from './workflow-task-identity.ts';
+import {
+  ticketAutoWorkflowActionKey,
+  ticketOperationFromPrompt,
+  ticketOperationIdentityFromPrompt,
+  ticketPendingActionMatches,
+  ticketRefFromPrompt,
+  ticketSelectorFromPrompt,
+} from './auto-action-keys.ts';
+import {
+  taskIdentityKeyParts,
+  type TicketSliceIdentity,
+} from './workflow-task-identity.ts';
 import type {
   AutoFreshReason,
   AutoPendingActionReason,
@@ -44,7 +56,7 @@ export function withProjectAutoControl(
   if (!hasLiveAutoControl(projectState)) return state;
   if (state.autoMode || explicitlyStoppedAuto(state)) return state;
 
-  const merged = { ...state, autoMode: true };
+  const merged = { ...state, autoMode: Boolean(projectState?.autoMode) };
   for (const field of PROJECT_FALLBACK_CONTROL_FIELDS) {
     const value = projectState?.[field];
     if (value !== undefined) merged[field] = value as never;
@@ -59,15 +71,17 @@ export function sanitizedProjectFallbackAutoControl(
     state.autoFreshPrompt && state.autoFreshReason,
   );
   const validPendingAction = Boolean(state.autoPendingAction);
+  const autoPendingAction = Boolean(
+    state.autoPendingAction &&
+    state.autoPendingAction.executionSource !== 'ticket',
+  );
   const preserveFreshRetry = Boolean(
     validPendingFresh &&
     state.autoRetryKey?.startsWith(`${state.autoFreshPrompt}`),
   );
   const sanitized = {
     ...state,
-    autoMode: Boolean(
-      state.autoMode || validPendingFresh || validPendingAction,
-    ),
+    autoMode: Boolean(state.autoMode || validPendingFresh || autoPendingAction),
   };
 
   if (!validPendingFresh && !validPendingAction && !state.autoMode) {
@@ -90,6 +104,10 @@ export function autoFreshContinuationKey(
   reason: AutoFreshReason,
   state: WorkflowState,
 ): string {
+  const pendingTicket =
+    state.autoPendingAction?.executionSource === 'ticket'
+      ? state.autoPendingAction
+      : undefined;
   return [
     reason,
     prompt,
@@ -101,6 +119,18 @@ export function autoFreshContinuationKey(
     state.autoReviewTaskIndex ?? '',
     state.autoRetryKey ?? '',
     state.autoRetryCount ?? '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.source.kind ?? pendingTicket?.sourceKind ?? '')
+      : '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.source.ref ?? pendingTicket?.ticketRef ?? '')
+      : '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.runId ?? pendingTicket?.runId ?? '')
+      : '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.claim?.id ?? pendingTicket?.claimId ?? '')
+      : '',
   ].join('\u001f');
 }
 
@@ -194,6 +224,123 @@ export function pendingAutoActionForPrompt(
       target?.taskIndex ?? state.autoReviewTaskIndex ?? state.currentTaskIndex,
     taskTitle: target?.taskTitle ?? state.autoReviewTask ?? state.currentTask,
   };
+  const attempts = (state.autoPendingAction?.attempts ?? -1) + 1;
+  if (state.executionSource === 'ticket' && !state.ticketRun) {
+    const operation = ticketOperationFromPrompt(prompt);
+    if (!operation || !['select', 'status', 'claim'].includes(operation))
+      throw new Error('Cannot dispatch this Ticket operation without a run.');
+    const selector = ticketSelectorFromPrompt(prompt);
+    const ticketRef =
+      operation === 'select' ? selector?.value : ticketRefFromPrompt(prompt);
+    if (!ticketRef) throw new Error('Cannot identify the Ticket reference.');
+    const previous = state.autoPendingAction;
+    const sameAction =
+      previous?.executionSource === 'ticket' &&
+      previous.operation === operation &&
+      previous.ticketRef === ticketRef &&
+      previous.prompt === prompt;
+    const runId = sameAction ? previous.runId : randomUUID();
+    const claimId =
+      operation === 'claim'
+        ? sameAction && previous?.executionSource === 'ticket'
+          ? previous.claimId
+          : randomUUID()
+        : undefined;
+    const attemptMarker = sameAction
+      ? previous.attemptMarker
+      : `attempt-${attempts}`;
+    const identity: TicketSliceIdentity = {
+      source: 'ticket',
+      ticketRef,
+      runId,
+      ...(claimId ? { claimId } : {}),
+      ...(selector ? { selector } : {}),
+    };
+    return {
+      executionSource: 'ticket',
+      key: ticketAutoWorkflowActionKey(identity, operation, attemptMarker),
+      prompt,
+      ...(deliveryPrompt !== undefined
+        ? { expandedPrompt: deliveryPrompt }
+        : {}),
+      ticketRef,
+      runId,
+      ...(claimId ? { claimId } : {}),
+      ...(selector ? { selector } : {}),
+      operation,
+      attemptMarker,
+      reason,
+      attempts,
+      createdAt: new Date().toISOString(),
+    };
+  }
+  if (state.executionSource === 'ticket' && state.ticketRun) {
+    const operation = ticketOperationFromPrompt(prompt);
+    if (!operation)
+      throw new Error(
+        `Cannot identify Ticket operation for pending action: ${prompt}`,
+      );
+    if (operation === 'reclaim' && !state.ticketRun.claim)
+      throw new Error('Cannot RECLAIM without a stale claim identity.');
+    const operationIdentity = ticketOperationIdentityFromPrompt(
+      prompt,
+      state.ticketRun,
+      operation,
+    );
+    const pending = state.autoPendingAction;
+    const sameAction =
+      pending?.executionSource === 'ticket' &&
+      ticketPendingActionMatches(pending, state.ticketRun, operation) &&
+      pending.selector?.kind === operationIdentity.selector?.kind &&
+      pending.selector?.value === operationIdentity.selector?.value &&
+      pending.repository === operationIdentity.repository;
+    const identity: TicketSliceIdentity = {
+      source: 'ticket' as const,
+      sourceKind: state.ticketRun.source.kind,
+      ticketRef: state.ticketRun.source.ref,
+      runId: state.ticketRun.runId,
+      ...(operation === 'reclaim'
+        ? {
+            staleClaimId: state.ticketRun.claim?.id,
+            claimId:
+              sameAction && pending.executionSource === 'ticket'
+                ? pending.claimId
+                : randomUUID(),
+          }
+        : operation === 'claim' && !state.ticketRun.claim
+          ? {
+              claimId:
+                sameAction && pending.executionSource === 'ticket'
+                  ? pending.claimId
+                  : randomUUID(),
+            }
+          : { claimId: state.ticketRun.claim?.id }),
+      ...operationIdentity,
+    };
+    const attemptMarker = sameAction
+      ? pending.attemptMarker
+      : `attempt-${attempts}`;
+    return {
+      executionSource: 'ticket',
+      key: ticketAutoWorkflowActionKey(identity, operation, attemptMarker),
+      prompt,
+      ...(deliveryPrompt !== undefined
+        ? { expandedPrompt: deliveryPrompt }
+        : {}),
+      sourceKind: identity.sourceKind,
+      ticketRef: identity.ticketRef,
+      runId: identity.runId,
+      ...(identity.claimId ? { claimId: identity.claimId } : {}),
+      ...(identity.staleClaimId ? { staleClaimId: identity.staleClaimId } : {}),
+      ...(identity.selector ? { selector: identity.selector } : {}),
+      ...(identity.repository ? { repository: identity.repository } : {}),
+      operation,
+      attemptMarker,
+      reason,
+      attempts,
+      createdAt: new Date().toISOString(),
+    };
+  }
   return {
     key,
     prompt,
@@ -204,7 +351,7 @@ export function pendingAutoActionForPrompt(
     taskIndex: details.taskIndex,
     taskTitle: details.taskTitle,
     reason,
-    attempts: (state.autoPendingAction?.attempts ?? -1) + 1,
+    attempts,
     createdAt: new Date().toISOString(),
   };
 }

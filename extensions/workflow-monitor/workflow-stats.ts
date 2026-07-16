@@ -1,11 +1,13 @@
 import {
   type WorkflowEvent,
   type WorkflowIssueStats,
+  type TicketOperation,
   type WorkflowPhase,
   type WorkflowState,
   type WorkflowStats,
   type WorkflowStatsSession,
   type WorkflowTaskStats,
+  type WorkflowTicketStats,
 } from './workflow-transitions.ts';
 import { commandNameFromText, isManualTurnCommand } from './command-router.ts';
 import {
@@ -13,13 +15,20 @@ import {
   workflowTaskIdentityKey,
 } from './workflow-task-identity.ts';
 
-export type WorkflowStatsTarget = {
+export type WorkflowPlanStatsTarget = {
   plan?: string;
   taskId?: string;
   sliceIndex?: number;
   taskIndex?: number;
   taskTitle?: string;
 };
+
+export type WorkflowTicketStatsTarget = {
+  kind: 'ticket';
+  source: { kind: 'github' | 'linear' | 'local'; ref: string };
+};
+
+export type WorkflowStatsTarget = WorkflowPlanStatsTarget;
 
 export function emptyIssueStats(): WorkflowIssueStats {
   return { critical: 0, important: 0, suggestion: 0, unknown: 0, total: 0 };
@@ -133,6 +142,60 @@ function normalizePhaseDurations(
   return Object.keys(durations).length ? durations : undefined;
 }
 
+function normalizeTicketStats(value: unknown): WorkflowTicketStats | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Partial<WorkflowTicketStats>;
+  if (
+    candidate.target?.kind !== 'ticket' ||
+    !['github', 'linear', 'local'].includes(candidate.target.source?.kind) ||
+    typeof candidate.target.source?.ref !== 'string'
+  )
+    return undefined;
+  const nonNegative = (number: unknown) =>
+    typeof number === 'number' && Number.isSafeInteger(number) && number >= 0
+      ? number
+      : 0;
+  const phaseDurationsMs: WorkflowTicketStats['phaseDurationsMs'] = {};
+  for (const phase of [
+    'build',
+    'simplify',
+    'verify',
+    'review',
+    'fix-all',
+    'finish',
+  ] as const) {
+    const duration = candidate.phaseDurationsMs?.[phase];
+    if (
+      typeof duration === 'number' &&
+      Number.isSafeInteger(duration) &&
+      duration >= 0
+    )
+      phaseDurationsMs[phase] = duration;
+  }
+  return {
+    target: candidate.target,
+    startedAt:
+      typeof candidate.startedAt === 'string' ? candidate.startedAt : undefined,
+    finishedAt:
+      typeof candidate.finishedAt === 'string'
+        ? candidate.finishedAt
+        : undefined,
+    phaseDurationsMs: Object.keys(phaseDurationsMs).length
+      ? phaseDurationsMs
+      : undefined,
+    turns: nonNegative(candidate.turns),
+    verifyRuns: nonNegative(candidate.verifyRuns),
+    reviewRuns: nonNegative(candidate.reviewRuns),
+    fixRuns: nonNegative(candidate.fixRuns),
+    findings: nonNegative(candidate.findings),
+    recordedAttempts: Array.isArray(candidate.recordedAttempts)
+      ? candidate.recordedAttempts.filter(
+          (entry): entry is string => typeof entry === 'string',
+        )
+      : [],
+  };
+}
+
 function normalizeStatsSession(value: unknown): WorkflowStatsSession {
   if (typeof value !== 'object' || value === null) return { tasks: {} };
   const candidate = value as Partial<WorkflowStatsSession>;
@@ -143,8 +206,16 @@ function normalizeStatsSession(value: unknown): WorkflowStatsSession {
       if (normalized) tasks[key] = normalized;
     }
   }
+  const tickets: Record<string, WorkflowTicketStats> = {};
+  if (typeof candidate.tickets === 'object' && candidate.tickets !== null) {
+    for (const [key, ticket] of Object.entries(candidate.tickets)) {
+      const normalized = normalizeTicketStats(ticket);
+      if (normalized) tickets[key] = normalized;
+    }
+  }
   return {
     tasks,
+    ...(Object.keys(tickets).length ? { tickets } : {}),
     endedReason:
       typeof candidate.endedReason === 'string'
         ? candidate.endedReason
@@ -190,7 +261,7 @@ function statsTaskKey(
 function workflowStatsTarget(
   state: WorkflowState,
   target: WorkflowStatsTarget = {},
-): Required<WorkflowStatsTarget> {
+): Required<WorkflowPlanStatsTarget> {
   return {
     plan: target.plan ?? state.activePlan ?? '',
     taskId:
@@ -217,7 +288,7 @@ function hasWorkflowStatsTarget(
 }
 
 function emptyTaskStats(
-  target: Required<WorkflowStatsTarget>,
+  target: Required<WorkflowPlanStatsTarget>,
 ): WorkflowTaskStats {
   return {
     plan: target.plan || undefined,
@@ -482,12 +553,97 @@ export function phaseForStatsCommand(
   return undefined;
 }
 
+const TICKET_STATS_OPERATIONS = new Set<TicketOperation>([
+  'build',
+  'simplify',
+  'verify',
+  'review',
+  'fix-all',
+  'finish',
+]);
+
+export function recordValidatedTicketAttempt(
+  state: WorkflowState,
+  target: WorkflowTicketStatsTarget,
+  result: {
+    operation: TicketOperation;
+    outcome: 'succeeded' | 'reconciled' | 'blocked' | 'failed';
+    actionKey: string;
+    attempt: number;
+    findings?: number;
+  },
+  startedAt = new Date().toISOString(),
+  finishedAt = new Date().toISOString(),
+): WorkflowState {
+  if (
+    !TICKET_STATS_OPERATIONS.has(result.operation) ||
+    (result.outcome !== 'succeeded' && result.outcome !== 'reconciled')
+  )
+    return state;
+  const stats = state.stats ?? createEmptyWorkflowStats();
+  const key = `${target.source.kind}\u001f${target.source.ref}`;
+  const attemptKey = `${result.actionKey}\u001f${result.attempt}`;
+  const existing = stats.active.tickets?.[key];
+  if (existing?.recordedAttempts.includes(attemptKey)) return state;
+  const started = Date.parse(startedAt);
+  const finished = Date.parse(finishedAt);
+  const duration =
+    Number.isFinite(started) && Number.isFinite(finished)
+      ? Math.max(0, finished - started)
+      : 0;
+  const ticket: WorkflowTicketStats = existing ?? {
+    target,
+    turns: 0,
+    verifyRuns: 0,
+    reviewRuns: 0,
+    fixRuns: 0,
+    findings: 0,
+    recordedAttempts: [],
+  };
+  return {
+    ...state,
+    stats: {
+      active: {
+        ...stats.active,
+        tickets: {
+          ...stats.active.tickets,
+          [key]: {
+            ...ticket,
+            startedAt: ticket.startedAt ?? startedAt,
+            ...(result.operation === 'finish' ? { finishedAt } : {}),
+            phaseDurationsMs: {
+              ...ticket.phaseDurationsMs,
+              [result.operation]:
+                (ticket.phaseDurationsMs?.[
+                  result.operation as keyof NonNullable<
+                    WorkflowTicketStats['phaseDurationsMs']
+                  >
+                ] ?? 0) + duration,
+            },
+            turns: ticket.turns + 1,
+            verifyRuns:
+              ticket.verifyRuns + (result.operation === 'verify' ? 1 : 0),
+            reviewRuns:
+              ticket.reviewRuns + (result.operation === 'review' ? 1 : 0),
+            fixRuns: ticket.fixRuns + (result.operation === 'fix-all' ? 1 : 0),
+            findings: ticket.findings + (result.findings ?? 0),
+            recordedAttempts: [...ticket.recordedAttempts, attemptKey],
+          },
+        },
+      },
+      history: stats.history,
+    },
+  };
+}
+
 export function archiveWorkflowStats(
   state: WorkflowState,
   endedReason: string,
 ): WorkflowState {
   const stats = state.stats ?? createEmptyWorkflowStats();
-  const hasActiveStats = Object.keys(stats.active.tasks).length > 0;
+  const hasActiveStats =
+    Object.keys(stats.active.tasks).length > 0 ||
+    Object.keys(stats.active.tickets ?? {}).length > 0;
   return {
     ...state,
     stats: hasActiveStats

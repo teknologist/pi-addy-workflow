@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import {
   repositoryScopeForPlan,
   repositoryScopesForPlan,
+  repositoryScopesFromMarkdown,
 } from '../extensions/workflow-monitor/repository-scope.ts';
 
 function createPlanRoot(): string {
@@ -83,4 +84,25 @@ test('repository scope falls back to base cwd when plan cannot be read', () => {
   const root = createPlanRoot();
 
   assert.deepEqual(repositoryScopesForPlan('missing.md', root), [root]);
+});
+
+test('shared markdown scope normalization preserves plan vocabulary', () => {
+  assert.deepEqual(
+    repositoryScopesFromMarkdown(
+      [
+        'Repository scope: current repository, `../companion`',
+        '**Owner repo:** `owner`',
+        '**Companion repo:** sibling `../companion`',
+      ].join('\n'),
+      '/workspace/owner',
+    ),
+    ['/workspace/owner', '/workspace/companion'],
+  );
+  assert.deepEqual(
+    repositoryScopesFromMarkdown(
+      'No repository metadata here.',
+      '/workspace/owner',
+    ),
+    ['/workspace/owner'],
+  );
 });

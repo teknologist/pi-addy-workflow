@@ -18,12 +18,32 @@ test('command intake exposes registered fresh step command names', () => {
 test('command intake plans fresh step input and workflow event', () => {
   const plan = planFreshStepCommand('/addy-review', { args: ['PLAN.md'] });
 
+  assert.equal(plan.kind, 'run');
+  if (plan.kind !== 'run') return;
   assert.equal(plan.input, '/addy-review PLAN.md');
   assert.deepEqual(plan.workflowEvent, {
     source: 'command',
     text: '/addy-review PLAN.md',
     manualAddyCommand: true,
   });
+});
+
+test('command intake preserves legacy free-text rendering', () => {
+  const plan = planFreshStepCommand('/addy-build', {
+    args: ['explain', 'the', 'change'],
+  });
+
+  assert.equal(plan.kind, 'run');
+  if (plan.kind === 'run')
+    assert.equal(plan.input, '/addy-build explain the change');
+});
+
+test('command intake rejects malformed quoted command lines with usage', () => {
+  for (const input of ['--ticket "ENG-42', '--ticket ENG-42\\']) {
+    const plan = planFreshStepCommand('/addy-build', input);
+    assert.equal(plan.kind, 'warn');
+    if (plan.kind === 'warn') assert.match(plan.message, /Use --ticket/);
+  }
 });
 
 test('command intake plans auto continuation reason or warning', () => {
@@ -42,9 +62,10 @@ test('command intake plans auto continuation reason or warning', () => {
 
 test('command intake plans stats path', () => {
   assert.deepEqual(planStatsCommand({ args: ['docs/plan.md'] }), {
+    kind: 'plan-stats',
     planPath: 'docs/plan.md',
   });
-  assert.deepEqual(planStatsCommand({ args: [] }), { planPath: undefined });
+  assert.deepEqual(planStatsCommand({ args: [] }), { kind: 'plan-stats' });
 });
 
 test('command intake plans workflow-next open or warning', () => {
@@ -62,4 +83,14 @@ test('command intake plans workflow-next open or warning', () => {
     kind: 'warn',
     message: WORKFLOW_NEXT_USAGE,
   });
+});
+
+test('command intake re-quotes opaque ticket refs', () => {
+  const plan = planFreshStepCommand('/addy-build', {
+    args: ['--ticket', 'local tickets/01.md'],
+  });
+
+  assert.equal(plan.kind, 'run');
+  if (plan.kind === 'run')
+    assert.equal(plan.input, '/addy-build --ticket "local tickets/01.md"');
 });

@@ -98,6 +98,45 @@ test('provider transport retry preserves task commit prompt', () => {
   assert.equal(harness.state.autoPendingAction?.prompt, '/addy-task-commit');
 });
 
+test('provider transport retry preserves an existing Ticket action identity', () => {
+  const pending = {
+    executionSource: 'ticket' as const,
+    key: 'ticket-key',
+    prompt: '/addy-verify --ticket #9',
+    sourceKind: 'github' as const,
+    ticketRef: '#9',
+    runId: 'run-1',
+    claimId: 'claim-1',
+    operation: 'verify' as const,
+    attemptMarker: 'attempt-2',
+    reason: 'idle-retry' as const,
+    attempts: 2,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+  const harness = createHarness({
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket',
+    autoPendingAction: pending,
+  });
+
+  assert.equal(
+    harness.handler.maybePreserveProviderTransportRetry(
+      {} as never,
+      {},
+      {
+        message: {
+          stopReason: 'error',
+          diagnostics: [{ type: 'provider_transport_failure' }],
+        },
+      },
+      harness.state,
+    ),
+    true,
+  );
+  assert.deepEqual(harness.state.autoPendingAction, pending);
+  assert.equal(harness.appended, 0);
+});
+
 test('provider transport retry ignores non-provider failures and non-Addy prompts', () => {
   const providerFailure = {
     message: {

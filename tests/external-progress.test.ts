@@ -295,6 +295,54 @@ test('addy-progress CLI starts, updates, and finishes through JSON stdin', () =>
   }
 });
 
+test('addy-progress CLI accepts the aborted terminal status', () => {
+  const fixture = setup();
+  try {
+    const env = { ...process.env, HOME: fixture.homeDir };
+    const started = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'start',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+      ],
+      { encoding: 'utf8', env },
+    );
+    assert.equal(started.status, 0, started.stderr);
+
+    const finished = spawnSync(
+      process.execPath,
+      [
+        '--experimental-strip-types',
+        ADDY_PROGRESS_BIN,
+        'finish',
+        '--cwd',
+        fixture.cwd,
+        '--source',
+        'df-implement-issues',
+        '--run',
+        started.stdout.trim(),
+        '--stdin',
+      ],
+      { encoding: 'utf8', env, input: JSON.stringify({ status: 'aborted' }) },
+    );
+    assert.equal(finished.status, 0, finished.stderr);
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots[0]?.status,
+      'aborted',
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('addy-progress CLI reuses the active implement-from-issues publication', () => {
   const fixture = setup();
   try {
@@ -438,8 +486,21 @@ test('strictly parses schema-v1 snapshots and rejects invalid or unknown fields'
   assert.throws(() =>
     parseIssueImplementationProgressSnapshot(snapshot({ unexpected: true })),
   );
-  assert.throws(() =>
+  assert.deepEqual(
     parseIssueImplementationProgressSnapshot(snapshot({ status: 'paused' })),
+    snapshot({ status: 'paused' }),
+  );
+  assert.deepEqual(
+    parseIssueImplementationProgressSnapshot(
+      snapshot({
+        status: 'aborted',
+        finishedAt: '2026-07-14T12:00:00.000Z',
+      }),
+    ),
+    snapshot({
+      status: 'aborted',
+      finishedAt: '2026-07-14T12:00:00.000Z',
+    }),
   );
   assert.throws(() =>
     parseIssueImplementationProgressSnapshot(snapshot({ completed: -1 })),
@@ -449,6 +510,52 @@ test('strictly parses schema-v1 snapshots and rejects invalid or unknown fields'
       snapshot({ startedAt: 'not-a-date' }),
     ),
   );
+});
+
+test('supports paused active runs and aborted terminal runs end to end', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    const paused = updateExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      patch: { status: 'paused' },
+      now: new Date(TIME.getTime() + 1),
+    });
+    assert.equal(paused.status, 'paused');
+    assert.equal(
+      selectExternalProgress({ cwd: fixture.cwd, homeDir: fixture.homeDir })
+        .active[0]?.snapshot.status,
+      'paused',
+    );
+
+    const aborted = finishExternalProgress({
+      runId: run.runId,
+      homeDir: fixture.homeDir,
+      status: 'aborted',
+      now: new Date(TIME.getTime() + 2),
+    });
+    assert.equal(aborted.status, 'aborted');
+    assert.equal(
+      selectExternalProgress({ cwd: fixture.cwd, homeDir: fixture.homeDir })
+        .terminal?.snapshot.status,
+      'aborted',
+    );
+    assert.throws(() =>
+      updateExternalProgress({
+        runId: run.runId,
+        homeDir: fixture.homeDir,
+        patch: { status: 'running' },
+      }),
+    );
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 test('normalizes display text and enforces a 256 Unicode code-point boundary', () => {

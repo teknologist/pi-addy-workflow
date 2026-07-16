@@ -118,7 +118,8 @@ export function setContextWorkflowState(
   state: WorkflowState,
   appendEntry?: AppendEntry,
 ): void {
-  state = refreshWorkflowTasksFromPlan(state, ctx.cwd);
+  if (state.executionSource !== 'ticket')
+    state = refreshWorkflowTasksFromPlan(state, ctx.cwd);
   commitWorkflowState(ctx, state, appendEntry);
   applyWorkflowStateUiEffects(ctx, state);
 }

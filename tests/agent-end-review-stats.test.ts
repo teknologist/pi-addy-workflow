@@ -40,6 +40,24 @@ test('agent-end review stats records matching review agent findings', () => {
   assert.equal(state.stats?.active.tasks['review-task']?.issues.important, 1);
 });
 
+test('agent-end review stats never parses Ticket review prose', () => {
+  const initial = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    reviewStatsKey: 'review-task',
+    reviewStatsAgent: 'addy-reviewer',
+  };
+
+  assert.equal(
+    stateWithAgentEndReviewIssues(
+      initial,
+      { agentName: 'addy-reviewer' },
+      'Critical: prose must not route Ticket REVIEW',
+    ),
+    initial,
+  );
+});
+
 test('agent-end review stats ignores non-matching review agent', () => {
   const initial = {
     ...createInitialWorkflowState(),

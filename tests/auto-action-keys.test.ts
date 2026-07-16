@@ -6,6 +6,8 @@ import {
   autoWorkflowActionKeyForPromptState,
   currentAutoWorkflowActionKey,
   idleUserMessageKey,
+  ticketAutoWorkflowActionKey,
+  ticketPendingActionMatches,
 } from '../extensions/workflow-monitor/auto-action-keys.ts';
 import { ADDY_AUTO_TASK_COMMIT_PROMPT } from '../extensions/workflow-monitor/workflow-tracker.ts';
 import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
@@ -175,6 +177,254 @@ test('auto action key for action uses action task identity over state fallback',
       taskIndex: 3,
       taskTitle: 'Action task',
     }),
+  );
+});
+
+test('ticket auto action keys survive fresh sessions and cannot collide', () => {
+  const identity = {
+    source: 'ticket' as const,
+    sourceKind: 'linear' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'claim-1',
+  };
+  const key = ticketAutoWorkflowActionKey(identity, 'verify', 'attempt-1');
+  assert.equal(
+    key,
+    ticketAutoWorkflowActionKey({ ...identity }, 'verify', 'attempt-1'),
+  );
+  assert.notEqual(
+    key,
+    ticketAutoWorkflowActionKey(
+      { ...identity, runId: 'run-2' },
+      'verify',
+      'attempt-1',
+    ),
+  );
+  assert.notEqual(
+    key,
+    ticketAutoWorkflowActionKey(
+      { ...identity, claimId: 'claim-2' },
+      'verify',
+      'attempt-1',
+    ),
+  );
+  assert.notEqual(
+    key,
+    ticketAutoWorkflowActionKey(identity, 'review', 'attempt-1'),
+  );
+  assert.notEqual(
+    key,
+    ticketAutoWorkflowActionKey(identity, 'verify', 'attempt-2'),
+  );
+});
+
+test('claim-required ticket operations never match before claim acquisition', () => {
+  const run = {
+    schemaVersion: 1 as const,
+    source: { kind: 'linear' as const, ref: 'ENG-42' },
+    runId: 'run-1',
+    queueSelector: { kind: 'label' as const, value: 'ready-for-agent' },
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+  };
+  const pending = {
+    executionSource: 'ticket' as const,
+    key: 'unused',
+    prompt: '/addy-verify --ticket ENG-42',
+    sourceKind: 'linear' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    operation: 'verify' as const,
+    attemptMarker: 'attempt-0',
+    reason: 'next-action' as const,
+    attempts: 0,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+
+  for (const operation of [
+    'build',
+    'simplify',
+    'verify',
+    'review',
+    'fix-all',
+    'finish',
+  ] as const) {
+    assert.equal(
+      ticketPendingActionMatches({ ...pending, operation }, run, operation),
+      false,
+      operation,
+    );
+  }
+
+  assert.equal(
+    ticketPendingActionMatches(
+      {
+        ...pending,
+        operation: 'select',
+        selector: { kind: 'label', value: 'ready-for-agent' },
+      },
+      run,
+      'select',
+    ),
+    true,
+  );
+});
+
+test('scope approval only matches the repository awaiting approval', () => {
+  const run = {
+    schemaVersion: 1 as const,
+    source: { kind: 'github' as const, ref: '#9' },
+    runId: 'run-1',
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+    pendingScopeRequest: { repository: '/requested' },
+  };
+  const pending = {
+    executionSource: 'ticket' as const,
+    key: 'unused',
+    prompt: 'approval',
+    sourceKind: 'github' as const,
+    ticketRef: '#9',
+    runId: 'run-1',
+    operation: 'repository-scope-approval' as const,
+    repository: '/requested',
+    attemptMarker: 'attempt-0',
+    reason: 'next-action' as const,
+    attempts: 0,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+
+  assert.equal(
+    ticketPendingActionMatches(pending, run, 'repository-scope-approval'),
+    true,
+  );
+  assert.equal(
+    ticketPendingActionMatches(
+      { ...pending, repository: '/different' },
+      run,
+      'repository-scope-approval',
+    ),
+    false,
+  );
+});
+
+test('persisted ticket pending action key reuses its attempt marker', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'linear' as const, ref: 'ENG-42' },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'eric',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+    autoPendingAction: {
+      executionSource: 'ticket' as const,
+      key: 'persisted-key',
+      prompt: '/addy-verify --ticket ENG-42',
+      sourceKind: 'linear' as const,
+      ticketRef: 'ENG-42',
+      runId: 'run-1',
+      claimId: 'claim-1',
+      operation: 'verify' as const,
+      attemptMarker: 'tracker-attempt-7',
+      reason: 'idle-retry' as const,
+      attempts: 7,
+      createdAt: '2026-07-15T00:00:00.000Z',
+    },
+  };
+
+  assert.equal(
+    autoWorkflowActionKeyForPromptState(
+      '/addy-verify --ticket ENG-42',
+      state,
+      undefined,
+    ),
+    ticketAutoWorkflowActionKey(
+      {
+        source: 'ticket',
+        sourceKind: 'linear',
+        ticketRef: 'ENG-42',
+        runId: 'run-1',
+        claimId: 'claim-1',
+      },
+      'verify',
+      'tracker-attempt-7',
+    ),
+  );
+});
+
+test('duplicate SELECT key reconstruction includes the run selector', () => {
+  const selector = { kind: 'label' as const, value: 'ready-for-agent' };
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    autoLastPrompt: '/addy-auto --tickets --label ready-for-agent',
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: '#9' },
+      runId: 'run-1',
+      queueSelector: selector,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+    },
+  };
+
+  assert.equal(
+    autoWorkflowActionKeyForPromptState(state.autoLastPrompt, state, undefined),
+    ticketAutoWorkflowActionKey(
+      {
+        source: 'ticket',
+        sourceKind: 'github',
+        ticketRef: '#9',
+        runId: 'run-1',
+        selector,
+      },
+      'select',
+      'attempt-0',
+    ),
+  );
+});
+
+test('auto action key for a ticket action uses ticket retry identity', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'linear' as const, ref: 'ENG-42' },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'eric',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: { implemented: true, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+  };
+  const action = {
+    executionSource: 'ticket' as const,
+    source: 'ticket' as const,
+    prompt: '/addy-verify --ticket ENG-42',
+    sourceKind: 'linear' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'claim-1',
+    operation: 'verify' as const,
+    attemptMarker: 'attempt-1',
+  };
+
+  assert.equal(
+    autoWorkflowActionKeyForAction(state, action),
+    ticketAutoWorkflowActionKey(action, 'verify', 'attempt-1'),
   );
 });
 

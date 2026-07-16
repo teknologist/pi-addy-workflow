@@ -48,6 +48,31 @@ test('committed task codec skips invalid records inside persisted maps', () => {
   );
 });
 
+test('committed task codec backfills stats with stable task identity', () => {
+  const plan = 'docs/plans/current.md';
+  const key = workflowTaskCommitKey(plan, 1, 'Current task', 'task-123');
+  const committedTasks = backfillCommittedTasksFromStats({
+    history: [
+      {
+        endedReason: 'task-commit',
+        tasks: {
+          committed: {
+            plan,
+            taskId: 'task-123',
+            taskIndex: 1,
+            taskTitle: 'Current task',
+            verifyRuns: 1,
+            reviewRuns: 1,
+          },
+        },
+      },
+    ],
+  });
+
+  assert.equal(committedTasks?.[key]?.taskId, 'task-123');
+  assert.equal(Object.keys(committedTasks ?? {}).length, 1);
+});
+
 test('committed task codec backfills legacy commit evidence from task-commit stats', () => {
   const plan = 'docs/plans/legacy.md';
   const taskTitle = 'Persist old evidence';

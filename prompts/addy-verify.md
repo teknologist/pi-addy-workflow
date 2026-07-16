@@ -10,9 +10,11 @@ Pi adaptation of Addy Osmani's `verify` command.
 
 Use the Pi `test-driven-development` skill.
 
-Argument: `/addy-verify [plan-path]`.
+Argument: `/addy-verify [plan-path]` or `/addy-verify --ticket <ticket-ref>`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
+
+Ticket form requires the current run's live claim. VERIFY exclusively owns the Ticket's `Verified` lifecycle status; the workflow monitor supplies the source-neutral tracker contract.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise verify the current implementation or bug context.
 

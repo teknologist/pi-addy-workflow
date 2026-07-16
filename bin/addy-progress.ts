@@ -117,8 +117,8 @@ function main(args: string[]): void {
   }
 
   const { status, ...patch } = payload;
-  if (status !== 'completed' && status !== 'failed')
-    throw new Error('finish status must be completed or failed');
+  if (status !== 'completed' && status !== 'failed' && status !== 'aborted')
+    throw new Error('finish status must be completed, failed, or aborted');
   finishExternalProgress({ cwd, source, runId, status, patch });
 }
 
