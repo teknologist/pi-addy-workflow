@@ -852,6 +852,10 @@ test('concurrent Ticket Slice initialization is idempotent and conflicting write
 test('Ticket Slice collections stay isolated by project and source while starts reuse one logical run', () => {
   const firstProject = setup();
   const secondProject = setup();
+  const secondProjectStorage = {
+    cwd: secondProject.cwd,
+    homeDir: firstProject.homeDir,
+  };
   try {
     const firstRun = startExternalProgress({
       cwd: firstProject.cwd,
@@ -875,15 +879,19 @@ test('Ticket Slice collections stay isolated by project and source while starts 
       now: TIME,
     });
     const secondProjectRun = startExternalProgress({
-      cwd: secondProject.cwd,
-      homeDir: secondProject.homeDir,
+      ...secondProjectStorage,
       source: 'df-implement-issues',
       now: TIME,
     });
     for (const [run, fixture, source, key] of [
       [firstRun, firstProject, 'df-implement-issues', 'FIRST-DF'],
       [otherSourceRun, firstProject, 'implement-from-issues', 'FIRST-OTHER'],
-      [secondProjectRun, secondProject, 'df-implement-issues', 'SECOND-DF'],
+      [
+        secondProjectRun,
+        secondProjectStorage,
+        'df-implement-issues',
+        'SECOND-DF',
+      ],
     ] as const) {
       initializeExternalProgressTicketSlices({
         runId: run.runId,
@@ -903,10 +911,9 @@ test('Ticket Slice collections stay isolated by project and source while starts 
       ['FIRST-DF', 'FIRST-OTHER'],
     );
     assert.deepEqual(
-      readExternalProgressProject({
-        cwd: secondProject.cwd,
-        homeDir: secondProject.homeDir,
-      }).snapshots.map((snapshot) => snapshot.ticketSlices?.[0]?.key),
+      readExternalProgressProject(secondProjectStorage).snapshots.map(
+        (snapshot) => snapshot.ticketSlices?.[0]?.key,
+      ),
       ['SECOND-DF'],
     );
   } finally {
