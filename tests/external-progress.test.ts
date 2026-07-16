@@ -762,13 +762,17 @@ test('Ticket Slice initialization is normalized-idempotent and conflicts do not 
         { key: ' TEST-1 ', title: ' First   ticket ', status: 'queued' },
         { key: 'TEST-2', title: 'Second ticket', status: 'queued' },
       ],
+      now: new Date(TIME.getTime() + 1),
     });
+    assert.equal(first.updatedAt, '2026-07-14T12:00:00.001Z');
+
     const repeated = initializeExternalProgressTicketSlices({
       ...input,
       ticketSlices: [
         { key: 'TEST-1', title: 'First ticket', status: 'queued' },
         { key: 'TEST-2', title: 'Second ticket', status: 'queued' },
       ],
+      now: new Date(TIME.getTime() + 2),
     });
     assert.deepEqual(repeated, first);
 
