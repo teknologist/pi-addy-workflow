@@ -33,6 +33,12 @@ type FreshStepCommandDeps = {
     input: string,
     ctx: unknown,
   ): boolean | Promise<boolean>;
+  dispatchTicketPrompt(
+    pi: ExtensionAPI,
+    ctx: unknown,
+    prompt: string,
+    state: WorkflowState,
+  ): Promise<void>;
   dispatchTaskCommitPrompt(
     pi: ExtensionAPI,
     ctx: unknown,
@@ -156,7 +162,21 @@ export function registerWorkflowCommands(
         if (await deps.dispatchManualFrontierGuard(pi, input, ctx))
           return { action: 'continue' } satisfies ContinueResult;
         deps.handleWorkflowEvent(ctx, plan.workflowEvent, deps.appendEntry(pi));
-        if (deps.shouldFreshContextBeforeStep(input, ctx))
+        if (plan.intent?.kind === 'ticket-lifecycle') {
+          const ticketState = {
+            ...deps.getState(ctx),
+            executionSource: 'ticket' as const,
+            autoMode: false,
+          };
+          const ticketPrompt =
+            plan.intent.claim === 'create' && !ticketState.ticketRun?.claim
+              ? commandFromArgs('/addy-ticket', [
+                  'claim',
+                  plan.intent.ticketRef,
+                ])
+              : input;
+          await deps.dispatchTicketPrompt(pi, ctx, ticketPrompt, ticketState);
+        } else if (deps.shouldFreshContextBeforeStep(input, ctx))
           await deps.dispatchManualStepWithFreshContextConfig(pi, input, ctx);
         else deps.sendUserMessage(pi, ctx, input);
         return { action: 'continue' } satisfies ContinueResult;
@@ -210,7 +230,7 @@ export function registerWorkflowCommands(
 
   pi.registerCommand?.('addy-ticket', {
     description: 'Inspect or manage an Addy Ticket Slice claim.',
-    handler: (event: CommandEvent, ctx: unknown) => {
+    handler: async (event: CommandEvent, ctx: unknown) => {
       const plan = planTicketManagementCommand(event);
       if (plan.kind === 'error') deps.notify(ctx, plan.message, 'warning');
       else if (plan.kind === 'ticket-management') {
@@ -221,7 +241,12 @@ export function registerWorkflowCommands(
         ]);
         const warning = ticketClaimSafetyWarning(deps.getState(ctx), input);
         if (warning) deps.notify(ctx, warning, 'warning');
-        else deps.sendUserMessage(pi, ctx, input);
+        else
+          await deps.dispatchTicketPrompt(pi, ctx, input, {
+            ...deps.getState(ctx),
+            executionSource: 'ticket',
+            autoMode: false,
+          });
       }
       return { action: 'continue' } satisfies ContinueResult;
     },

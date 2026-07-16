@@ -10,10 +10,16 @@ export type PlanTaskIdentity = WorkflowTaskIdentity & { source: 'plan' };
 
 export type TicketSliceIdentity = {
   source: 'ticket';
-  sourceKind: 'github' | 'linear' | 'local';
+  sourceKind?: 'github' | 'linear' | 'local';
   ticketRef: string;
   runId: string;
   claimId?: string;
+  staleClaimId?: string;
+  selector?: {
+    kind: 'default' | 'label' | 'status';
+    value: string;
+  };
+  repository?: string;
 };
 
 export type WorkflowSourceIdentity = PlanTaskIdentity | TicketSliceIdentity;

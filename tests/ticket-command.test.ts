@@ -45,10 +45,14 @@ test('parses direct ticket lifecycle forms without treating refs as paths', () =
 test('parses ticket queues strictly', () => {
   assert.deepEqual(parseTicketCommand('/addy-auto', ['--tickets']), {
     kind: 'ticket-queue',
+    selector: { kind: 'default', value: 'unbound' },
   });
   assert.deepEqual(
     parseTicketCommand('/addy-auto', ['--tickets', '--label', 'backend']),
-    { kind: 'ticket-queue', label: 'backend' },
+    {
+      kind: 'ticket-queue',
+      selector: { kind: 'label', value: 'backend' },
+    },
   );
   for (const [command, args] of [
     ['/addy-auto', ['--label', 'backend']],
@@ -62,7 +66,7 @@ test('parses ticket queues strictly', () => {
 });
 
 test('parses strict ticket management arity', () => {
-  for (const operation of ['status', 'release', 'reclaim'] as const)
+  for (const operation of ['claim', 'status', 'release', 'reclaim'] as const)
     assert.deepEqual(
       parseTicketCommand('/addy-ticket', [operation, 'ENG-42']),
       {

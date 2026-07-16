@@ -1,9 +1,11 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { pendingAutoActionForPrompt } from './auto-control.ts';
 import {
   planAutoPromptDispatch,
   type AutoPromptDispatchPlan,
 } from './command-dispatch.ts';
 import { expandPackagedPromptTemplate } from './prompt-template.ts';
+import { buildTicketPrompt } from './ticket-prompt.ts';
 import type { FreshContinuationDispatchOptions } from './fresh-continuation.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
 import type { WorkflowStatsTarget } from './workflow-stats.ts';
@@ -122,14 +124,43 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
       !(await deps.ensureAutoRunnerOwnership(pi, ctx, state, prompt))
     )
       return;
+    let dispatchState = state;
+    let resolvedDeliveryPrompt = deliveryPrompt;
+    if (state.executionSource === 'ticket') {
+      const pending = pendingAutoActionForPrompt(
+        prompt,
+        state,
+        statsTarget,
+        'next-action',
+        '',
+      );
+      if (pending.executionSource !== 'ticket')
+        throw new Error('Ticket dispatch did not produce a Ticket action.');
+      dispatchState = { ...state, autoPendingAction: pending };
+      resolvedDeliveryPrompt = buildTicketPrompt({
+        operation: pending.operation,
+        sourceKind: pending.sourceKind,
+        ...(pending.operation === 'select'
+          ? {}
+          : { ticketRef: pending.ticketRef }),
+        runId: pending.runId,
+        claimId: pending.claimId,
+        staleClaimId: pending.staleClaimId,
+        repository: pending.repository,
+        repositoryRoot: state.ticketRun?.repositoryRoot,
+        selector: pending.selector,
+        actionKey: pending.key,
+        attempt: Number(pending.attemptMarker.slice('attempt-'.length)),
+      });
+    }
     const plan = planAutoPromptDispatch({
       prompt,
-      state,
+      state: dispatchState,
       updates,
       statsTarget,
       options,
       freshContext: deps.freshContext(ctx),
-      deliveryPrompt,
+      deliveryPrompt: resolvedDeliveryPrompt,
       expandedPrompt: expandPackagedPromptTemplate(prompt),
     });
     if (plan.kind === 'current-session') {

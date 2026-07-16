@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { pendingAutoActionForPrompt } from './auto-control.ts';
 import { commandFromPrompt } from './command-router.ts';
 import {
   commandFromArgs,
@@ -197,6 +198,26 @@ export async function handleAddyAutoCommand(
     },
     deps.appendEntry(pi),
   );
+  if (intent.kind === 'ticket-queue') {
+    const ticketState = {
+      ...deps.getState(ctx),
+      executionSource: 'ticket' as const,
+    };
+    deps.setState(
+      ctx,
+      {
+        ...ticketState,
+        autoPendingAction: pendingAutoActionForPrompt(
+          text,
+          ticketState,
+          undefined,
+          'next-action',
+          '',
+        ),
+      },
+      deps.appendEntry(pi),
+    );
+  }
 
   if (!stopping)
     await deps.maybeRunAutoWatchdog(pi, ctx, 'addy-auto-command', {

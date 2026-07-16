@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import {
   ticketAutoWorkflowActionKey,
   ticketOperationFromPrompt,
@@ -12,7 +13,7 @@ import type {
 } from './workflow-core.ts';
 
 const SOURCE_KINDS = ['github', 'linear', 'local'] as const;
-const SELECTOR_KINDS = ['label', 'status'] as const;
+const SELECTOR_KINDS = ['default', 'label', 'status'] as const;
 const OPERATIONS = [
   'select',
   'claim',
@@ -87,6 +88,7 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
       ['schemaVersion', 'source', 'runId', 'lifecycle', 'repositoryScope'],
       [
         'claim',
+        'repositoryRoot',
         'revision',
         'queueSelector',
         'activityMarker',
@@ -101,6 +103,9 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
     !isTicketSourceKind(value.source.kind) ||
     !nonEmptyString(value.source.ref) ||
     !nonEmptyString(value.runId) ||
+    (value.repositoryRoot !== undefined &&
+      (!nonEmptyString(value.repositoryRoot) ||
+        !isAbsolute(value.repositoryRoot))) ||
     !Array.isArray(value.repositoryScope) ||
     value.repositoryScope.length === 0 ||
     !value.repositoryScope.every(nonEmptyString)
@@ -169,14 +174,74 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
       !exactKeys(
         result,
         ['operation', 'outcome', 'actionKey', 'attempt'],
-        ['revision'],
+        [
+          'revision',
+          'claimId',
+          'staleClaimId',
+          'repository',
+          'reviewDisposition',
+          'commitEvidence',
+        ],
       ) ||
       !isTicketOperation(result.operation) ||
       !oneOf(result.outcome, OUTCOMES) ||
       !nonEmptyString(result.actionKey) ||
       !Number.isSafeInteger(result.attempt) ||
       (result.attempt as number) < 0 ||
-      !optionalString(result.revision)
+      !optionalString(result.revision) ||
+      !optionalString(result.claimId) ||
+      (result.operation === 'reclaim') !==
+        nonEmptyString(result.staleClaimId) ||
+      (result.operation === 'repository-scope-approval') !==
+        nonEmptyString(result.repository)
+    )
+      return undefined;
+    if (result.reviewDisposition !== undefined) {
+      const disposition = result.reviewDisposition;
+      if (
+        result.operation !== 'review' ||
+        !record(disposition) ||
+        (disposition.status === 'clean'
+          ? !exactKeys(disposition, ['status'])
+          : disposition.status === 'findings'
+            ? !exactKeys(disposition, ['status', 'count']) ||
+              !Number.isSafeInteger(disposition.count) ||
+              (disposition.count as number) <= 0
+            : true)
+      )
+        return undefined;
+    }
+    const successfulFinish =
+      result.operation === 'finish' &&
+      (result.outcome === 'succeeded' || result.outcome === 'reconciled');
+    const commitEvidence = result.commitEvidence;
+    if (
+      (successfulFinish &&
+        (!value.lifecycle.implemented ||
+          !value.lifecycle.verified ||
+          !value.lifecycle.reviewed)) ||
+      (commitEvidence !== undefined
+        ? !successfulFinish ||
+          !Array.isArray(commitEvidence) ||
+          commitEvidence.length !== value.repositoryScope.length ||
+          !commitEvidence.every(
+            (entry) =>
+              record(entry) &&
+              exactKeys(entry, ['repository', 'commit']) &&
+              nonEmptyString(entry.repository) &&
+              nonEmptyString(entry.commit),
+          ) ||
+          new Set(
+            commitEvidence.map((entry) =>
+              record(entry) ? entry.repository : undefined,
+            ),
+          ).size !== commitEvidence.length ||
+          !value.repositoryScope.every((repository) =>
+            commitEvidence.some(
+              (entry) => record(entry) && entry.repository === repository,
+            ),
+          )
+        : successfulFinish)
     )
       return undefined;
   }
@@ -241,6 +306,9 @@ function ticketPendingActionMatchesRun(
           ticketRef: pending.ticketRef,
           runId: pending.runId,
           claimId: pending.claimId,
+          staleClaimId: pending.staleClaimId,
+          selector: pending.selector,
+          repository: pending.repository,
         },
         pending.operation,
         pending.attemptMarker,
@@ -290,6 +358,13 @@ export function coerceTicketExecution(
       ticketRecovery: recovery,
       warnings: withRecoveryWarning(base.warnings, recovery),
     };
+  if (
+    candidate.ticketRun === undefined &&
+    candidate.ticketRecovery === undefined &&
+    base.autoPendingAction?.executionSource === 'ticket' &&
+    ['select', 'status', 'claim'].includes(base.autoPendingAction.operation)
+  )
+    return { ...base, executionSource: 'ticket' };
   return corruptTicketExecution(candidate, base);
 }
 

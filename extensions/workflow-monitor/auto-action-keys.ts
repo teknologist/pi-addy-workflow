@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 import { commandFromPrompt, workflowTextFromInput } from './command-router.ts';
+import { normalizeTicketRepositoryRequest } from './repository-scope.ts';
+import { parseTicketCommand } from './ticket-command.ts';
+import { tokenizeCommandLine } from './workflow-host-events.ts';
 import { ADDY_AUTO_TASK_COMMIT_PROMPT } from './workflow-tracker.ts';
 import type { WorkflowAction } from './auto-lifecycle.ts';
 import type {
@@ -32,10 +35,61 @@ const CLAIM_REQUIRED_TICKET_OPERATIONS = new Set<TicketOperation>(
   ),
 );
 
+function ticketIntentFromPrompt(prompt: string) {
+  const [command, ...args] = tokenizeCommandLine(workflowTextFromInput(prompt));
+  return parseTicketCommand(command ?? '', args);
+}
+
+export function ticketSelectorFromPrompt(
+  prompt: string,
+): TicketRunState['queueSelector'] {
+  const intent = ticketIntentFromPrompt(prompt);
+  return intent.kind === 'ticket-queue' ? intent.selector : undefined;
+}
+
+export function ticketRefFromPrompt(prompt: string): string | undefined {
+  const intent = ticketIntentFromPrompt(prompt);
+  return intent.kind === 'ticket-lifecycle' ||
+    intent.kind === 'ticket-management'
+    ? intent.ticketRef
+    : undefined;
+}
+
 export function ticketOperationFromPrompt(
   prompt: string,
 ): TicketOperation | undefined {
-  return TICKET_OPERATIONS_BY_COMMAND[commandFromPrompt(prompt) ?? ''];
+  const command = commandFromPrompt(prompt) ?? '';
+  const lifecycle = TICKET_OPERATIONS_BY_COMMAND[command];
+  if (lifecycle) return lifecycle;
+  if (command !== '/addy-ticket' && command !== '/addy-auto') return undefined;
+  const intent = ticketIntentFromPrompt(prompt);
+  if (intent.kind === 'ticket-management') return intent.operation;
+  return intent.kind === 'ticket-queue' ? 'select' : undefined;
+}
+
+export function ticketOperationIdentityFromPrompt(
+  prompt: string,
+  run: TicketRunState,
+  operation: TicketOperation,
+): Pick<TicketSliceIdentity, 'selector' | 'repository'> {
+  const intent = ticketIntentFromPrompt(prompt);
+  if (operation === 'select') {
+    const selector = ticketSelectorFromPrompt(prompt) ?? run.queueSelector;
+    return selector ? { selector } : {};
+  }
+  if (operation === 'add-repository')
+    return intent.kind === 'ticket-management' &&
+      intent.operation === 'add-repository'
+      ? {
+          repository: normalizeTicketRepositoryRequest(
+            intent.repository,
+            run.repositoryRoot,
+          ),
+        }
+      : {};
+  return operation === 'repository-scope-approval' && run.pendingScopeRequest
+    ? { repository: run.pendingScopeRequest.repository }
+    : {};
 }
 
 export function idleUserMessageKey(ctx: unknown, message: string): string {
@@ -54,9 +108,21 @@ export function ticketAutoWorkflowActionKey(
   operation: TicketOperation,
   attemptMarker: string,
 ): string {
-  return [workflowSourceIdentityKey(identity), operation, attemptMarker].join(
-    '\u001f',
-  );
+  const operationIdentity =
+    operation === 'reclaim'
+      ? (identity.staleClaimId ?? '')
+      : operation === 'select'
+        ? `${identity.selector?.kind ?? ''}:${identity.selector?.value ?? ''}`
+        : operation === 'add-repository' ||
+            operation === 'repository-scope-approval'
+          ? (identity.repository ?? '')
+          : '';
+  return [
+    workflowSourceIdentityKey(identity),
+    operation,
+    operationIdentity,
+    attemptMarker,
+  ].join('\u001f');
 }
 
 export function ticketPendingActionMatches(
@@ -64,14 +130,29 @@ export function ticketPendingActionMatches(
   run: TicketRunState,
   operation: TicketOperation,
 ): boolean {
-  if (CLAIM_REQUIRED_TICKET_OPERATIONS.has(operation) && !run.claim)
+  const stagedClaim =
+    operation === 'claim' && !run.claim && Boolean(pending.claimId);
+  if (
+    CLAIM_REQUIRED_TICKET_OPERATIONS.has(operation) &&
+    !run.claim &&
+    !stagedClaim
+  )
     return false;
   return (
     pending.operation === operation &&
     pending.sourceKind === run.source.kind &&
     pending.ticketRef === run.source.ref &&
     pending.runId === run.runId &&
-    pending.claimId === run.claim?.id
+    (operation !== 'select' ||
+      (pending.selector?.kind === run.queueSelector?.kind &&
+        pending.selector?.value === run.queueSelector?.value)) &&
+    (operation !== 'repository-scope-approval' ||
+      pending.repository === run.pendingScopeRequest?.repository) &&
+    (operation === 'reclaim'
+      ? pending.staleClaimId === run.claim?.id &&
+        Boolean(pending.claimId) &&
+        pending.claimId !== pending.staleClaimId
+      : stagedClaim || pending.claimId === run.claim?.id)
   );
 }
 
@@ -140,18 +221,31 @@ export function autoWorkflowActionKeyForPromptState(
         `Cannot identify Ticket operation for pending action: ${prompt}`,
       );
     const pending = state.autoPendingAction;
-    const attemptMarker =
+    const matchingPending =
       pending?.executionSource === 'ticket' &&
       ticketPendingActionMatches(pending, state.ticketRun, operation)
-        ? pending.attemptMarker
-        : 'attempt-0';
+        ? pending
+        : undefined;
+    const attemptMarker = matchingPending?.attemptMarker ?? 'attempt-0';
     return ticketAutoWorkflowActionKey(
       {
         source: 'ticket',
         sourceKind: state.ticketRun.source.kind,
         ticketRef: state.ticketRun.source.ref,
         runId: state.ticketRun.runId,
-        claimId: state.ticketRun.claim?.id,
+        ...(operation === 'reclaim'
+          ? {
+              staleClaimId: state.ticketRun.claim?.id,
+              claimId: matchingPending?.claimId,
+            }
+          : operation === 'claim'
+            ? { claimId: matchingPending?.claimId }
+            : { claimId: state.ticketRun.claim?.id }),
+        ...ticketOperationIdentityFromPrompt(
+          prompt,
+          state.ticketRun,
+          operation,
+        ),
       },
       operation,
       attemptMarker,

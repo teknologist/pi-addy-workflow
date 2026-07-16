@@ -1,5 +1,5 @@
 export const TICKET_COMMAND_USAGE =
-  'Use --ticket <ticket-ref> without positional arguments, /addy-auto --tickets [--label <label>], or /addy-ticket status|release|reclaim <ticket-ref>.';
+  'Use --ticket <ticket-ref> without positional arguments, /addy-auto --tickets [--label <label>], or /addy-ticket claim|status|release|reclaim <ticket-ref>.';
 
 export type TicketLifecycleCommand =
   | '/addy-build'
@@ -8,6 +8,16 @@ export type TicketLifecycleCommand =
   | '/addy-review'
   | '/addy-fix-all'
   | '/addy-finish';
+
+export type TicketQueueSelector = {
+  kind: 'default' | 'label' | 'status';
+  value: string;
+};
+
+export const DEFAULT_TICKET_QUEUE_SELECTOR: TicketQueueSelector = {
+  kind: 'default',
+  value: 'unbound',
+};
 
 export type TicketCommandIntent =
   | {
@@ -23,12 +33,12 @@ export type TicketCommandIntent =
     }
   | { kind: 'plan-auto'; artifact?: string }
   | { kind: 'auto-stop' }
-  | { kind: 'ticket-queue'; label?: string }
+  | { kind: 'ticket-queue'; selector: TicketQueueSelector }
   | { kind: 'plan-stats'; planPath?: string; all?: true }
   | { kind: 'ticket-stats'; ticketRef: string }
   | {
       kind: 'ticket-management';
-      operation: 'status' | 'release' | 'reclaim';
+      operation: 'claim' | 'status' | 'release' | 'reclaim';
       ticketRef: string;
     }
   | {
@@ -91,13 +101,17 @@ function parseAuto(args: string[]): TicketCommandIntent {
   }
   if (args.filter((arg) => arg === '--tickets').length !== 1) return error();
   const remaining = args.filter((arg) => arg !== '--tickets');
-  if (remaining.length === 0) return { kind: 'ticket-queue' };
+  if (remaining.length === 0)
+    return { kind: 'ticket-queue', selector: DEFAULT_TICKET_QUEUE_SELECTOR };
   if (
     remaining.length === 2 &&
     remaining[0] === '--label' &&
     optionValue(remaining[1])
   )
-    return { kind: 'ticket-queue', label: remaining[1] };
+    return {
+      kind: 'ticket-queue',
+      selector: { kind: 'label', value: remaining[1] },
+    };
   return error();
 }
 
@@ -118,7 +132,8 @@ function parseStats(args: string[]): TicketCommandIntent {
 function parseManagement(args: string[]): TicketCommandIntent {
   const [operation, ticketRef, repository] = args;
   if (
-    (operation === 'status' ||
+    (operation === 'claim' ||
+      operation === 'status' ||
       operation === 'release' ||
       operation === 'reclaim') &&
     args.length === 2 &&

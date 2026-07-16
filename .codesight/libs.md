@@ -35,13 +35,13 @@
 - `extensions/workflow-monitor/agent-end-handler.ts` — function createAgentEndHandler: (deps) => void
 - `extensions/workflow-monitor/agent-end-review-stats.ts` — function stateWithAgentEndReviewIssues: (state, event, reviewText) => WorkflowState
 - `extensions/workflow-monitor/auto-action-keys.ts`
+  - function ticketSelectorFromPrompt: (prompt) => TicketRunState['queueSelector']
+  - function ticketRefFromPrompt: (prompt) => string | undefined
   - function ticketOperationFromPrompt: (prompt) => TicketOperation | undefined
+  - function ticketOperationIdentityFromPrompt: (prompt, run, operation) => Pick<TicketSliceIdentity, 'selector' | 'repository'>
   - function idleUserMessageKey: (ctx, message) => string
   - function ticketAutoWorkflowActionKey: (identity, operation, attemptMarker) => string
-  - function ticketPendingActionMatches: (pending, run, operation) => boolean
-  - function autoWorkflowActionKey: (prompt, details) => string
-  - function autoWorkflowActionKeyForAction: (state, action) => string | undefined
-  - _...2 more_
+  - _...5 more_
 - `extensions/workflow-monitor/auto-agent-end.ts` — function createAutoAgentEnd: (deps) => void
 - `extensions/workflow-monitor/auto-agent-finish.ts`
   - function finishTextReportsComplete: (text) => boolean
@@ -56,13 +56,13 @@
   - function validPendingFreshContinuation: (state) => state is WorkflowState &
   - _...8 more_
 - `extensions/workflow-monitor/auto-lifecycle.ts`
+  - function nextWorkflowActionForExecutionSource: (state, baseCwd?) => WorkflowAction
   - function reviewedTaskWasCompleted: (previousState, state) => boolean
   - function planTaskIsComplete: (planPath, baseCwd, target) => boolean
   - function actionTargetsCompletePlanTask: (state, action, baseCwd?) => boolean
   - function completedPlanAutoContinuation: (state, action, baseCwd?) => |
   - function latestCompletedActiveStatsTarget: (state, baseCwd?) => WorkflowStatsTarget | undefined
-  - function autoPauseWarning: (prompt, action) => string
-  - _...4 more_
+  - _...5 more_
 - `extensions/workflow-monitor/auto-loop.ts` — function createAutoLoopDispatchPort: () => void
 - `extensions/workflow-monitor/auto-prompt-dispatcher.ts` — function createAutoPromptDispatcher: (deps) => void
 - `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` — function addAutoRecoveryGuidance: (message, prompt) => string
@@ -181,7 +181,11 @@
   - function maybeSendTaskFinishedPushoverNotification: (input) => Promise<void>
   - type TaskFinishedNotificationInput
 - `extensions/workflow-monitor/renderers.ts` — function registerWorkflowRenderers: (pi) => void, function showWorkflowStats: (pi, ctx, state, options, notify, message, level?) => void
-- `extensions/workflow-monitor/repository-scope.ts` — function repositoryScopesForPlan: (planPath, baseCwd?) => string[], function repositoryScopeForPlan: (planPath, baseCwd?) => string | undefined
+- `extensions/workflow-monitor/repository-scope.ts`
+  - function normalizeTicketRepositoryRequest: (value, repositoryRoot?) => string
+  - function normalizeRepositoryScope: (value, baseCwd?) => string | undefined
+  - function repositoryScopesForPlan: (planPath, baseCwd?) => string[]
+  - function repositoryScopeForPlan: (planPath, baseCwd?) => string | undefined
 - `extensions/workflow-monitor/review-control.ts` — function reviewFixKey: (state) => string, function legacyReviewFixKey: (state) => string
 - `extensions/workflow-monitor/review-findings.ts`
   - function reviewTextHasActionableFindings: (text) => boolean
@@ -221,9 +225,21 @@
 - `extensions/workflow-monitor/ticket-command.ts`
   - function parseTicketCommand: (command, args) => TicketCommandIntent
   - type TicketLifecycleCommand
+  - type TicketQueueSelector
   - type TicketCommandIntent
   - const TICKET_COMMAND_USAGE
-  - const TICKET_LIFECYCLE_COMMANDS
+  - const DEFAULT_TICKET_QUEUE_SELECTOR: TicketQueueSelector
+  - _...1 more_
+- `extensions/workflow-monitor/ticket-phase-result.ts`
+  - function extractTicketResultEnvelope: (text, expected?) => TicketResult
+  - function formatTicketResultEnvelope: (result) => string
+  - function queuePauseSummary: (result) => string
+  - type TicketLifecycleSnapshot
+  - type TicketQueueResult
+  - type TicketReviewDisposition
+  - _...3 more_
+- `extensions/workflow-monitor/ticket-prompt.ts` — function buildTicketPrompt: (request) => string, type TicketPromptRequest
+- `extensions/workflow-monitor/ticket-result-ingestion.ts` — function ingestTicketResult: (state, text, repositoryRoot?) => TicketResultIngestion, type TicketResultIngestion
 - `extensions/workflow-monitor/ticket-source-switch.ts` — function ticketStateBlocksReset: (state) => boolean, function ticketClaimSafetyWarning: (state, input) => string | undefined
 - `extensions/workflow-monitor/workflow-core.ts`
   - function createInitialWorkflowState: () => WorkflowState

@@ -72,9 +72,13 @@ export type TicketRunState = {
   schemaVersion: 1;
   source: { kind: 'github' | 'linear' | 'local'; ref: string };
   runId: string;
+  repositoryRoot?: string;
   claim?: { id: string; owner: string; claimedAt: string };
   revision?: string;
-  queueSelector?: { kind: 'label' | 'status'; value: string };
+  queueSelector?: {
+    kind: 'default' | 'label' | 'status';
+    value: string;
+  };
   lifecycle: {
     implemented: boolean;
     verified: boolean;
@@ -100,6 +104,13 @@ export type TicketRunState = {
     actionKey: string;
     attempt: number;
     revision?: string;
+    claimId?: string;
+    staleClaimId?: string;
+    repository?: string;
+    reviewDisposition?:
+      | { status: 'clean' }
+      | { status: 'findings'; count: number };
+    commitEvidence?: Array<{ repository: string; commit: string }>;
   };
 };
 
@@ -135,10 +146,13 @@ export type WorkflowPlanPendingAction = WorkflowAutoPendingActionBase & {
 
 export type WorkflowTicketPendingAction = WorkflowAutoPendingActionBase & {
   executionSource: 'ticket';
-  sourceKind: TicketRunState['source']['kind'];
+  sourceKind?: TicketRunState['source']['kind'];
   ticketRef: string;
   runId: string;
   claimId?: string;
+  staleClaimId?: string;
+  selector?: TicketRunState['queueSelector'];
+  repository?: string;
   operation: TicketOperation;
   attemptMarker: string;
 };
@@ -151,6 +165,8 @@ export type WorkflowAutoPausedReason =
   | 'max-review-fix-loops'
   | 'repeated-review-finding'
   | 'same-phase-retry-limit'
+  | 'ticket-operation-blocked'
+  | 'ticket-operation-failed'
   | 'user-stopped';
 
 export type WorkflowState = {

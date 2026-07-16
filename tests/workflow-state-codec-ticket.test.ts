@@ -11,6 +11,7 @@ export const validTicketRun = {
   schemaVersion: 1 as const,
   source: { kind: 'github' as const, ref: 'ENG-42' },
   runId: 'run-1',
+  repositoryRoot: '/repo',
   claim: {
     id: 'claim-1',
     owner: 'eric',
@@ -49,6 +50,144 @@ test('valid ticket state round-trips strictly', () => {
   assert.equal(parsed?.executionSource, 'ticket');
   assert.deepEqual(parsed?.ticketRun, validTicketRun);
   assert.equal(parsed?.ticketRecovery, undefined);
+});
+
+test('Ticket operation pauses round-trip durably', () => {
+  for (const autoPausedReason of [
+    'ticket-operation-blocked',
+    'ticket-operation-failed',
+  ] as const) {
+    const parsed = parsePersistedWorkflowState(
+      serializeWorkflowState({
+        ...createInitialWorkflowState(),
+        autoMode: false,
+        autoPausedReason,
+        executionSource: 'ticket',
+        ticketRun: validTicketRun,
+      }),
+    );
+    assert.equal(parsed?.autoPausedReason, autoPausedReason);
+    assert.equal(parsed?.autoMode, false);
+  }
+});
+
+test('blocked and failed REVIEW dispositions round-trip when structured', () => {
+  for (const outcome of ['blocked', 'failed'] as const)
+    for (const reviewDisposition of [
+      undefined,
+      { status: 'clean' as const },
+      { status: 'findings' as const, count: 1 },
+    ]) {
+      const ticketRun = {
+        ...validTicketRun,
+        lastValidatedResult: {
+          operation: 'review' as const,
+          outcome,
+          actionKey: 'review-1',
+          attempt: 1,
+          ...(reviewDisposition ? { reviewDisposition } : {}),
+        },
+      };
+      const parsed = parsePersistedWorkflowState(
+        serializeWorkflowState({
+          ...createInitialWorkflowState(),
+          executionSource: 'ticket',
+          ticketRun,
+        }),
+      );
+      assert.deepEqual(parsed?.ticketRun, ticketRun);
+    }
+});
+
+test('persisted successful FINISH requires completed lifecycle', () => {
+  for (const outcome of ['succeeded', 'reconciled'] as const) {
+    const lastValidatedResult = {
+      operation: 'finish' as const,
+      outcome,
+      actionKey: 'finish-1',
+      attempt: 1,
+      commitEvidence: [{ repository: '/repo', commit: 'abc' }],
+    };
+    const completedRun = {
+      ...validTicketRun,
+      lifecycle: { implemented: true, verified: true, reviewed: true },
+      lastValidatedResult,
+    };
+    assert.deepEqual(
+      parsePersistedWorkflowState(
+        serializeWorkflowState({
+          ...createInitialWorkflowState(),
+          executionSource: 'ticket',
+          ticketRun: completedRun,
+        }),
+      )?.ticketRun,
+      completedRun,
+    );
+
+    for (const lifecycle of [
+      { implemented: false, verified: false, reviewed: false },
+      { implemented: true, verified: false, reviewed: false },
+      { implemented: true, verified: true, reviewed: false },
+    ]) {
+      const parsed = parsePersistedWorkflowState(
+        serializeWorkflowState({
+          ...createInitialWorkflowState(),
+          executionSource: 'ticket',
+          ticketRun: { ...validTicketRun, lifecycle, lastValidatedResult },
+        }),
+      );
+      assert.equal(parsed?.ticketRun, undefined);
+      assert.equal(parsed?.ticketRecovery?.possibleClaim, true);
+    }
+  }
+});
+
+test('persisted Ticket evidence remains operation-specific and exact', () => {
+  for (const lastValidatedResult of [
+    {
+      operation: 'finish',
+      outcome: 'succeeded',
+      actionKey: 'finish-1',
+      attempt: 1,
+      reviewDisposition: { status: 'clean' },
+      commitEvidence: [{ repository: '/repo', commit: 'abc' }],
+    },
+    {
+      operation: 'review',
+      outcome: 'succeeded',
+      actionKey: 'review-1',
+      attempt: 1,
+      reviewDisposition: { status: 'clean' },
+      commitEvidence: [{ repository: '/repo', commit: 'abc' }],
+    },
+    {
+      operation: 'finish',
+      outcome: 'succeeded',
+      actionKey: 'finish-1',
+      attempt: 1,
+      commitEvidence: [
+        { repository: '/repo', commit: 'abc' },
+        { repository: '/repo', commit: 'def' },
+      ],
+    },
+    {
+      operation: 'finish',
+      outcome: 'succeeded',
+      actionKey: 'finish-1',
+      attempt: 1,
+      commitEvidence: [{ repository: '/other', commit: 'abc' }],
+    },
+  ]) {
+    const parsed = parsePersistedWorkflowState(
+      serializeWorkflowState({
+        ...createInitialWorkflowState(),
+        executionSource: 'ticket',
+        ticketRun: { ...validTicketRun, lastValidatedResult } as never,
+      }),
+    );
+    assert.equal(parsed?.ticketRun, undefined);
+    assert.equal(parsed?.ticketRecovery?.possibleClaim, true);
+  }
 });
 
 test('ticket pending actions persist source-neutral retry identity', () => {
@@ -98,6 +237,49 @@ test('ticket pending actions persist source-neutral retry identity', () => {
   assert.equal(corrupt?.ticketRecovery?.possibleClaim, true);
 });
 
+test('unclaimed CLAIM identity survives persistence for retry', () => {
+  const { claim: _claim, ...unclaimedRun } = validTicketRun;
+  const pending = {
+    executionSource: 'ticket' as const,
+    key: ticketAutoWorkflowActionKey(
+      {
+        source: 'ticket',
+        sourceKind: 'github',
+        ticketRef: 'ENG-42',
+        runId: 'run-1',
+        claimId: 'staged-claim',
+      },
+      'claim',
+      'attempt-0',
+    ),
+    prompt: '/addy-ticket claim ENG-42',
+    sourceKind: 'github' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'staged-claim',
+    operation: 'claim' as const,
+    attemptMarker: 'attempt-0',
+    reason: 'next-action' as const,
+    attempts: 0,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+  const parsed = parsePersistedWorkflowState(
+    serializeWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: {
+        ...unclaimedRun,
+        lifecycle: { implemented: false, verified: false, reviewed: false },
+        lastValidatedResult: undefined,
+      },
+      autoPendingAction: pending,
+    }),
+  );
+
+  assert.deepEqual(parsed?.autoPendingAction, pending);
+  assert.equal(parsed?.ticketRun?.claim, undefined);
+});
+
 test('ticket pending action must match its run identity and prompt operation', () => {
   const pending = {
     executionSource: 'ticket' as const,
@@ -142,6 +324,93 @@ test('ticket pending action must match its run identity and prompt operation', (
     assert.equal(parsed?.ticketRun, undefined);
     assert.equal(parsed?.ticketRecovery?.possibleClaim, true);
   }
+});
+
+test('ticket pending operation identity fields are exact and action-key bound', () => {
+  const base = {
+    executionSource: 'ticket' as const,
+    prompt: '/addy-auto --tickets --label ready-for-agent',
+    sourceKind: 'github' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'claim-1',
+    operation: 'select' as const,
+    selector: { kind: 'label' as const, value: 'ready-for-agent' },
+    attemptMarker: 'attempt-0',
+    reason: 'next-action' as const,
+    attempts: 0,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+  const valid = {
+    ...base,
+    key: ticketAutoWorkflowActionKey(
+      { ...base, source: 'ticket' },
+      'select',
+      'attempt-0',
+    ),
+  };
+  assert.deepEqual(
+    parsePersistedWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: validTicketRun,
+      autoPendingAction: valid,
+    })?.autoPendingAction,
+    valid,
+  );
+
+  for (const autoPendingAction of [
+    { ...valid, selector: undefined },
+    { ...valid, selector: { kind: 'label', value: 'other' } },
+    {
+      ...valid,
+      operation: 'verify',
+      prompt: '/addy-verify --ticket ENG-42',
+    },
+    { ...valid, operation: 'add-repository', selector: undefined },
+    {
+      ...valid,
+      operation: 'verify',
+      prompt: '/addy-verify --ticket ENG-42',
+      selector: undefined,
+      repository: '/other',
+    },
+  ]) {
+    const parsed = parsePersistedWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: validTicketRun,
+      autoPendingAction,
+    });
+    assert.equal(parsed?.ticketRun, undefined);
+    assert.equal(parsed?.ticketRecovery?.possibleClaim, true);
+  }
+
+  const repository = '/other';
+  const { selector: _selector, ...withoutSelector } = base;
+  const repositoryAction = {
+    ...withoutSelector,
+    operation: 'add-repository' as const,
+    prompt: `/addy-ticket add-repository ENG-42 ${repository}`,
+    repository,
+  };
+  const keyedRepositoryAction = {
+    ...repositoryAction,
+    key: ticketAutoWorkflowActionKey(
+      { ...repositoryAction, source: 'ticket' },
+      'add-repository',
+      'attempt-0',
+    ),
+  };
+  assert.deepEqual(
+    parsePersistedWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: validTicketRun,
+      autoPendingAction: keyedRepositoryAction,
+    })?.autoPendingAction,
+    keyedRepositoryAction,
+  );
 });
 
 test('ticket pending action key mismatch fails closed as recovery', () => {

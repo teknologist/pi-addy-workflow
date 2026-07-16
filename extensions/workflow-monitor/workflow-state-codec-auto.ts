@@ -75,9 +75,21 @@ export function coerceAutoPendingAction(
     createdAt: candidate.createdAt,
   };
   if (candidate.executionSource === 'ticket') {
+    const selector = candidate.selector;
     if (
-      !isTicketSourceKind(candidate.sourceKind) ||
+      (candidate.sourceKind !== undefined &&
+        !isTicketSourceKind(candidate.sourceKind)) ||
       !isOptionalString(candidate.claimId) ||
+      !isOptionalString(candidate.staleClaimId) ||
+      !isOptionalString(candidate.repository) ||
+      (selector !== undefined &&
+        (typeof selector !== 'object' ||
+          selector === null ||
+          (selector.kind !== 'default' &&
+            selector.kind !== 'label' &&
+            selector.kind !== 'status') ||
+          typeof selector.value !== 'string' ||
+          selector.value.length === 0)) ||
       typeof candidate.ticketRef !== 'string' ||
       candidate.ticketRef.length === 0 ||
       typeof candidate.runId !== 'string' ||
@@ -92,14 +104,37 @@ export function coerceAutoPendingAction(
       candidate.sliceIndex !== undefined
     )
       return undefined;
+    const repositoryOperation =
+      candidate.operation === 'add-repository' ||
+      candidate.operation === 'repository-scope-approval';
+    if (
+      (candidate.operation !== 'select' && selector !== undefined) ||
+      repositoryOperation !== (candidate.repository !== undefined) ||
+      (candidate.operation === 'reclaim') !==
+        (candidate.staleClaimId !== undefined) ||
+      (candidate.operation === 'reclaim' &&
+        (typeof candidate.claimId !== 'string' ||
+          candidate.claimId.length === 0 ||
+          candidate.claimId === candidate.staleClaimId))
+    )
+      return undefined;
     return {
       ...common,
       executionSource: 'ticket',
-      sourceKind: candidate.sourceKind,
+      ...(candidate.sourceKind !== undefined
+        ? { sourceKind: candidate.sourceKind }
+        : {}),
       ticketRef: candidate.ticketRef,
       runId: candidate.runId,
       ...(candidate.claimId !== undefined
         ? { claimId: candidate.claimId }
+        : {}),
+      ...(candidate.staleClaimId !== undefined
+        ? { staleClaimId: candidate.staleClaimId }
+        : {}),
+      ...(selector !== undefined ? { selector } : {}),
+      ...(candidate.repository !== undefined
+        ? { repository: candidate.repository }
         : {}),
       operation: candidate.operation,
       attemptMarker: candidate.attemptMarker,

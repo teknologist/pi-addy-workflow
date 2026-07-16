@@ -27,7 +27,21 @@ function cleanScopeValue(value: string): string | undefined {
   return cleaned;
 }
 
-function repoScopeValueToPath(
+export function normalizeTicketRepositoryRequest(
+  value: string,
+  repositoryRoot?: string,
+): string {
+  const cleaned = cleanScopeValue(value);
+  if (!cleaned) throw new Error('Ticket repository request is empty.');
+  if (isAbsolute(cleaned)) return resolve(cleaned);
+  if (!repositoryRoot)
+    throw new Error(
+      'Relative Ticket repository request requires the owning repository root.',
+    );
+  return resolve(repositoryRoot, cleaned);
+}
+
+export function normalizeRepositoryScope(
   value: string,
   baseCwd?: string,
 ): string | undefined {
@@ -126,10 +140,10 @@ export function repositoryScopesForPlan(
     return uniqueDefined([
       baseCwd,
       ...extractOwnerAndCompanionRepos(indexMarkdown || markdown).map((value) =>
-        repoScopeValueToPath(value, baseCwd),
+        normalizeRepositoryScope(value, baseCwd),
       ),
       ...extractRepositoryScopeLineValues(markdown).map((value) =>
-        repoScopeValueToPath(value, baseCwd),
+        normalizeRepositoryScope(value, baseCwd),
       ),
     ]);
   } catch {

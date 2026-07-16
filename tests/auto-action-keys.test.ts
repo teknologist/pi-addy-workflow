@@ -224,6 +224,7 @@ test('claim-required ticket operations never match before claim acquisition', ()
     schemaVersion: 1 as const,
     source: { kind: 'linear' as const, ref: 'ENG-42' },
     runId: 'run-1',
+    queueSelector: { kind: 'label' as const, value: 'ready-for-agent' },
     lifecycle: { implemented: false, verified: false, reviewed: false },
     repositoryScope: ['/repo'],
   };
@@ -258,11 +259,53 @@ test('claim-required ticket operations never match before claim acquisition', ()
 
   assert.equal(
     ticketPendingActionMatches(
-      { ...pending, operation: 'select' },
+      {
+        ...pending,
+        operation: 'select',
+        selector: { kind: 'label', value: 'ready-for-agent' },
+      },
       run,
       'select',
     ),
     true,
+  );
+});
+
+test('scope approval only matches the repository awaiting approval', () => {
+  const run = {
+    schemaVersion: 1 as const,
+    source: { kind: 'github' as const, ref: '#9' },
+    runId: 'run-1',
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['/repo'],
+    pendingScopeRequest: { repository: '/requested' },
+  };
+  const pending = {
+    executionSource: 'ticket' as const,
+    key: 'unused',
+    prompt: 'approval',
+    sourceKind: 'github' as const,
+    ticketRef: '#9',
+    runId: 'run-1',
+    operation: 'repository-scope-approval' as const,
+    repository: '/requested',
+    attemptMarker: 'attempt-0',
+    reason: 'next-action' as const,
+    attempts: 0,
+    createdAt: '2026-07-15T00:00:00.000Z',
+  };
+
+  assert.equal(
+    ticketPendingActionMatches(pending, run, 'repository-scope-approval'),
+    true,
+  );
+  assert.equal(
+    ticketPendingActionMatches(
+      { ...pending, repository: '/different' },
+      run,
+      'repository-scope-approval',
+    ),
+    false,
   );
 });
 
@@ -314,6 +357,38 @@ test('persisted ticket pending action key reuses its attempt marker', () => {
       },
       'verify',
       'tracker-attempt-7',
+    ),
+  );
+});
+
+test('duplicate SELECT key reconstruction includes the run selector', () => {
+  const selector = { kind: 'label' as const, value: 'ready-for-agent' };
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    autoLastPrompt: '/addy-auto --tickets --label ready-for-agent',
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: '#9' },
+      runId: 'run-1',
+      queueSelector: selector,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+    },
+  };
+
+  assert.equal(
+    autoWorkflowActionKeyForPromptState(state.autoLastPrompt, state, undefined),
+    ticketAutoWorkflowActionKey(
+      {
+        source: 'ticket',
+        sourceKind: 'github',
+        ticketRef: '#9',
+        runId: 'run-1',
+        selector,
+      },
+      'select',
+      'attempt-0',
     ),
   );
 });

@@ -36,6 +36,14 @@ export function createProviderTransportRetryHandler(
   ): boolean {
     if (!agentEndedWithProviderTransportFailure(event)) return false;
 
+    if (state.autoPendingAction?.executionSource === 'ticket') {
+      deps.notifyWarning(
+        ctx,
+        'Addy preserved the pending Ticket action after a provider transport failure.',
+      );
+      return true;
+    }
+
     const retryPrompt = state.autoLastPrompt;
     if (
       !retryPrompt ||

@@ -28,6 +28,9 @@ function createHarness() {
       resumePendingFreshContinuation: async () => 'none',
       dispatchManualFrontierGuard: async () => false,
       dispatchManualStepWithFreshContextConfig: () => true,
+      dispatchTicketPrompt: async (_pi, _ctx, prompt) => {
+        sent.push(prompt);
+      },
       dispatchTaskCommitPrompt: async () => {},
       getState: () => state,
       handleWorkflowEvent: (_ctx, event) => events.push(event),

@@ -43,7 +43,7 @@ test('auto control project fallback preserves pending fresh prompt and clears st
   assert.equal(state.reviewStatsAgent, undefined);
 });
 
-test('ticket pending action carries source-neutral retry identity', () => {
+test('ticket pending action preserves selector and repository retry identities', () => {
   const state = {
     ...createInitialWorkflowState(),
     executionSource: 'ticket' as const,
@@ -51,6 +51,7 @@ test('ticket pending action carries source-neutral retry identity', () => {
       schemaVersion: 1 as const,
       source: { kind: 'github' as const, ref: 'ENG-42' },
       runId: 'run-1',
+      repositoryRoot: '/repo',
       claim: {
         id: 'claim-1',
         owner: 'eric',
@@ -63,6 +64,26 @@ test('ticket pending action carries source-neutral retry identity', () => {
 
   const pending = pendingAutoActionForPrompt(
     '/addy-verify --ticket ENG-42',
+    state,
+    undefined,
+    'idle-retry',
+    'ticket-key',
+  );
+  const selected = pendingAutoActionForPrompt(
+    '/addy-auto --tickets --label ready-for-agent',
+    {
+      ...state,
+      ticketRun: {
+        ...state.ticketRun,
+        queueSelector: { kind: 'label', value: 'ready-for-agent' },
+      },
+    },
+    undefined,
+    'idle-retry',
+    'ticket-key',
+  );
+  const repository = pendingAutoActionForPrompt(
+    '/addy-ticket add-repository ENG-42 ../companion',
     state,
     undefined,
     'idle-retry',
@@ -97,6 +118,97 @@ test('ticket pending action carries source-neutral retry identity', () => {
       attemptMarker: 'attempt-0',
       plan: undefined,
     },
+  );
+  assert.deepEqual(
+    selected.executionSource === 'ticket' ? selected.selector : undefined,
+    { kind: 'label', value: 'ready-for-agent' },
+  );
+  assert.equal(
+    repository.executionSource === 'ticket' ? repository.repository : undefined,
+    '/companion',
+  );
+  const repositoryRetry = pendingAutoActionForPrompt(
+    repository.prompt,
+    { ...state, autoPendingAction: repository },
+    undefined,
+    'idle-retry',
+    'ticket-key',
+  );
+  assert.equal(
+    repositoryRetry.executionSource === 'ticket'
+      ? repositoryRetry.attemptMarker
+      : undefined,
+    'attempt-0',
+  );
+});
+
+test('ticket CLAIM persists one claim identity across retries', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: 'ENG-42' },
+      runId: 'run-1',
+      repositoryRoot: '/repo',
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['/repo'],
+    },
+  };
+
+  const first = pendingAutoActionForPrompt(
+    '/addy-ticket claim ENG-42',
+    state,
+    undefined,
+    'next-action',
+    'ignored',
+  );
+  assert.equal(first.executionSource, 'ticket');
+  if (first.executionSource !== 'ticket') assert.fail('expected Ticket action');
+  assert.ok(first.claimId);
+
+  const retry = pendingAutoActionForPrompt(
+    first.prompt,
+    { ...state, autoPendingAction: first },
+    undefined,
+    'idle-retry',
+    'ignored',
+  );
+  assert.equal(retry.executionSource, 'ticket');
+  if (retry.executionSource !== 'ticket') assert.fail('expected Ticket action');
+  assert.equal(retry.claimId, first.claimId);
+  assert.equal(retry.key, first.key);
+  assert.equal(retry.attemptMarker, first.attemptMarker);
+});
+
+test('ticket repository requests resolve from the persisted run root', () => {
+  const pending = pendingAutoActionForPrompt(
+    '/addy-ticket add-repository ENG-42 ../companion',
+    {
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: {
+        schemaVersion: 1,
+        source: { kind: 'local', ref: 'ENG-42' },
+        runId: 'run-1',
+        repositoryRoot: '/work/owner',
+        claim: {
+          id: 'claim-1',
+          owner: 'eric',
+          claimedAt: '2026-07-15T00:00:00.000Z',
+        },
+        lifecycle: { implemented: true, verified: false, reviewed: false },
+        repositoryScope: ['/work/owner'],
+      },
+    },
+    undefined,
+    'next-action',
+    'ignored',
+  );
+
+  assert.equal(
+    pending.executionSource === 'ticket' ? pending.repository : undefined,
+    '/work/companion',
   );
 });
 

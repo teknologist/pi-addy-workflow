@@ -25,10 +25,13 @@ export type TicketWorkflowAction = {
   executionSource: 'ticket';
   source: 'ticket';
   prompt: string;
-  sourceKind: TicketRunState['source']['kind'];
+  sourceKind?: TicketRunState['source']['kind'];
   ticketRef: string;
   runId: string;
   claimId?: string;
+  staleClaimId?: string;
+  selector?: TicketRunState['queueSelector'];
+  repository?: string;
   operation: TicketOperation;
   attemptMarker: string;
   plan?: undefined;
@@ -44,6 +47,66 @@ export type WorkflowAction =
   | PlanWorkflowAction
   | TicketWorkflowAction
   | undefined;
+
+function ticketOperationForRun(run: TicketRunState): TicketOperation {
+  if (!run.claim) return 'claim';
+  if (!run.lifecycle.implemented) return 'build';
+  if (run.lifecycle.lastCompletedPhase === 'build') return 'simplify';
+  if (!run.lifecycle.verified) return 'verify';
+  if (
+    run.lastValidatedResult?.operation === 'review' &&
+    run.lastValidatedResult.reviewDisposition?.status === 'findings'
+  )
+    return 'fix-all';
+  if (!run.lifecycle.reviewed) return 'review';
+  return 'finish';
+}
+
+function ticketPrompt(operation: TicketOperation, ticketRef: string): string {
+  if (operation === 'claim') return `/addy-ticket claim ${ticketRef}`;
+  if (operation === 'simplify')
+    return `/addy-code-simplify --ticket ${ticketRef}`;
+  if (operation === 'fix-all') return `/addy-fix-all --ticket ${ticketRef}`;
+  return `/addy-${operation} --ticket ${ticketRef}`;
+}
+
+export function nextWorkflowActionForExecutionSource(
+  state: WorkflowState,
+  baseCwd?: string,
+): WorkflowAction {
+  const pending = state.autoPendingAction;
+  if (state.executionSource !== 'ticket')
+    return nextWorkflowActionForActivePlanLifecycle(state, baseCwd);
+  if (pending?.executionSource === 'ticket')
+    return {
+      executionSource: 'ticket',
+      source: 'ticket',
+      prompt: pending.prompt,
+      sourceKind: pending.sourceKind,
+      ticketRef: pending.ticketRef,
+      runId: pending.runId,
+      claimId: pending.claimId,
+      staleClaimId: pending.staleClaimId,
+      selector: pending.selector,
+      repository: pending.repository,
+      operation: pending.operation,
+      attemptMarker: pending.attemptMarker,
+    };
+  const run = state.ticketRun;
+  if (!run) return undefined;
+  const operation = ticketOperationForRun(run);
+  return {
+    executionSource: 'ticket',
+    source: 'ticket',
+    prompt: ticketPrompt(operation, run.source.ref),
+    sourceKind: run.source.kind,
+    ticketRef: run.source.ref,
+    runId: run.runId,
+    claimId: run.claim?.id,
+    operation,
+    attemptMarker: 'attempt-0',
+  };
+}
 
 export function reviewedTaskWasCompleted(
   previousState: WorkflowState,
@@ -103,6 +166,7 @@ export function completedPlanAutoContinuation(
       action: WorkflowAction;
     }
   | undefined {
+  if (action?.executionSource === 'ticket') return undefined;
   const command = commandFromPrompt(action?.prompt);
   if (command !== '/addy-review' && command !== '/addy-finish')
     return undefined;

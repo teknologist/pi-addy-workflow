@@ -19,6 +19,8 @@ export function isAutoPausedReason(
     value === 'max-review-fix-loops' ||
     value === 'repeated-review-finding' ||
     value === 'same-phase-retry-limit' ||
+    value === 'ticket-operation-blocked' ||
+    value === 'ticket-operation-failed' ||
     value === 'user-stopped'
   );
 }
