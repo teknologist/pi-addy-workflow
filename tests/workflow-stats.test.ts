@@ -9,6 +9,10 @@ import {
 } from '../extensions/workflow-monitor/workflow-transitions.ts';
 import { handleWorkflowEvent } from '../extensions/workflow-monitor/workflow-handler.ts';
 import {
+  parsePersistedWorkflowState,
+  serializeWorkflowState,
+} from '../extensions/workflow-monitor/workflow-state.ts';
+import {
   archiveWorkflowStats,
   createEmptyWorkflowStats,
   recordWorkflowReviewIssues,
@@ -16,6 +20,7 @@ import {
   recordWorkflowTaskFinished,
   recordWorkflowTaskTurn,
   recordWorkflowVerifyRun,
+  recordValidatedTicketAttempt,
 } from '../extensions/workflow-monitor/workflow-stats.ts';
 import {
   renderWorkflowStatsMarkdown,
@@ -23,6 +28,103 @@ import {
 } from '../extensions/workflow-monitor/workflow-stats-report.ts';
 
 const stateDir = mkdtempSync(join(tmpdir(), 'pi-addy-workflow-stats-test-'));
+
+test('Ticket stats use stable source identity and deduplicate validated attempts', () => {
+  const base = createInitialWorkflowState();
+  const source = { kind: 'linear' as const, ref: 'ENG-42' };
+  const reviewed = recordValidatedTicketAttempt(
+    base,
+    { kind: 'ticket', source },
+    {
+      operation: 'review',
+      outcome: 'succeeded',
+      actionKey: 'review-key',
+      attempt: 1,
+      findings: 3,
+    },
+    '2026-07-15T10:00:00.000Z',
+    '2026-07-15T10:02:00.000Z',
+  );
+  const duplicate = recordValidatedTicketAttempt(
+    reviewed,
+    { kind: 'ticket', source },
+    {
+      operation: 'review',
+      outcome: 'succeeded',
+      actionKey: 'review-key',
+      attempt: 1,
+      findings: 3,
+    },
+  );
+  const fixed = recordValidatedTicketAttempt(
+    duplicate,
+    { kind: 'ticket', source },
+    {
+      operation: 'fix-all',
+      outcome: 'reconciled',
+      actionKey: 'fix-key',
+      attempt: 1,
+    },
+    '2026-07-15T10:02:00.000Z',
+    '2026-07-15T10:03:00.000Z',
+  );
+
+  const ticket = Object.values(fixed.stats?.active.tickets ?? {})[0];
+  assert.equal(Object.keys(fixed.stats?.active.tickets ?? {}).length, 1);
+  assert.equal(ticket.reviewRuns, 1);
+  assert.equal(ticket.fixRuns, 1);
+  assert.equal(ticket.findings, 3);
+  assert.equal(ticket.turns, 2);
+  assert.equal(ticket.phaseDurationsMs?.review, 120_000);
+  assert.equal(ticket.phaseDurationsMs?.['fix-all'], 60_000);
+  assert.match(
+    renderWorkflowStatsText(fixed, { kind: 'ticket', source }),
+    /Ticket linear:ENG-42/,
+  );
+  const persisted = parsePersistedWorkflowState(serializeWorkflowState(fixed));
+  assert.equal(
+    Object.values(persisted?.stats?.active.tickets ?? {})[0]?.findings,
+    3,
+  );
+});
+
+test('Ticket stats filter by full source identity across trackers', () => {
+  const base = createInitialWorkflowState();
+  const github = recordValidatedTicketAttempt(
+    base,
+    {
+      kind: 'ticket',
+      source: { kind: 'github', ref: '42' },
+    },
+    {
+      operation: 'verify',
+      outcome: 'succeeded',
+      actionKey: 'github-verify',
+      attempt: 1,
+    },
+  );
+  const both = recordValidatedTicketAttempt(
+    github,
+    {
+      kind: 'ticket',
+      source: { kind: 'linear', ref: '42' },
+    },
+    {
+      operation: 'review',
+      outcome: 'succeeded',
+      actionKey: 'linear-review',
+      attempt: 1,
+    },
+  );
+
+  const rendered = renderWorkflowStatsText(both, {
+    kind: 'ticket',
+    source: { kind: 'github', ref: '42' },
+  });
+  assert.match(rendered, /Ticket github:42/);
+  assert.match(rendered, /Verify runs: 1/);
+  assert.match(rendered, /Review runs: 0/);
+});
 
 test('workflow stats records verify review issues and archives active tasks', () => {
   const state = {

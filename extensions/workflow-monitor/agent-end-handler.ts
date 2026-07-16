@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { latestAssistantText, type AgentEndEvent } from './agent-end-event.ts';
 import { stateWithAgentEndReviewIssues } from './agent-end-review-stats.ts';
+import { ingestTicketResult } from './ticket-result-ingestion.ts';
 import type { WorkflowAction } from './auto-lifecycle.ts';
 import type { WorkflowDispatchOptions } from './workflow-dispatch-options.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
@@ -102,19 +103,53 @@ export function createAgentEndHandler(deps: AgentEndHandlerDeps) {
     );
     if (stateWithReviewIssues !== state)
       deps.setState(ctx, stateWithReviewIssues, deps.appendEntry(pi));
-    if (!stateWithReviewIssues.autoMode) return;
+    let currentState = deps.getState(ctx);
+    const ticketEnd = currentState.executionSource === 'ticket';
     if (
+      !ticketEnd &&
+      currentState.autoMode &&
       deps.ensureAutoRunnerOwnership &&
       !(await deps.ensureAutoRunnerOwnership(
         pi,
         ctx,
-        stateWithReviewIssues,
+        currentState,
         'agent-end',
       ))
     )
       return;
     if (
-      deps.preserveProviderTransportRetry(pi, ctx, event, stateWithReviewIssues)
+      (currentState.autoMode ||
+        currentState.autoPendingAction?.executionSource === 'ticket') &&
+      deps.preserveProviderTransportRetry(pi, ctx, event, currentState)
+    )
+      return;
+
+    const ingestion = ingestTicketResult(
+      currentState,
+      reviewText,
+      deps.baseCwd(ctx),
+    );
+    if (ingestion.state !== currentState) {
+      deps.setState(ctx, ingestion.state, deps.appendEntry(pi));
+      currentState = ingestion.state;
+    }
+    if (
+      ingestion.status === 'rejected' ||
+      ingestion.status === 'duplicate' ||
+      ingestion.outcome === 'blocked' ||
+      ingestion.outcome === 'failed'
+    )
+      return;
+    if (!currentState.autoMode) return;
+    if (
+      ticketEnd &&
+      deps.ensureAutoRunnerOwnership &&
+      !(await deps.ensureAutoRunnerOwnership(
+        pi,
+        ctx,
+        currentState,
+        'agent-end',
+      ))
     )
       return;
     if (!deps.isChildSession()) {

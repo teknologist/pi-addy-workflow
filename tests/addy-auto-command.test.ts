@@ -216,6 +216,76 @@ test('addy auto command delivers valid pending fresh prompt before normal comman
   assert.deepEqual(harness.watchdogs, []);
 });
 
+test('ticket auto does not resume pending plan continuation or task commit', async () => {
+  const harness = createHarness({
+    ...createInitialWorkflowState(),
+    activePlan: 'PLAN.md',
+    autoFreshPrompt: '/addy-review PLAN.md',
+    autoFreshReason: 'before-review',
+    autoLastPrompt: ADDY_AUTO_TASK_COMMIT_PROMPT,
+    stats: {
+      active: {
+        tasks: {
+          current: {
+            taskTitle: 'Plan commit target',
+            turns: 1,
+            verifyRuns: 1,
+            reviewRuns: 1,
+            issues: {
+              critical: 0,
+              important: 0,
+              suggestion: 0,
+              unknown: 0,
+              total: 0,
+            },
+          },
+        },
+      },
+      history: [],
+    },
+  });
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['--tickets', '--label', 'ready'] },
+    {},
+    harness.deps,
+  );
+
+  assert.deepEqual(harness.delivered, []);
+  assert.deepEqual(harness.taskCommits, []);
+  assert.deepEqual(harness.events, [
+    {
+      source: 'command',
+      text: '/addy-auto --tickets --label ready',
+      artifact: undefined,
+    },
+  ]);
+  assert.equal(harness.watchdogs.length, 1);
+});
+
+test('each explicit ticket queue command starts a new persisted drain', async () => {
+  const harness = createHarness();
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['--tickets', '--label', 'ready'] },
+    {},
+    harness.deps,
+  );
+  const firstDrainId = harness.state.ticketQueue?.drainId;
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['--tickets', '--label', 'ready'] },
+    {},
+    harness.deps,
+  );
+
+  assert.ok(firstDrainId);
+  assert.notEqual(harness.state.ticketQueue?.drainId, firstDrainId);
+});
+
 test('addy auto command records stop and shows stats', async () => {
   const harness = createHarness();
 

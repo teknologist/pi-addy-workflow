@@ -12,6 +12,7 @@ export function stateWithAgentEndReviewIssues(
   event: ReviewAgentEvent,
   reviewText: string,
 ): WorkflowState {
+  if (state.executionSource === 'ticket') return state;
   const reviewAgent = event.agentName ?? event.agent;
   const shouldRecordReviewIssues = Boolean(
     state.reviewStatsKey &&

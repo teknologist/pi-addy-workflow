@@ -11,6 +11,10 @@ import {
   isValidProgress,
   readSlicePlanProgress,
 } from './slice-plan-progress.ts';
+import {
+  boundedTicketDisplay,
+  ticketLifecycleFrontier,
+} from './ticket-presentation.ts';
 
 export const WORKFLOW_WIDGET_KEY = 'pi-addy-workflow';
 const MIN_ARTIFACT_NAME_WIDTH = 12;
@@ -273,6 +277,27 @@ function shouldRenderTaskFooter(state: WorkflowState): boolean {
   );
 }
 
+function ticketFooterLine(state: WorkflowState): string | undefined {
+  const run = state.ticketRun;
+  if (!run) return undefined;
+  const selector = run.queueSelector ?? state.ticketQueue?.selector;
+  const parts = [
+    `Ticket: ${run.source.kind}:${boundedTicketDisplay(run.source.ref)}`,
+    `Frontier: ${ticketLifecycleFrontier(run.lifecycle)}`,
+    `Claim: ${run.claim ? 'claimed' : 'unclaimed'}`,
+    ...(state.autoPausedReason ? [`Pause: ${state.autoPausedReason}`] : []),
+    ...(selector
+      ? [`Selector: ${selector.kind}:${boundedTicketDisplay(selector.value)}`]
+      : []),
+    ...(run.lastValidatedResult
+      ? [
+          `Last: ${run.lastValidatedResult.operation}/${run.lastValidatedResult.outcome}`,
+        ]
+      : []),
+  ];
+  return parts.join(' | ');
+}
+
 export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   return (
     _tui?: unknown,
@@ -292,6 +317,16 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
           : undefined;
       const workflowStrip = renderWorkflowStrip(state, theme);
       const line = `${label}${workflowStrip}`;
+      if (state.executionSource === 'ticket') {
+        const lines = [line, ticketFooterLine(state)].filter(
+          (value): value is string => Boolean(value),
+        );
+        return width
+          ? lines.map((value) =>
+              truncateToWidth(value, Math.max(1, width), '', true),
+            )
+          : lines;
+      }
       const artifactName = artifact
         ? workflowArtifactName(artifact)
         : undefined;

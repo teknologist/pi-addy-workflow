@@ -5,6 +5,7 @@ import {
   taskIdentityKeyParts,
   taskIdForIdentity,
   workflowTaskIdentityKey,
+  workflowSourceIdentityKey,
 } from '../extensions/workflow-monitor/workflow-task-identity.ts';
 
 test('workflow task identity keys prefer stable task id', () => {
@@ -49,6 +50,32 @@ test('workflow task identity resolves stable id from matching legacy identity', 
       { taskIndex: 1, taskTitle: 'Current task' },
     ),
     true,
+  );
+});
+
+test('ticket source identity is stable and distinct from plan identity', () => {
+  const ticket = {
+    source: 'ticket' as const,
+    sourceKind: 'github' as const,
+    ticketRef: 'ENG-42',
+    runId: 'run-1',
+    claimId: 'claim-1',
+  };
+  assert.equal(
+    workflowSourceIdentityKey(ticket),
+    workflowSourceIdentityKey({ ...ticket }),
+  );
+  assert.notEqual(
+    workflowSourceIdentityKey(ticket),
+    workflowSourceIdentityKey({ ...ticket, claimId: 'claim-2' }),
+  );
+  assert.notEqual(
+    workflowSourceIdentityKey(ticket),
+    workflowSourceIdentityKey({
+      source: 'plan',
+      plan: 'ENG-42',
+      taskId: 'run-1',
+    }),
   );
 });
 

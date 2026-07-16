@@ -10,9 +10,11 @@ Pi adaptation of Addy Osmani's `review` command.
 
 Use the Pi `code-review-and-quality` skill.
 
-Argument: `/addy-review [plan-path]`.
+Argument: `/addy-review [plan-path]` or `/addy-review --ticket <ticket-ref>`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
+
+Ticket form requires the current run's live claim. REVIEW exclusively owns the Ticket's `Reviewed` lifecycle status; the workflow monitor supplies the source-neutral tracker contract.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, then review the current staged, unstaged, or recent changes against that plan.
 

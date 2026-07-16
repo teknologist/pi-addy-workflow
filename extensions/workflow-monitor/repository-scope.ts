@@ -27,7 +27,21 @@ function cleanScopeValue(value: string): string | undefined {
   return cleaned;
 }
 
-function repoScopeValueToPath(
+export function normalizeTicketRepositoryRequest(
+  value: string,
+  repositoryRoot?: string,
+): string {
+  const cleaned = cleanScopeValue(value);
+  if (!cleaned) throw new Error('Ticket repository request is empty.');
+  if (isAbsolute(cleaned)) return resolve(cleaned);
+  if (!repositoryRoot)
+    throw new Error(
+      'Relative Ticket repository request requires the owning repository root.',
+    );
+  return resolve(repositoryRoot, cleaned);
+}
+
+export function normalizeRepositoryScope(
   value: string,
   baseCwd?: string,
 ): string | undefined {
@@ -97,6 +111,29 @@ function extractOwnerAndCompanionRepos(markdown: string): string[] {
   return repos;
 }
 
+function normalizedRepositoryScopes(
+  ownershipMarkdown: string,
+  scopeMarkdown: string,
+  baseCwd: string | undefined,
+): string[] {
+  return uniqueDefined([
+    baseCwd,
+    ...extractOwnerAndCompanionRepos(ownershipMarkdown).map((value) =>
+      normalizeRepositoryScope(value, baseCwd),
+    ),
+    ...extractRepositoryScopeLineValues(scopeMarkdown).map((value) =>
+      normalizeRepositoryScope(value, baseCwd),
+    ),
+  ]);
+}
+
+export function repositoryScopesFromMarkdown(
+  markdown: string,
+  baseCwd: string,
+): string[] {
+  return normalizedRepositoryScopes(markdown, markdown, baseCwd);
+}
+
 export function repositoryScopesForPlan(
   planPath: string | undefined,
   baseCwd?: string,
@@ -123,15 +160,11 @@ export function repositoryScopesForPlan(
       }
     }
 
-    return uniqueDefined([
+    return normalizedRepositoryScopes(
+      indexMarkdown || markdown,
+      markdown,
       baseCwd,
-      ...extractOwnerAndCompanionRepos(indexMarkdown || markdown).map((value) =>
-        repoScopeValueToPath(value, baseCwd),
-      ),
-      ...extractRepositoryScopeLineValues(markdown).map((value) =>
-        repoScopeValueToPath(value, baseCwd),
-      ),
-    ]);
+    );
   } catch {
     return baseCwd ? [baseCwd] : [];
   }

@@ -30,6 +30,17 @@ test('stats target from task preserves task identity fields', () => {
   );
 });
 
+test('Ticket stats target carries a discriminated stable source identity', () => {
+  const target = {
+    kind: 'ticket' as const,
+    source: { kind: 'github' as const, ref: '#13' },
+  };
+  assert.deepEqual(target, {
+    kind: 'ticket',
+    source: { kind: 'github', ref: '#13' },
+  });
+});
+
 test('latest active stats target returns most recent active task target', () => {
   const state: WorkflowState = {
     phases: {

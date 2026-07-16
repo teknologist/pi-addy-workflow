@@ -178,15 +178,16 @@ export function createAutoWorkflowOrchestrator(
         options.appendEntry === false ? undefined : deps.appendEntry(pi),
       );
     }
-    const actionPendingCommitTarget =
-      deps.taskCommitCoordinator.actionCommitTarget(
-        dispatchState,
-        dispatchAction,
-      );
-    const pendingCommitTarget = latestCompletedActiveStatsTarget(
-      dispatchState,
-      deps.baseCwd(ctx),
-    );
+    const ticketAction = dispatchAction?.executionSource === 'ticket';
+    const actionPendingCommitTarget = ticketAction
+      ? undefined
+      : deps.taskCommitCoordinator.actionCommitTarget(
+          dispatchState,
+          dispatchAction,
+        );
+    const pendingCommitTarget = ticketAction
+      ? undefined
+      : latestCompletedActiveStatsTarget(dispatchState, deps.baseCwd(ctx));
     const decision = planAutoWorkflowDecision({
       action: dispatchAction,
       actionPendingCommitTarget,

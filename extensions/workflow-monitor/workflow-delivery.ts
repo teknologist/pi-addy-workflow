@@ -62,6 +62,8 @@ export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
   ): string | undefined {
     const state = deps.getState(ctx);
     if (!state.autoMode) return undefined;
+    if (state.autoPendingAction?.executionSource === 'ticket')
+      return state.autoPendingAction.key;
     const prompt = workflowTextFromInput(message);
     const target = deps.latestActiveStatsTarget(state);
     const pendingAction = pendingAutoActionForPrompt(
@@ -165,7 +167,8 @@ export function createWorkflowDelivery(deps: WorkflowDeliveryDeps) {
         }
         if (
           scheduledActionKey &&
-          latestState.autoPendingAction?.key === scheduledActionKey
+          latestState.autoPendingAction?.key === scheduledActionKey &&
+          latestState.autoPendingAction.executionSource !== 'ticket'
         ) {
           deps.setState(
             ctx,

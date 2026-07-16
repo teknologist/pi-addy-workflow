@@ -1,6 +1,9 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { actionTargetsCompletePlanTask } from './auto-lifecycle.ts';
+import {
+  actionTargetsCompletePlanTask,
+  nextWorkflowActionForExecutionSource,
+} from './auto-lifecycle.ts';
 import { stateAfterAutoPrompt } from './command-dispatch.ts';
 import { autoWorkflowActionKeyForAction } from './auto-action-keys.ts';
 import { createAutoAgentEnd } from './auto-agent-end.ts';
@@ -70,10 +73,7 @@ import {
 } from './composition-adapter.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
 import { stopAutoModeControlUpdates } from './workflow-state-control.ts';
-import {
-  ADDY_AUTO_TASK_COMMIT_PROMPT,
-  nextWorkflowActionForActivePlanLifecycle,
-} from './workflow-tracker.ts';
+import { ADDY_AUTO_TASK_COMMIT_PROMPT } from './workflow-tracker.ts';
 
 const AUTO_TASK_COMMIT_PROMPT = ADDY_AUTO_TASK_COMMIT_PROMPT;
 const AUTO_FRESH_IDLE_RETRY_MS = 50;
@@ -324,7 +324,7 @@ const autoWorkflowOrchestrator = createAutoWorkflowOrchestrator({
   autoTaskCommitPrompt: AUTO_TASK_COMMIT_PROMPT,
   baseCwd,
   getState: getWorkflowState,
-  nextActionForState: nextWorkflowActionForActivePlanLifecycle,
+  nextActionForState: nextWorkflowActionForExecutionSource,
   notify: notifyWorkflow,
   setState: setWorkflowState,
   taskCommitCoordinator,
@@ -340,7 +340,7 @@ const autoWatchdog = createAutoWatchdog({
   getState: getWorkflowState,
   ensureAutoRunnerOwnership,
   isChildSession: isSubagentChildSession,
-  nextActionForState: nextWorkflowActionForActivePlanLifecycle,
+  nextActionForState: nextWorkflowActionForExecutionSource,
   resumePendingFreshContinuation: (pi, ctx, options) =>
     freshContinuation.resumePendingFreshContinuation(pi, ctx, options ?? {}),
   setState: setWorkflowState,
@@ -371,7 +371,7 @@ const manualFrontierGuard = createManualFrontierGuard({
       options,
     ),
   getState: getWorkflowState,
-  nextActionForState: nextWorkflowActionForActivePlanLifecycle,
+  nextActionForState: nextWorkflowActionForExecutionSource,
   notify: notifyWorkflow,
 });
 
@@ -449,7 +449,7 @@ const agentEndHandler = createAgentEndHandler({
       state,
       options,
     ),
-  nextActionForState: nextWorkflowActionForActivePlanLifecycle,
+  nextActionForState: nextWorkflowActionForExecutionSource,
   preserveProviderTransportRetry: (pi, ctx, event, state) =>
     providerTransportRetry.maybePreserveProviderTransportRetry(
       pi,
@@ -492,6 +492,16 @@ export function registerAddyWorkflowMonitor(pi: ExtensionAPI) {
       manualFrontierGuard.dispatchManualFrontierGuard(pi, input, ctx),
     dispatchManualStepWithFreshContextConfig: (pi, input, ctx) =>
       manualFreshStep.dispatchManualStepWithFreshContextConfig(pi, input, ctx),
+    dispatchTicketPrompt: (pi, ctx, prompt, state) =>
+      autoLoop.dispatchAutoPromptFreshAware(
+        pi,
+        ctx,
+        prompt,
+        state,
+        {},
+        undefined,
+        { disableFreshSession: true, disableCompaction: true },
+      ),
     dispatchTaskCommitPrompt: (pi, ctx, state, target, options) =>
       taskCommitCoordinator.dispatchTaskCommitPrompt(
         pi,

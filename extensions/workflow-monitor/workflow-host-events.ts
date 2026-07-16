@@ -23,9 +23,46 @@ const WRITE_TOOL_NAMES = new Set([
   'obsidian_obsidian_patch_content',
 ]);
 
+export function tokenizeCommandLine(input: string): string[] {
+  const args: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+  for (const char of input) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+    } else if (char === '\\' && quote !== "'") escaped = true;
+    else if (quote) {
+      if (char === quote) quote = undefined;
+      else current += char;
+    } else if (char === '"' || char === "'") quote = char;
+    else if (/\s/.test(char)) {
+      if (current) {
+        args.push(current);
+        current = '';
+      }
+    } else current += char;
+  }
+  if (escaped || quote)
+    throw new SyntaxError(
+      'Unterminated quote or dangling escape in command line.',
+    );
+  if (current) args.push(current);
+  return args;
+}
+
 export function parseCommandArgs(event: CommandEvent): string[] {
-  if (typeof event === 'string') return event.split(/\s+/).filter(Boolean);
-  return event.args ?? event.input?.split(/\s+/).filter(Boolean) ?? [];
+  if (typeof event === 'string') return tokenizeCommandLine(event);
+  return event.args ?? (event.input ? tokenizeCommandLine(event.input) : []);
+}
+
+export function quoteCommandArg(arg: string): string {
+  return /[\s"'\\]/.test(arg) ? JSON.stringify(arg) : arg;
+}
+
+export function commandFromArgs(command: string, args: string[]): string {
+  return `${command}${args.length ? ` ${args.map(quoteCommandArg).join(' ')}` : ''}`;
 }
 
 export function inputTextFromEvent(event: InputEvent): string {
