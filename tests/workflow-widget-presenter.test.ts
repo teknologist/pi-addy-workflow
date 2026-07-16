@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { visibleWidth } from '@earendil-works/pi-tui';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createInitialWorkflowState,
@@ -18,12 +20,65 @@ import {
   renderWorkflowWidget,
 } from '../extensions/workflow-monitor/workflow-widget-presenter.ts';
 import {
+  externalProgressProjectKey,
+  externalProgressRunsDir,
+  writeExternalProgressSnapshot,
+} from '../extensions/workflow-monitor/external-progress.ts';
+import {
   renderWorkflowStrip as renderWorkflowStripFromTracker,
   renderWorkflowWidget as renderWorkflowWidgetFromTracker,
 } from '../extensions/workflow-monitor/workflow-tracker.ts';
 import { expectedTotalTasksProgress } from './helpers.ts';
 
 const taskFooterDir = '/tmp/pi-addy-workflow-task-footer-test';
+
+function externalProgressFixture(): {
+  cwd: string;
+  homeDir: string;
+  cleanup: () => void;
+} {
+  const cwd = mkdtempSync(join(tmpdir(), 'addy-widget-external-progress-'));
+  const homeDir = mkdtempSync(
+    join(tmpdir(), 'addy-widget-external-progress-home-'),
+  );
+  writeFileSync(join(cwd, 'README.md'), 'fixture\n');
+  execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
+  execFileSync('git', ['add', '.'], { cwd, stdio: 'ignore' });
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.email=fixture@example.test',
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-m',
+      'fixture',
+    ],
+    { cwd, stdio: 'ignore' },
+  );
+  return {
+    cwd,
+    homeDir,
+    cleanup: () => {
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(homeDir, { recursive: true, force: true });
+    },
+  };
+}
+
+function withExternalProgressHome<T>(homeDir: string, render: () => T): T {
+  const previousHome = process.env.HOME;
+  process.env.HOME = homeDir;
+  try {
+    return render();
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+  }
+}
 
 function committedTasksFor(
   planPath: string,
@@ -736,6 +791,215 @@ test('workflow widget truncates to render width', () => {
 
   const [line] = renderWorkflowWidget(state)().render(80);
   assert.equal(visibleWidth(line) <= 80, true);
+});
+
+test('workflow widget appends selected external runs after unchanged Addy lines', () => {
+  const fixture = externalProgressFixture();
+  try {
+    writeExternalProgressSnapshot(
+      {
+        schemaVersion: 1,
+        projectKey: externalProgressProjectKey({ cwd: fixture.cwd }),
+        runId: '11111111-1111-4111-8111-111111111111',
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'implementation',
+        progressUnit: 'issues',
+        currentItem: 'Issue #3',
+        completed: 1,
+        total: 3,
+        startedAt: '2026-07-14T12:00:00.000Z',
+        updatedAt: '2026-07-14T12:00:00.000Z',
+      },
+      { homeDir: fixture.homeDir },
+    );
+
+    const state = transitionWorkflow(createInitialWorkflowState(), {
+      source: 'user-input',
+      text: '/addy-build docs/plans/slice-01.md',
+    });
+
+    assert.deepEqual(
+      withExternalProgressHome(fixture.homeDir, () =>
+        renderWorkflowWidget(state, fixture.cwd)().render(),
+      ),
+      [
+        'Addy Workflow: ✓define → ✓plan => { [build] → simplify → verify → review → finish }',
+        'Plan: \x1b[1mslice-01.md\x1b[22m',
+        'Issue: 1/3 issues implementation | df-implement-issues | Issue #3 | running | stale',
+      ],
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('workflow widget cache lifetime starts after snapshot selection', () => {
+  const fixture = externalProgressFixture();
+  const realNow = Date.now;
+  try {
+    const runId = '55555555-5555-4555-8555-555555555555';
+    writeExternalProgressSnapshot(
+      {
+        schemaVersion: 1,
+        projectKey: externalProgressProjectKey({ cwd: fixture.cwd }),
+        runId,
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'implementation',
+        startedAt: '2026-07-14T12:00:00.000Z',
+        updatedAt: '2026-07-14T12:00:00.000Z',
+      },
+      { homeDir: fixture.homeDir },
+    );
+    const times = [0, 2_000, 2_000];
+    let calls = 0;
+    Date.now = () => times[Math.min(calls++, times.length - 1)]!;
+    const state = createInitialWorkflowState();
+
+    const first = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+    rmSync(
+      join(
+        externalProgressRunsDir({
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+        }),
+        `${runId}.json`,
+      ),
+    );
+    const second = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+
+    assert.deepEqual(second, first);
+  } finally {
+    Date.now = realNow;
+    fixture.cleanup();
+  }
+});
+
+test('workflow widget preserves baseline lines for missing or corrupt external snapshots', () => {
+  const fixture = externalProgressFixture();
+  try {
+    const state = transitionWorkflow(createInitialWorkflowState(), {
+      source: 'user-input',
+      text: '/addy-build docs/plans/slice-01.md',
+    });
+    const baseline = renderWorkflowWidget(state)().render();
+    const stateBefore = structuredClone(state);
+    const runsDir = externalProgressRunsDir({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    });
+    mkdirSync(runsDir, { recursive: true });
+    writeFileSync(join(runsDir, 'corrupt.json'), '{');
+
+    assert.deepEqual(
+      withExternalProgressHome(fixture.homeDir, () =>
+        renderWorkflowWidget(state, fixture.cwd)().render(),
+      ),
+      baseline,
+    );
+    assert.deepEqual(
+      withExternalProgressHome(fixture.homeDir, () =>
+        renderWorkflowWidget(state, join(fixture.cwd, 'missing'))().render(),
+      ),
+      baseline,
+    );
+    assert.deepEqual(state, stateBefore);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('workflow widget orders external runs and bounds safe display text', () => {
+  const fixture = externalProgressFixture();
+  try {
+    const projectKey = externalProgressProjectKey({ cwd: fixture.cwd });
+    for (const snapshot of [
+      {
+        runId: '11111111-1111-4111-8111-111111111111',
+        source: 'implement-from-issues',
+        status: 'blocked',
+        loopPhase: 'pre-loop',
+        progressUnit: 'issues',
+        currentItem: 'Issue #2',
+        completed: 1,
+        total: 4,
+        startedAt: '2026-07-14T12:00:00.000Z',
+        updatedAt: '2026-07-14T12:00:00.000Z',
+      },
+      {
+        runId: '22222222-2222-4222-8222-222222222222',
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'implementation',
+        progressUnit: 'waves',
+        currentItem: 'Wave 2\x1b[2J\nreview',
+        completed: 2,
+        total: 3,
+        startedAt: '2026-07-14T12:01:00.000Z',
+        updatedAt: '2026-07-14T12:01:00.000Z',
+      },
+      {
+        runId: '44444444-4444-4444-8444-444444444444',
+        source: 'df-implement-issues',
+        status: 'failed',
+        loopPhase: 'post-loop',
+        startedAt: '2026-07-14T11:00:00.000Z',
+        updatedAt: '2026-07-14T11:01:00.000Z',
+        finishedAt: '2026-07-14T11:01:00.000Z',
+      },
+      {
+        runId: '33333333-3333-4333-8333-333333333333',
+        source: 'df-implement-issues',
+        status: 'completed',
+        loopPhase: 'post-loop',
+        progressUnit: 'waves',
+        currentItem: 'Wave 3',
+        completed: 3,
+        total: 3,
+        startedAt: '2026-07-14T12:02:00.000Z',
+        updatedAt: '2026-07-14T12:03:00.000Z',
+        finishedAt: '2026-07-14T12:03:00.000Z',
+      },
+    ]) {
+      writeExternalProgressSnapshot(
+        { schemaVersion: 1, projectKey, ...snapshot },
+        { homeDir: fixture.homeDir },
+      );
+    }
+
+    const state = transitionWorkflow(createInitialWorkflowState(), {
+      source: 'user-input',
+      text: '/addy-build docs/plans/slice-01.md',
+    });
+    const lines = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(),
+    );
+
+    assert.deepEqual(lines.slice(-3), [
+      'Issue: 1/4 issues pre-loop boundary | implement-from-issues | Issue #2 | blocked | stale',
+      'Issue: 2/3 waves implementation | df-implement-issues | Wave 2 [2J review | running | stale',
+      'Issue: 3/3 waves post-loop boundary | df-implement-issues | Wave 3 | completed',
+    ]);
+    assert.equal(lines.slice(-3).join('').includes('\x1b'), false);
+    const narrowLines = withExternalProgressHome(fixture.homeDir, () =>
+      renderWorkflowWidget(state, fixture.cwd)().render(32),
+    );
+    assert.equal(
+      narrowLines.every((line) => visibleWidth(line) <= 32),
+      true,
+    );
+    assert.match(
+      narrowLines.find((line) => line.startsWith('Issue:')) ?? '',
+      /1\/4 issues pre-loop/,
+    );
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 test('auto mode toggles without changing lifecycle phase', () => {

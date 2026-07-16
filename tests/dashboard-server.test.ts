@@ -8,11 +8,19 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import {
+  dashboardHtml,
   dashboardSnapshot,
   type DashboardSnapshot,
 } from '../extensions/workflow-monitor/dashboard-server.ts';
+import {
+  externalProgressProjectKey,
+  externalProgressRunsDir,
+  writeExternalProgressSnapshot,
+} from '../extensions/workflow-monitor/external-progress.ts';
 import {
   createInitialWorkflowState,
   transitionWorkflow,
@@ -262,6 +270,231 @@ test('dashboard snapshot keeps the no-Ticket shape unchanged', () => {
     assert.equal(bytes(), before);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('dashboard projects issue workflows without changing empty dashboard data', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-external-'));
+  const stateDir = join(cwd, 'state');
+  const homeDir = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-home-'));
+  try {
+    writeFileSync(join(cwd, 'README.md'), 'fixture\n', 'utf8');
+    execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
+    const baseline = dashboardSnapshot({
+      cwd,
+      stateDir,
+      externalProgressHomeDir: homeDir,
+      externalProgressCacheMs: 0,
+    }) as DashboardSnapshot;
+    assert.deepEqual(Object.keys(baseline).sort(), [
+      'activePlan',
+      'activePlanDisplayName',
+      'activeSuitePlan',
+      'activeSuitePlanDisplayName',
+      'activeTask',
+      'autoMode',
+      'autoPausedReason',
+      'autoPendingAction',
+      'currentPhase',
+      'currentSliceIndex',
+      'currentTask',
+      'currentTaskId',
+      'currentTaskIndex',
+      'currentTaskSummary',
+      'cwd',
+      'nextTask',
+      'nextTaskId',
+      'nextTaskSummary',
+      'phases',
+      'planGroups',
+      'progress',
+      'sliceCount',
+      'sliceGroups',
+      'stateCount',
+      'stateDir',
+      'stateFile',
+      'stateLastUpdatedAt',
+      'taskCount',
+      'tasks',
+      'updatedAt',
+      'warnings',
+    ]);
+    assert.equal('externalRuns' in baseline, false);
+    assert.equal('externalProgressWarning' in baseline, false);
+
+    const projectKey = externalProgressProjectKey({ cwd });
+    const now = new Date().toISOString();
+    const run = (overrides: Record<string, unknown>) => ({
+      schemaVersion: 1,
+      projectKey,
+      source: 'df-implement-issues',
+      status: 'running',
+      loopPhase: 'implementation',
+      startedAt: now,
+      updatedAt: now,
+      ...overrides,
+    });
+    writeExternalProgressSnapshot(
+      run({
+        runId: '11111111-1111-4111-8111-111111111111',
+        currentItem: '<script>alert(1)</script>',
+      }),
+      { homeDir },
+    );
+    writeExternalProgressSnapshot(
+      run({
+        runId: '22222222-2222-4222-8222-222222222222',
+        source: 'implement-from-issues',
+        status: 'blocked',
+        currentItem: 'Blocked <review>',
+        startedAt: '2000-01-01T00:00:00.000Z',
+        updatedAt: '2000-01-01T00:00:00.000Z',
+      }),
+      { homeDir },
+    );
+    writeExternalProgressSnapshot(
+      run({
+        runId: '33333333-3333-4333-8333-333333333333',
+        status: 'completed',
+        loopPhase: 'post-loop',
+        currentItem: '<img src=x>',
+        finishedAt: now,
+      }),
+      { homeDir },
+    );
+    writeExternalProgressSnapshot(
+      run({
+        runId: '44444444-4444-4444-8444-444444444444',
+        status: 'failed',
+        loopPhase: 'post-loop',
+        currentItem: 'older terminal',
+        startedAt: '2000-01-01T00:00:00.000Z',
+        updatedAt: '2000-01-01T00:00:00.000Z',
+        finishedAt: '2000-01-01T00:00:00.000Z',
+      }),
+      { homeDir },
+    );
+    writeFileSync(
+      join(externalProgressRunsDir({ cwd, homeDir }), 'corrupt.json'),
+      '{',
+    );
+
+    const snapshot = dashboardSnapshot({
+      cwd,
+      stateDir,
+      externalProgressHomeDir: homeDir,
+      externalProgressCacheMs: 0,
+    }) as DashboardSnapshot;
+    assert.deepEqual(
+      snapshot.externalRuns?.map((entry) => entry.status),
+      ['running', 'blocked', 'completed'],
+    );
+    assert.equal(snapshot.externalRuns?.[1]?.stale, true);
+    assert.equal(
+      snapshot.externalRuns?.[0]?.currentItem,
+      '<script>alert(1)</script>',
+    );
+    assert.equal(
+      snapshot.externalRuns?.some(
+        (entry) => entry.currentItem === 'older terminal',
+      ),
+      false,
+    );
+    assert.equal('runId' in (snapshot.externalRuns?.[0] ?? {}), false);
+    assert.equal(
+      snapshot.externalProgressWarning,
+      'Some issue workflow snapshots could not be read.',
+    );
+
+    const html = readFileSync(
+      join(process.cwd(), 'extensions/workflow-monitor/dashboard-server.ts'),
+      'utf8',
+    );
+    assert.match(html, /Issue workflows/);
+    assert.match(html, /escapeHtml\(run\.currentItem\)/);
+    assert.match(html, /externalProgressWarning/);
+    assert.match(html, /const refreshIntervalMs = 5000/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
+
+test('dashboard client escapes issue workflow text and renders partial counters', () => {
+  const html = dashboardHtml();
+  const script =
+    [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].at(-1)?.[1] ?? '';
+  const start = script.indexOf('function value(');
+  const end = script.indexOf('function renderIssueWorkflows');
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  const helpers = script.slice(start, end);
+
+  const completedOnly = runInNewContext(`${helpers}; issueWorkflow(run);`, {
+    run: {
+      source: '<img src=x>',
+      status: 'running',
+      loopPhase: 'implementation',
+      progressUnit: 'issues',
+      currentItem: '<script>alert(1)</script>',
+      completed: 3,
+      stale: false,
+    },
+  }) as string;
+  assert.match(completedOnly, /3 completed issues/);
+  assert.match(completedOnly, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(completedOnly, /&lt;img src=x&gt;/);
+  assert.doesNotMatch(completedOnly, /<script>|<img/);
+
+  const totalOnly = runInNewContext(`${helpers}; issueWorkflow(run);`, {
+    run: {
+      source: 'df-implement-issues',
+      status: 'blocked',
+      loopPhase: 'queue',
+      total: 8,
+      stale: false,
+    },
+  }) as string;
+  assert.match(totalOnly, /8 total/);
+});
+
+test('dashboard external progress cache hits then expires', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-cache-'));
+  const stateDir = join(cwd, 'state');
+  const homeDir = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-cache-home-'));
+  const originalDateNow = Date.now;
+  const cacheTimes = [0, 100, 101, 151];
+  Date.now = () => cacheTimes.shift() ?? 151;
+  try {
+    writeFileSync(join(cwd, 'README.md'), 'fixture\n', 'utf8');
+    execFileSync('git', ['init'], { cwd, stdio: 'ignore' });
+    const options = {
+      cwd,
+      stateDir,
+      externalProgressHomeDir: homeDir,
+      externalProgressCacheMs: 50,
+    };
+    assert.equal(dashboardSnapshot(options).externalRuns, undefined);
+    const now = new Date().toISOString();
+    writeExternalProgressSnapshot(
+      {
+        schemaVersion: 1,
+        projectKey: externalProgressProjectKey({ cwd }),
+        runId: '55555555-5555-4555-8555-555555555555',
+        source: 'df-implement-issues',
+        status: 'running',
+        loopPhase: 'queue',
+        startedAt: now,
+        updatedAt: now,
+      },
+      { homeDir },
+    );
+    assert.equal(dashboardSnapshot(options).externalRuns, undefined);
+    assert.equal(dashboardSnapshot(options).externalRuns?.length, 1);
+  } finally {
+    Date.now = originalDateNow;
+    rmSync(cwd, { recursive: true, force: true });
+    rmSync(homeDir, { recursive: true, force: true });
   }
 });
 

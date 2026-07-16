@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   ensureDashboardShim,
+  ensureProgressShim,
   dashboardShimUsage,
   launchDashboardCommand,
 } from './dashboard-installer/core.ts';
@@ -21,20 +22,26 @@ function commandArgs(event: CommandEvent): string[] {
   return event.args ?? event.input?.split(/\s+/).filter(Boolean) ?? [];
 }
 
-function installDashboardShim(ctx: UiContext): void {
+async function installDashboardShim(ctx: UiContext): Promise<void> {
   ctx.ui?.setStatus?.('addy-dashboard', 'Dashboard: addy-dashboard');
-  // Fire-and-forget: installing the shim must never delay Pi startup.
-  void ensureDashboardShim(import.meta.url)
-    .then((result) => {
-      if (result.changed) ctx.ui?.notify?.(dashboardShimUsage(result), 'info');
-    })
-    .catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      ctx.ui?.notify?.(
-        `pi-addy-workflow dashboard shim install failed: ${message}`,
-        'warning',
-      );
-    });
+  const results = await Promise.allSettled([
+    ensureDashboardShim(import.meta.url),
+    ensureProgressShim(import.meta.url),
+  ]);
+  const dashboard = results[0];
+  if (dashboard.status === 'fulfilled' && dashboard.value.changed)
+    ctx.ui?.notify?.(dashboardShimUsage(dashboard.value), 'info');
+  for (const result of results) {
+    if (result.status !== 'rejected') continue;
+    const message =
+      result.reason instanceof Error
+        ? result.reason.message
+        : String(result.reason);
+    ctx.ui?.notify?.(
+      `pi-addy-workflow runtime shim install failed: ${message}`,
+      'warning',
+    );
+  }
 }
 
 export default function addyDashboardInstaller(pi: ExtensionAPI) {
@@ -54,10 +61,10 @@ export default function addyDashboardInstaller(pi: ExtensionAPI) {
   });
 
   pi.on('session_start', async (_event: unknown, ctx: UiContext) => {
-    installDashboardShim(ctx);
+    await installDashboardShim(ctx);
   });
   pi.on('resources_discover', async (_event: unknown, ctx: UiContext) => {
-    installDashboardShim(ctx);
+    await installDashboardShim(ctx);
     return {};
   });
 }

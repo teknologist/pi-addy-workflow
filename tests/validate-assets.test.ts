@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const prompts = [
@@ -124,6 +124,15 @@ test('package manifest exposes Pi resources but not native agents', async () => 
   assert.equal(manifest.pi.agents, undefined);
   assert.ok(manifest.files.includes('agents/'));
   assert.ok(manifest.files.includes('docs/'));
+  assert.deepEqual(manifest.bin, {
+    'addy-dashboard': 'bin/addy-dashboard.ts',
+    'addy-progress': 'bin/addy-progress.ts',
+  });
+  assert.notEqual((await stat('bin/addy-progress.ts')).mode & 0o111, 0);
+  assert.match(
+    await readFile('bin/addy-progress.ts', 'utf8'),
+    /^#!\/usr\/bin\/env -S node --disable-warning=ExperimentalWarning --experimental-strip-types/,
+  );
 });
 
 test('all Addy prompts exist and workflow commands are not prompt files', async () => {

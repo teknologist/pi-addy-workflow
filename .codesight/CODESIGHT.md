@@ -2,9 +2,9 @@
 
 > **Stack:** raw-http | none | unknown | typescript
 
-> 1 routes (1 inferred) | 0 models | 0 components | 109 lib files | 7 env vars | 2 middleware | 100% test coverage
-> **Token savings:** this file is ~10,000 tokens. Without it, AI exploration would cost ~39,400 tokens. **Saves ~29,400 tokens per conversation.**
-> **Last scanned:** 2026-07-16 15:27 — re-run after significant changes
+> 1 routes (1 inferred) | 0 models | 0 components | 110 lib files | 7 env vars | 2 middleware | 100% test coverage
+> **Token savings:** this file is ~10,200 tokens. Without it, AI exploration would cost ~39,700 tokens. **Saves ~29,500 tokens per conversation.**
+> **Last scanned:** 2026-07-16 16:24 — re-run after significant changes
 
 ---
 
@@ -36,10 +36,10 @@
   - function defaultDashboardBinDir: (home) => void
   - function packageRoot: (importMetaUrl) => string
   - function dashboardBinSource: (importMetaUrl) => string
+  - function progressBinSource: (importMetaUrl) => string
   - function dashboardShimContent: (sourcePath) => string
-  - function ensureDashboardShim: (importMetaUrl, options) => Promise<DashboardShimResult>
-  - function dashboardShimUsage: (result) => string
-  - _...5 more_
+  - function progressShimContent: (sourcePath) => string
+  - _...9 more_
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string
@@ -136,6 +136,7 @@
   - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
 - `extensions/workflow-monitor/dashboard-server.ts`
   - function dashboardSnapshot: (options) => DashboardSnapshot
+  - function dashboardHtml: () => string
   - function startAddyDashboard: (options) => void
   - type DashboardSnapshot
 - `extensions/workflow-monitor/event-intake.ts`
@@ -144,6 +145,14 @@
   - function planSubagentStartEvent: (event) => PlannedWorkflowEvent
   - type PlannedWorkflowEvent
 - `extensions/workflow-monitor/event-registry.ts` — function registerWorkflowEvents: (pi, deps) => void
+- `extensions/workflow-monitor/external-progress.ts`
+  - function canonicalGitCommonDir: ({...}, }, 'cwd'>) => string
+  - function externalProgressProjectKey: ({...}, }, 'cwd'>) => string
+  - function externalProgressRoot: ({...}) => string
+  - function externalProgressRunsDir: ({...}, homeDir, }) => string
+  - function parseIssueImplementationProgressSnapshot: (value) => IssueImplementationProgressSnapshot
+  - function startExternalProgress: (input) => IssueImplementationProgressSnapshot
+  - _...15 more_
 - `extensions/workflow-monitor/fresh-continuation-delivery.ts`
   - function createPendingFreshDelivery: (deps, consumedAutoFreshKeys) => void
   - type FreshContinuationDispatchOptions
@@ -508,7 +517,7 @@
 # Test Coverage
 
 > **100%** of routes and models are covered by tests
-> 107 test files found
+> 108 test files found
 
 ## Covered Routes
 
