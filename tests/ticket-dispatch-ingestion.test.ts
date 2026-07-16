@@ -559,9 +559,25 @@ test('accepted successful or reconciled Ticket FINISH stops Auto without redispa
       attempt: Number(pending.attemptMarker.slice('attempt-'.length)),
       postRevision: 'rev-finish',
       lifecycle: { implemented: true, verified: true, reviewed: true },
-      activity: { marker: `${pending.key}:0`, id: 'finish-comment' },
+      activity: {
+        marker: `${pending.key}:0`,
+        id: 'finish-comment',
+        kind: 'final',
+      },
       repositoryScope: ['.'],
-      commitEvidence: [{ repository: '.', commit: 'abc123' }],
+      commitEvidence: [
+        {
+          repository: '.',
+          result: 'committed',
+          commitSha: 'abc1234',
+          recordedAt: '2026-07-15T01:00:00.000Z',
+        },
+      ],
+      finishStage: 'terminal-refetch',
+      terminal: {
+        state: 'closed',
+        confirmedAt: '2026-07-15T01:01:00.000Z',
+      },
     });
 
     await harness.events.get('agent_end')!(
@@ -576,8 +592,9 @@ test('accepted successful or reconciled Ticket FINISH stops Auto without redispa
     assert.equal(harness.ctx.state.autoMode, false);
     assert.equal(harness.ctx.state.autoPendingAction, undefined);
     assert.equal(harness.sentMessages.length, messageCount);
+    assert.equal(harness.ctx.state.ticketRun, undefined);
     assert.equal(
-      harness.ctx.state.ticketRun.lastValidatedResult.operation,
+      harness.ctx.state.ticketHistory.at(-1).lastValidatedResult.operation,
       'finish',
     );
   }

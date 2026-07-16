@@ -151,6 +151,17 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
         selector: pending.selector,
         manual: !state.autoMode,
         pendingClarification: state.ticketRun?.pendingClarification,
+        repositoryScope: state.ticketRun?.repositoryScope,
+        ...(pending.operation === 'finish' &&
+        state.ticketRun?.lastValidatedResult?.operation === 'finish'
+          ? {
+              commitEvidence:
+                state.ticketRun.lastValidatedResult.commitEvidence,
+              finishStage: state.ticketRun.lastValidatedResult.finishStage,
+              finishActivityKind:
+                state.ticketRun.lastValidatedResult.finishActivityKind,
+            }
+          : {}),
         actionKey: pending.key,
         attempt: Number(pending.attemptMarker.slice('attempt-'.length)),
       });

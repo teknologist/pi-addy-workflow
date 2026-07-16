@@ -407,11 +407,26 @@ test('repository scope is immutable outside approval and FINISH evidence is exac
     operation: 'finish',
     lifecycle: { implemented: true, verified: true, reviewed: true },
     reviewDisposition: undefined,
+    activity: { marker: 'action-1:1', id: 'comment-1', kind: 'final' },
     repositoryScope: ['.', 'extra'],
     commitEvidence: [
-      { repository: '.', commit: 'abc' },
-      { repository: 'extra', commit: 'def' },
+      {
+        repository: '.',
+        result: 'committed',
+        commitSha: 'abcdef1',
+        recordedAt: '2026-07-15T01:00:00.000Z',
+      },
+      {
+        repository: 'extra',
+        result: 'no-changes',
+        recordedAt: '2026-07-15T01:00:00.000Z',
+      },
     ],
+    finishStage: 'terminal-refetch',
+    terminal: {
+      state: 'closed',
+      confirmedAt: '2026-07-15T01:01:00.000Z',
+    },
   } as never);
   const finishExpectation = {
     ...expectation,
@@ -445,16 +460,21 @@ test('repository scope is immutable outside approval and FINISH evidence is exac
           { ...finishExpectation, previousLifecycle: incompleteLifecycle },
         ),
       );
+  const firstEvidence = {
+    repository: '.',
+    result: 'committed' as const,
+    commitSha: 'abcdef1',
+    recordedAt: '2026-07-15T01:00:00.000Z',
+  };
+  const secondEvidence = {
+    repository: 'extra',
+    result: 'no-changes' as const,
+    recordedAt: '2026-07-15T01:00:00.000Z',
+  };
   for (const commitEvidence of [
-    [{ repository: '.', commit: 'abc' }],
-    [
-      { repository: '.', commit: 'abc' },
-      { repository: '.', commit: 'def' },
-    ],
-    [
-      { repository: '.', commit: 'abc' },
-      { repository: 'other', commit: 'def' },
-    ],
+    [firstEvidence],
+    [firstEvidence, { ...secondEvidence, repository: '.' }],
+    [firstEvidence, { ...secondEvidence, repository: 'other' }],
   ])
     assert.throws(() =>
       extractTicketResultEnvelope(

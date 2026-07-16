@@ -1,5 +1,9 @@
 import { isAbsolute } from 'node:path';
 import {
+  isTicketCommitEvidence,
+  isTicketTerminalEvidence,
+} from './ticket-finish-evidence.ts';
+import {
   ticketAutoWorkflowActionKey,
   ticketOperationFromPrompt,
   ticketPendingActionMatches,
@@ -30,6 +34,12 @@ const OPERATIONS = [
   'repository-scope-approval',
 ] as const;
 const OUTCOMES = ['succeeded', 'reconciled', 'blocked', 'failed'] as const;
+const FINISH_STAGES = [
+  'repository-evidence',
+  'final-activity',
+  'terminal-transition',
+  'terminal-refetch',
+] as const;
 const COMPLETED_PHASES = [
   'build',
   'simplify',
@@ -199,6 +209,9 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
           'pendingClarification',
           'reviewDisposition',
           'commitEvidence',
+          'finishStage',
+          'finishActivityKind',
+          'terminal',
         ],
       ) ||
       !isTicketOperation(result.operation) ||
@@ -273,37 +286,82 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
       )
         return undefined;
     }
+    const finishResult = result.operation === 'finish';
     const successfulFinish =
-      result.operation === 'finish' &&
+      finishResult &&
       (result.outcome === 'succeeded' || result.outcome === 'reconciled');
     const commitEvidence = result.commitEvidence;
+    const validCommitEvidence =
+      Array.isArray(commitEvidence) &&
+      commitEvidence.length > 0 &&
+      commitEvidence.every(isTicketCommitEvidence);
+    const evidenceRepositories = validCommitEvidence
+      ? commitEvidence.map((entry) => entry.repository)
+      : [];
+    const evidenceMatchesScope =
+      validCommitEvidence &&
+      new Set(evidenceRepositories).size === evidenceRepositories.length &&
+      evidenceRepositories.every((repository) =>
+        (value.repositoryScope as string[]).includes(repository),
+      );
+    const terminal = result.terminal;
+    const validTerminal = isTicketTerminalEvidence(terminal);
+    const finishActivityKind = oneOf(result.finishActivityKind, [
+      'failure',
+      'final',
+    ] as const)
+      ? result.finishActivityKind
+      : undefined;
+    const finishStage = oneOf(result.finishStage, FINISH_STAGES)
+      ? result.finishStage
+      : undefined;
+    const finishStageIndex = finishStage
+      ? FINISH_STAGES.indexOf(finishStage)
+      : -1;
+    const expectedTerminal =
+      value.source.kind === 'github'
+        ? 'closed'
+        : value.source.kind === 'local'
+          ? 'resolved'
+          : 'completed';
     if (
+      (result.finishStage !== undefined &&
+        (!finishResult || !oneOf(result.finishStage, FINISH_STAGES))) ||
+      (result.finishActivityKind !== undefined &&
+        (!finishResult || !finishActivityKind)) ||
+      (finishResult &&
+        finishStageIndex >= 1 &&
+        finishActivityKind !== 'final') ||
+      (finishResult &&
+        finishStageIndex === 0 &&
+        finishActivityKind === 'final') ||
+      (terminal !== undefined && !finishResult) ||
+      (commitEvidence !== undefined &&
+        (!finishResult || !validCommitEvidence || !evidenceMatchesScope)) ||
+      (finishResult && !finishStage) ||
+      (finishResult &&
+        finishStageIndex >= 1 &&
+        (!value.lifecycle.implemented ||
+          !value.lifecycle.verified ||
+          !value.lifecycle.reviewed ||
+          !validCommitEvidence ||
+          commitEvidence.length !== value.repositoryScope.length)) ||
+      (finishResult && finishStageIndex === 0 && terminal !== undefined) ||
       (successfulFinish &&
         (!value.lifecycle.implemented ||
           !value.lifecycle.verified ||
-          !value.lifecycle.reviewed)) ||
-      (commitEvidence !== undefined
-        ? !successfulFinish ||
-          !Array.isArray(commitEvidence) ||
+          !value.lifecycle.reviewed ||
+          !validCommitEvidence ||
           commitEvidence.length !== value.repositoryScope.length ||
-          !commitEvidence.every(
-            (entry) =>
-              record(entry) &&
-              exactKeys(entry, ['repository', 'commit']) &&
-              nonEmptyString(entry.repository) &&
-              nonEmptyString(entry.commit),
-          ) ||
-          new Set(
-            commitEvidence.map((entry) =>
-              record(entry) ? entry.repository : undefined,
-            ),
-          ).size !== commitEvidence.length ||
+          new Set(commitEvidence.map((entry) => entry.repository)).size !==
+            commitEvidence.length ||
           !value.repositoryScope.every((repository) =>
-            commitEvidence.some(
-              (entry) => record(entry) && entry.repository === repository,
-            ),
-          )
-        : successfulFinish)
+            commitEvidence.some((entry) => entry.repository === repository),
+          ) ||
+          finishStage !== 'terminal-refetch' ||
+          !validTerminal ||
+          terminal.state !== expectedTerminal)) ||
+      (!successfulFinish && terminal !== undefined && !validTerminal)
     )
       return undefined;
   }
@@ -355,6 +413,22 @@ function possibleTicketRef(value: unknown): string | undefined {
     return value.source.ref;
   if (nonEmptyString(value.ticketRef)) return value.ticketRef;
   return undefined;
+}
+
+export function coerceTicketHistory(
+  value: unknown,
+): TicketRunState[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const history = value.map(coerceTicketRun);
+  return history.every(
+    (run): run is TicketRunState =>
+      run?.lastValidatedResult?.operation === 'finish' &&
+      (run.lastValidatedResult.outcome === 'succeeded' ||
+        run.lastValidatedResult.outcome === 'reconciled'),
+  )
+    ? history
+    : undefined;
 }
 
 export function hasTicketAssociation(value: unknown): boolean {

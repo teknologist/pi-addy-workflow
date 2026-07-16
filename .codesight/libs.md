@@ -235,6 +235,11 @@
   - const TICKET_COMMAND_USAGE
   - const DEFAULT_TICKET_QUEUE_SELECTOR: TicketQueueSelector
   - _...1 more_
+- `extensions/workflow-monitor/ticket-finish-evidence.ts`
+  - function isTicketCommitEvidence: (value) => value is TicketCommitEvidence
+  - function sameTicketCommitEvidence: (left, right) => boolean
+  - function sameTicketCommitEvidenceList: (left, right) => boolean
+  - function isTicketTerminalEvidence: (value) => value is TicketTerminalEvidence
 - `extensions/workflow-monitor/ticket-phase-result.ts`
   - function extractTicketResultEnvelope: (text, expected?) => TicketResult
   - function formatTicketResultEnvelope: (result) => string
@@ -253,7 +258,7 @@
   - type WorkflowTaskCommitRecord
   - type WorkflowStatsSession
   - type WorkflowStats
-  - _...11 more_
+  - _...13 more_
 - `extensions/workflow-monitor/workflow-delivery.ts` — function createWorkflowDelivery: (deps) => void, type WorkflowDeliveryOptions
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
@@ -323,10 +328,10 @@
   - function isTicketSourceKind: (value) => value is TicketRunState['source']['kind']
   - function isTicketOperation: (value) => value is TicketOperation
   - function coerceTicketRun: (value) => TicketRunState | undefined
+  - function coerceTicketHistory: (value) => TicketRunState[] | undefined
   - function hasTicketAssociation: (value) => boolean
   - function coerceTicketExecution: (candidate, unknown>, base) => WorkflowState | undefined
-  - function ticketRecoveryWarning: (recovery) => string
-  - _...1 more_
+  - _...2 more_
 - `extensions/workflow-monitor/workflow-state-coercer.ts` — function coerceWorkflowState: (value) => WorkflowState | undefined
 - `extensions/workflow-monitor/workflow-state-control.ts`
   - function clearReviewControlUpdates: () => Partial<WorkflowState>

@@ -270,14 +270,64 @@ test('completion requires lifecycle and repository evidence', () => {
   });
   ticket.setLifecycle({ implemented: true, verified: true, reviewed: true });
   ticket.setCommitEvidence({ repo: 'abc123' });
+  assert.throws(
+    () =>
+      ticket.apply({
+        operation: 'finish',
+        expectedRevision: ticket.fetch().revision,
+        actionKey: 'finish-1',
+        complete: true,
+      }),
+    /closure requirements/,
+  );
+  assert.equal(ticket.fetch().terminal, undefined);
+  assert.deepEqual(ticket.fetch().commitEvidence, { repo: 'abc123' });
   const completed = ticket.apply({
     operation: 'finish',
     expectedRevision: ticket.fetch().revision,
     actionKey: 'finish-1',
     complete: true,
-    activity: 'Completed ticket',
+    activity: { kind: 'final', content: 'Completed ticket' },
   });
   assert.equal(completed.terminal, 'resolved');
+});
+
+test('failure Activity is replaced by confirmed final Activity on retry', () => {
+  const ticket = source();
+  ticket.humanEdit((body) =>
+    body.replace('- [ ] criterion', '- [x] criterion'),
+  );
+  ticket.setLifecycle({ implemented: true, verified: true, reviewed: true });
+  ticket.setCommitEvidence({ repo: 'abc123' });
+
+  const failed = ticket.apply({
+    operation: 'finish',
+    expectedRevision: ticket.fetch().revision,
+    actionKey: 'finish-retry',
+    activity: { kind: 'failure', content: 'Commit failed' },
+  });
+  assert.throws(
+    () =>
+      ticket.apply({
+        operation: 'finish',
+        expectedRevision: failed.revision,
+        actionKey: 'finish-retry',
+        complete: true,
+      }),
+    /closure requirements/,
+  );
+
+  const completed = ticket.apply({
+    operation: 'finish',
+    expectedRevision: ticket.fetch().revision,
+    actionKey: 'finish-retry',
+    activity: { kind: 'final', content: 'Completed ticket' },
+    complete: true,
+  });
+  assert.equal(completed.terminal, 'resolved');
+  assert.equal(completed.comments.length, 1);
+  assert.match(completed.comments[0], /Completed ticket/);
+  assert.doesNotMatch(completed.comments[0], /Commit failed/);
 });
 
 test('ambiguous routing, backend failures, parents, and pull requests never mutate', () => {

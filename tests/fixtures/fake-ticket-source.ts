@@ -18,6 +18,10 @@ type FakeTicketState = {
 };
 
 type FakeStaleOwner = { owner: string; claimId: string };
+type FakeFinishActivity = {
+  kind: 'failure' | 'final';
+  content: string;
+};
 
 export type FakeTicketOperation = {
   operation: Exclude<TicketOperation, 'select'>;
@@ -28,7 +32,7 @@ export type FakeTicketOperation = {
   staleOwner?: FakeStaleOwner;
   repository?: string;
   removeSelector?: boolean;
-  activity?: string;
+  activity?: string | FakeFinishActivity;
   targetedReplacement?: { from: string; to: string };
   complete?: boolean;
   stopAfter?: 'native-owner';
@@ -230,8 +234,25 @@ export class FakeTicketSource {
     }
     if (input.activity !== undefined) {
       const marker = `<!-- addy-activity:${input.actionKey} -->`;
-      if (!this.#state.comments.some((comment) => comment.includes(marker))) {
-        this.#state.comments.push(`${input.activity}\n${marker}`);
+      const index = this.#state.comments.findIndex((comment) =>
+        comment.includes(marker),
+      );
+      if (input.operation === 'finish' && typeof input.activity === 'string')
+        throw new Error('finish Activity requires kind and content');
+      const content =
+        typeof input.activity === 'string'
+          ? input.activity
+          : `${input.activity.content}\n<!-- addy-activity-kind:${input.activity.kind} -->`;
+      const comment = `${content}\n${marker}`;
+      if (index === -1) {
+        this.#state.comments.push(comment);
+        changed = true;
+      } else if (
+        typeof input.activity !== 'string' &&
+        input.activity.kind === 'final' &&
+        this.#state.comments[index] !== comment
+      ) {
+        this.#state.comments[index] = comment;
         changed = true;
       }
     }
@@ -240,12 +261,18 @@ export class FakeTicketSource {
       const commitsComplete = this.#state.repositoryScope.every(
         (repository) => this.#state.commitEvidence[repository],
       );
+      const finalActivity = this.#state.comments.some(
+        (comment) =>
+          comment.includes(`<!-- addy-activity:${input.actionKey} -->`) &&
+          comment.includes('<!-- addy-activity-kind:final -->'),
+      );
       if (
         !lifecycle.implemented ||
         !lifecycle.verified ||
         !lifecycle.reviewed ||
         /- \[ \]/.test(this.#state.body) ||
-        !commitsComplete
+        !commitsComplete ||
+        !finalActivity
       )
         throw new Error('closure requirements are incomplete');
       if (!this.#state.terminal) {

@@ -68,6 +68,24 @@ export type TicketOperation =
   | 'add-repository'
   | 'repository-scope-approval';
 
+export type TicketCommitEvidence =
+  | {
+      repository: string;
+      result: 'committed';
+      commitSha: string;
+      recordedAt: string;
+    }
+  | {
+      repository: string;
+      result: 'no-changes';
+      recordedAt: string;
+    };
+
+export type TicketTerminalEvidence = {
+  state: 'closed' | 'completed' | 'resolved';
+  confirmedAt: string;
+};
+
 export type TicketRunState = {
   schemaVersion: 1;
   source: { kind: 'github' | 'linear' | 'local'; ref: string };
@@ -118,7 +136,14 @@ export type TicketRunState = {
     reviewDisposition?:
       | { status: 'clean' }
       | { status: 'findings'; count: number };
-    commitEvidence?: Array<{ repository: string; commit: string }>;
+    commitEvidence?: TicketCommitEvidence[];
+    finishStage?:
+      | 'repository-evidence'
+      | 'final-activity'
+      | 'terminal-transition'
+      | 'terminal-refetch';
+    finishActivityKind?: 'failure' | 'final';
+    terminal?: TicketTerminalEvidence;
   };
 };
 
@@ -181,6 +206,7 @@ export type WorkflowState = {
   current?: WorkflowPhase;
   executionSource?: 'plan' | 'ticket';
   ticketRun?: TicketRunState;
+  ticketHistory?: TicketRunState[];
   ticketRecovery?: TicketRecoveryState;
   phases: Record<WorkflowPhase, PhaseStatus>;
   warnings: string[];

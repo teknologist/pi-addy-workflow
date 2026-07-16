@@ -7,6 +7,19 @@ import {
 import { ticketAutoWorkflowActionKey } from '../extensions/workflow-monitor/auto-action-keys.ts';
 import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
 
+const finishEvidence = [
+  {
+    repository: '/repo',
+    result: 'committed' as const,
+    commitSha: 'abcdef1',
+    recordedAt: '2026-07-15T01:00:00.000Z',
+  },
+];
+const finishTerminal = {
+  state: 'closed' as const,
+  confirmedAt: '2026-07-15T01:01:00.000Z',
+};
+
 export const validTicketRun = {
   schemaVersion: 1 as const,
   source: { kind: 'github' as const, ref: 'ENG-42' },
@@ -147,7 +160,10 @@ test('persisted successful FINISH requires completed lifecycle', () => {
       outcome,
       actionKey: 'finish-1',
       attempt: 1,
-      commitEvidence: [{ repository: '/repo', commit: 'abc' }],
+      commitEvidence: finishEvidence,
+      finishStage: 'terminal-refetch' as const,
+      finishActivityKind: 'final' as const,
+      terminal: finishTerminal,
     };
     const completedRun = {
       ...validTicketRun,
@@ -183,6 +199,88 @@ test('persisted successful FINISH requires completed lifecycle', () => {
   }
 });
 
+test('persisted blocked and failed FINISH retain their retry frontier', () => {
+  for (const outcome of ['blocked', 'failed'] as const) {
+    const lastValidatedResult = {
+      operation: 'finish' as const,
+      outcome,
+      actionKey: 'finish-1',
+      attempt: 1,
+      commitEvidence: finishEvidence,
+      finishStage: 'repository-evidence' as const,
+      finishActivityKind: 'failure' as const,
+    };
+    const parsed = parsePersistedWorkflowState(
+      serializeWorkflowState({
+        ...createInitialWorkflowState(),
+        executionSource: 'ticket',
+        ticketRun: { ...validTicketRun, lastValidatedResult },
+      }),
+    );
+    assert.deepEqual(
+      parsed?.ticketRun?.lastValidatedResult,
+      lastValidatedResult,
+    );
+  }
+});
+
+test('persisted failed FINISH requires final Activity evidence at and beyond its frontier', () => {
+  for (const finishStage of [
+    'final-activity',
+    'terminal-transition',
+    'terminal-refetch',
+  ] as const) {
+    const parsed = parsePersistedWorkflowState(
+      serializeWorkflowState({
+        ...createInitialWorkflowState(),
+        executionSource: 'ticket',
+        ticketRun: {
+          ...validTicketRun,
+          lifecycle: { implemented: true, verified: true, reviewed: true },
+          lastValidatedResult: {
+            operation: 'finish',
+            outcome: 'failed',
+            actionKey: 'finish-1',
+            attempt: 1,
+            commitEvidence: finishEvidence,
+            finishStage,
+          },
+        },
+      }),
+    );
+
+    assert.equal(parsed?.ticketRun, undefined);
+    assert.equal(parsed?.ticketRecovery?.possibleClaim, true);
+  }
+});
+
+test('completed Ticket history round-trips without restoring active orchestration', () => {
+  const completedRun = {
+    ...validTicketRun,
+    lifecycle: { implemented: true, verified: true, reviewed: true },
+    lastValidatedResult: {
+      operation: 'finish' as const,
+      outcome: 'reconciled' as const,
+      actionKey: 'finish-1',
+      attempt: 1,
+      commitEvidence: finishEvidence,
+      finishStage: 'terminal-refetch' as const,
+      finishActivityKind: 'final' as const,
+      terminal: finishTerminal,
+    },
+  };
+  const parsed = parsePersistedWorkflowState(
+    serializeWorkflowState({
+      ...createInitialWorkflowState(),
+      ticketHistory: [completedRun],
+    }),
+  );
+
+  assert.equal(parsed?.executionSource, undefined);
+  assert.equal(parsed?.ticketRun, undefined);
+  assert.deepEqual(parsed?.ticketHistory, [completedRun]);
+});
+
 test('persisted Ticket evidence remains operation-specific and exact', () => {
   for (const lastValidatedResult of [
     {
@@ -191,7 +289,9 @@ test('persisted Ticket evidence remains operation-specific and exact', () => {
       actionKey: 'finish-1',
       attempt: 1,
       reviewDisposition: { status: 'clean' },
-      commitEvidence: [{ repository: '/repo', commit: 'abc' }],
+      commitEvidence: finishEvidence,
+      finishStage: 'terminal-refetch',
+      terminal: finishTerminal,
     },
     {
       operation: 'review',
@@ -199,24 +299,25 @@ test('persisted Ticket evidence remains operation-specific and exact', () => {
       actionKey: 'review-1',
       attempt: 1,
       reviewDisposition: { status: 'clean' },
-      commitEvidence: [{ repository: '/repo', commit: 'abc' }],
+      commitEvidence: finishEvidence,
     },
     {
       operation: 'finish',
       outcome: 'succeeded',
       actionKey: 'finish-1',
       attempt: 1,
-      commitEvidence: [
-        { repository: '/repo', commit: 'abc' },
-        { repository: '/repo', commit: 'def' },
-      ],
+      commitEvidence: [finishEvidence[0], finishEvidence[0]],
+      finishStage: 'terminal-refetch',
+      terminal: finishTerminal,
     },
     {
       operation: 'finish',
       outcome: 'succeeded',
       actionKey: 'finish-1',
       attempt: 1,
-      commitEvidence: [{ repository: '/other', commit: 'abc' }],
+      commitEvidence: [{ ...finishEvidence[0], repository: '/other' }],
+      finishStage: 'terminal-refetch',
+      terminal: finishTerminal,
     },
   ]) {
     const parsed = parsePersistedWorkflowState(

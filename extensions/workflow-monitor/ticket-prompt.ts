@@ -1,5 +1,9 @@
 import { normalizeTicketRepositoryRequest } from './repository-scope.ts';
-import type { TicketOperation, TicketRunState } from './workflow-core.ts';
+import type {
+  TicketCommitEvidence,
+  TicketOperation,
+  TicketRunState,
+} from './workflow-core.ts';
 
 export type TicketPromptRequest = {
   operation: TicketOperation;
@@ -13,6 +17,14 @@ export type TicketPromptRequest = {
   selector?: TicketRunState['queueSelector'];
   manual?: boolean;
   pendingClarification?: TicketRunState['pendingClarification'];
+  repositoryScope?: string[];
+  commitEvidence?: TicketCommitEvidence[];
+  finishStage?: NonNullable<
+    TicketRunState['lastValidatedResult']
+  >['finishStage'];
+  finishActivityKind?: NonNullable<
+    TicketRunState['lastValidatedResult']
+  >['finishActivityKind'];
   actionKey: string;
   attempt: number;
 };
@@ -43,7 +55,7 @@ const INSTRUCTIONS: Record<TicketOperation, string> = {
   'fix-all':
     'FIX-ALL is allowed only after REVIEW findings. FIX-ALL changes no lifecycle status or acceptance criterion, records each targeted fix, and requires VERIFY then REVIEW again.',
   finish:
-    'FINISH changes no lifecycle status. Complete only when lifecycle is complete and commit evidence contains exactly one unique commit for every approved repository, with no extras.',
+    'FINISH changes no lifecycle status. Refetch and confirm every acceptance criterion, Implemented, Verified, Reviewed, the exact claim, and locked scope before committing. Inspect each locked repository and record exactly one confirmed result: committed with a valid SHA and timestamp, or explicit no-changes with a timestamp. Reject missing, duplicate, unknown, malformed, failed, or unconfirmed evidence; post a bounded failure Activity for partial repository results without transitioning. Classify FINISH Activity as failure or final in both kind and content; on recovery, update or replace the failure Activity under this same idempotent action marker with confirmed final Activity, because failure Activity never authorizes closure. Then post the idempotent final Activity before the configured terminal transition and perform a terminal refetch. Resume only missing stages—repository evidence, final Activity, terminal transition, terminal refetch—using this same action marker. Reconcile an already-terminal ticket only when claim and evidence match; otherwise stop for manual repair. Preserve the claim and evidence on every failure.',
 };
 
 const READ_ONLY = new Set<TicketOperation>(['select', 'status']);
@@ -64,6 +76,54 @@ export function buildTicketPrompt(request: TicketPromptRequest): string {
         request.repositoryRoot,
       )
     : undefined;
+  const scope = request.repositoryScope?.length
+    ? [
+        `Locked repository scope:`,
+        ...request.repositoryScope.map((item) => `- ${item}`),
+      ]
+    : [];
+  const evidenceRepositories = new Set(
+    request.commitEvidence?.map((entry) => entry.repository),
+  );
+  const missingRepositories =
+    request.repositoryScope?.filter(
+      (repository) => !evidenceRepositories.has(repository),
+    ) ?? [];
+  const repositoryEvidenceComplete =
+    request.repositoryScope !== undefined &&
+    request.commitEvidence !== undefined &&
+    request.repositoryScope.length === request.commitEvidence.length &&
+    evidenceRepositories.size === request.commitEvidence.length &&
+    missingRepositories.length === 0;
+  const partialRepositoryEvidence =
+    request.operation === 'finish' &&
+    request.finishStage === 'repository-evidence' &&
+    !repositoryEvidenceComplete;
+  const finishFrontier =
+    request.operation === 'finish' && request.finishStage
+      ? [
+          `Completed FINISH frontier: ${request.finishStage}`,
+          `Confirmed repository evidence: ${JSON.stringify(request.commitEvidence ?? [])}`,
+          ...(partialRepositoryEvidence
+            ? [
+                'Missing locked repositories:',
+                ...missingRepositories.map((repository) => `- ${repository}`),
+              ]
+            : []),
+          `Final Activity: ${request.finishActivityKind === 'final' ? 'confirmed' : 'not confirmed'}`,
+          partialRepositoryEvidence
+            ? 'Resume at repository evidence; preserve confirmed partial evidence and do not advance to final Activity until exact complete coverage is validated.'
+            : `Resume at ${
+                request.finishStage === 'repository-evidence'
+                  ? 'final Activity'
+                  : request.finishStage === 'final-activity'
+                    ? 'terminal transition'
+                    : request.finishStage === 'terminal-transition'
+                      ? 'terminal refetch'
+                      : 'terminal confirmation reconciliation'
+              }; do not repeat or replace confirmed earlier stages.`,
+        ]
+      : [];
   const identity = [
     `Operation: ${request.operation}`,
     `Source kind: ${request.sourceKind ?? 'resolve from the configured guide'}`,
@@ -79,6 +139,8 @@ export function buildTicketPrompt(request: TicketPromptRequest): string {
       : []),
     `Auto Action Key: ${request.actionKey}`,
     `Attempt: ${request.attempt}`,
+    ...scope,
+    ...finishFrontier,
   ].join('\n');
   const authority =
     'Reread docs/agents/issue-tracker.md as the sole authority for tracker mechanics and docs/agents/triage-labels.md for label mapping. Use only the configured tracker skill or tool; do not invent backend commands. Fetch authoritative state and do not mutate a parent ticket or pull request.';

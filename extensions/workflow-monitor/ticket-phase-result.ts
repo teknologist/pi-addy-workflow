@@ -1,4 +1,14 @@
-import type { TicketOperation, TicketRunState } from './workflow-core.ts';
+import {
+  isTicketCommitEvidence,
+  isTicketTerminalEvidence,
+  sameTicketCommitEvidence,
+} from './ticket-finish-evidence.ts';
+import type {
+  TicketCommitEvidence,
+  TicketOperation,
+  TicketRunState,
+  TicketTerminalEvidence,
+} from './workflow-core.ts';
 
 const OUTCOMES = ['succeeded', 'reconciled', 'blocked', 'failed'] as const;
 const SOURCE_KINDS = ['github', 'linear', 'local'] as const;
@@ -99,11 +109,21 @@ export type TicketPhaseResult = {
   attempt: number;
   postRevision: string;
   lifecycle: TicketLifecycleSnapshot;
-  activity?: { marker: string; id?: string };
+  activity?: {
+    marker: string;
+    id?: string;
+    kind?: 'failure' | 'final';
+  };
   repositoryScope: string[];
   repository?: string;
   reviewDisposition?: TicketReviewDisposition;
-  commitEvidence?: Array<{ repository: string; commit: string }>;
+  commitEvidence?: TicketCommitEvidence[];
+  finishStage?:
+    | 'repository-evidence'
+    | 'final-activity'
+    | 'terminal-transition'
+    | 'terminal-refetch';
+  terminal?: TicketTerminalEvidence;
   clarification?: TicketClarificationResult;
 };
 
@@ -128,6 +148,11 @@ export type TicketResultExpectation = {
   repository?: string;
   manual?: boolean;
   pendingClarification?: TicketClarificationResult;
+  previousCommitEvidence?: TicketCommitEvidence[];
+  previousFinishStage?: TicketPhaseResult['finishStage'];
+  previousFinishActivityKind?: NonNullable<
+    TicketPhaseResult['activity']
+  >['kind'];
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -324,9 +349,11 @@ function parseQueueResult(value: Record<string, unknown>): TicketQueueResult {
 function parseActivity(value: unknown): TicketPhaseResult['activity'] {
   if (
     !record(value) ||
-    !exactKeys(value, ['marker'], ['id']) ||
+    !exactKeys(value, ['marker'], ['id', 'kind']) ||
     !safeString(value.marker) ||
-    (value.id !== undefined && !safeString(value.id))
+    (value.id !== undefined && !safeString(value.id)) ||
+    (value.kind !== undefined &&
+      !oneOf(value.kind, ['failure', 'final'] as const))
   )
     throw new Error('Ticket activity evidence is malformed.');
   return value as TicketPhaseResult['activity'];
@@ -365,16 +392,16 @@ function parseCommitEvidence(
   if (
     !Array.isArray(value) ||
     value.length === 0 ||
-    !value.every(
-      (entry) =>
-        record(entry) &&
-        exactKeys(entry, ['repository', 'commit']) &&
-        safeString(entry.repository) &&
-        safeString(entry.commit),
-    )
+    !value.every(isTicketCommitEvidence)
   )
     throw new Error('Ticket commit evidence is malformed.');
-  return value as TicketPhaseResult['commitEvidence'];
+  return value;
+}
+
+function parseTerminal(value: unknown): TicketTerminalEvidence {
+  if (!isTicketTerminalEvidence(value))
+    throw new Error('Ticket terminal confirmation is malformed.');
+  return value;
 }
 
 function validateLifecycleTransition(
@@ -434,6 +461,8 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
         'repository',
         'reviewDisposition',
         'commitEvidence',
+        'finishStage',
+        'terminal',
         'clarification',
       ],
     ) ||
@@ -495,6 +524,8 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
     value.activity === undefined ? undefined : parseActivity(value.activity);
   if (successfulMutation && !activity)
     throw new Error('Successful Ticket mutation requires Activity evidence.');
+  if (operation !== 'finish' && activity?.kind)
+    throw new Error('Only FINISH may classify Activity evidence.');
 
   const reviewDisposition =
     value.reviewDisposition === undefined
@@ -534,13 +565,78 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
     value.commitEvidence === undefined
       ? undefined
       : parseCommitEvidence(value.commitEvidence);
-  if (operation !== 'finish' && commitEvidence)
-    throw new Error('Only FINISH may return commit evidence.');
+  const finishStage = oneOf(value.finishStage, [
+    'repository-evidence',
+    'final-activity',
+    'terminal-transition',
+    'terminal-refetch',
+  ] as const)
+    ? value.finishStage
+    : undefined;
+  const terminal =
+    value.terminal === undefined ? undefined : parseTerminal(value.terminal);
+  if (
+    operation !== 'finish' &&
+    (commitEvidence || value.finishStage !== undefined || terminal)
+  )
+    throw new Error('Only FINISH may return closure evidence.');
+  if (operation === 'finish' && !finishStage)
+    throw new Error('FINISH requires a staged result.');
+  if (operation === 'finish' && commitEvidence) {
+    const repositories = commitEvidence.map((entry) => entry.repository);
+    if (
+      new Set(repositories).size !== repositories.length ||
+      repositories.some(
+        (repository) =>
+          !(value.repositoryScope as string[]).includes(repository),
+      )
+    )
+      throw new Error('FINISH commit evidence does not match locked scope.');
+  }
+  if (operation === 'finish') {
+    const stage = [
+      'repository-evidence',
+      'final-activity',
+      'terminal-transition',
+      'terminal-refetch',
+    ].indexOf(finishStage!);
+    const evidenceComplete =
+      commitEvidence?.length === value.repositoryScope.length;
+    if (
+      stage >= 1 &&
+      (!lifecycle.implemented ||
+        !lifecycle.verified ||
+        !lifecycle.reviewed ||
+        !evidenceComplete ||
+        !activity ||
+        activity.kind !== 'final')
+    )
+      throw new Error('FINISH stages must complete in order.');
+    if (
+      stage === 0 &&
+      (terminal ||
+        activity?.kind === 'final' ||
+        (!evidenceComplete && activity?.kind !== 'failure'))
+    )
+      throw new Error('FINISH stages must complete in order.');
+  }
   if (operation === 'finish' && successfulMutation) {
     if (!lifecycle.implemented || !lifecycle.verified || !lifecycle.reviewed)
       throw new Error('Successful FINISH requires completed lifecycle.');
     if (!commitEvidence)
       throw new Error('Successful FINISH requires commit evidence.');
+    if (activity?.kind !== 'final')
+      throw new Error('Successful FINISH requires final Activity evidence.');
+    if (finishStage !== 'terminal-refetch' || !terminal)
+      throw new Error('Successful FINISH requires terminal confirmation.');
+    const expectedTerminal =
+      source.kind === 'github'
+        ? 'closed'
+        : source.kind === 'local'
+          ? 'resolved'
+          : 'completed';
+    if (terminal.state !== expectedTerminal)
+      throw new Error('FINISH terminal state does not match its source.');
     const evidenceRepositories = commitEvidence.map(
       (evidence) => evidence.repository,
     );
@@ -565,6 +661,8 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
     ...(safeString(repository) ? { repository } : {}),
     ...(reviewDisposition ? { reviewDisposition } : {}),
     ...(commitEvidence ? { commitEvidence } : {}),
+    ...(finishStage ? { finishStage } : {}),
+    ...(terminal ? { terminal } : {}),
     ...(clarification ? { clarification } : {}),
   };
 }
@@ -668,6 +766,27 @@ function assertExpectation(
     result.activity.marker !== `${expected.actionKey}:${expected.attempt}`
   )
     throw new Error('Ticket activity marker is stale or mismatched.');
+  if (result.operation === 'finish' && expected.previousFinishStage) {
+    const stages: NonNullable<TicketPhaseResult['finishStage']>[] = [
+      'repository-evidence',
+      'final-activity',
+      'terminal-transition',
+      'terminal-refetch',
+    ];
+    if (
+      !result.finishStage ||
+      stages.indexOf(result.finishStage) <
+        stages.indexOf(expected.previousFinishStage) ||
+      expected.previousCommitEvidence?.some(
+        (previous, index) =>
+          !result.commitEvidence?.[index] ||
+          !sameTicketCommitEvidence(result.commitEvidence[index], previous),
+      ) ||
+      (expected.previousFinishActivityKind === 'final' &&
+        result.activity?.kind !== 'final')
+    )
+      throw new Error('FINISH retry frontier is stale or mismatched.');
+  }
   validateLifecycleTransition(
     result.operation,
     result.outcome,

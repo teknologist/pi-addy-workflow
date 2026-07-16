@@ -3,6 +3,7 @@ import {
   ticketOperationFromPrompt,
   ticketOperationIdentityFromPrompt,
 } from './auto-action-keys.ts';
+import { sameTicketCommitEvidenceList } from './ticket-finish-evidence.ts';
 import {
   extractTicketResultEnvelope,
   queuePauseSummary,
@@ -34,6 +35,20 @@ function numericAttempt(marker: string): number | undefined {
   return match ? Number(match[1]) : undefined;
 }
 
+function finishFrontierExpectation(
+  run: TicketRunState | undefined,
+  operation: TicketOperation,
+): Partial<TicketResultExpectation> {
+  const last = run?.lastValidatedResult;
+  return operation === 'finish' && last?.operation === 'finish'
+    ? {
+        previousCommitEvidence: last.commitEvidence,
+        previousFinishStage: last.finishStage,
+        previousFinishActivityKind: last.finishActivityKind,
+      }
+    : {};
+}
+
 function expectationFromPending(
   state: WorkflowState,
   pending: WorkflowTicketPendingAction,
@@ -46,6 +61,10 @@ function expectationFromPending(
     ticketRef: pending.ticketRef,
     runId: pending.runId,
     ...(pending.claimId ? { claimId: pending.claimId } : {}),
+    ...(state.ticketRun &&
+    !['claim', 'release', 'reclaim'].includes(pending.operation)
+      ? { claim: state.ticketRun.claim ?? null }
+      : {}),
     ...(pending.staleClaimId ? { staleClaimId: pending.staleClaimId } : {}),
     ...(pending.selector ? { selector: pending.selector } : {}),
     ...(pending.repository ? { repository: pending.repository } : {}),
@@ -53,6 +72,7 @@ function expectationFromPending(
     previousRepositoryScope: state.ticketRun?.repositoryScope,
     manual: !state.autoMode,
     pendingClarification: state.ticketRun?.pendingClarification,
+    ...finishFrontierExpectation(state.ticketRun, pending.operation),
   };
 }
 
@@ -93,6 +113,7 @@ function expectationFromLastResult(
               pendingClarification: last.pendingClarification,
             }
           : {}),
+        ...finishFrontierExpectation(run, last.operation),
       }
     : undefined;
 }
@@ -212,13 +233,29 @@ export function ingestTicketResult(
   }
   const duplicateRun = state.ticketRun;
   const lastResult = duplicateRun?.lastValidatedResult;
+  const continuingInterruptedFinish =
+    parsed.kind === 'ticket-phase-result' &&
+    parsed.operation === 'finish' &&
+    (lastResult?.outcome === 'failed' || lastResult?.outcome === 'blocked') &&
+    state.autoPendingAction?.executionSource === 'ticket' &&
+    state.autoPendingAction.operation === 'finish';
+  const sameFinishFrontier =
+    parsed.kind === 'ticket-phase-result' &&
+    parsed.outcome === lastResult?.outcome &&
+    parsed.finishStage === lastResult.finishStage &&
+    parsed.activity?.kind === lastResult.finishActivityKind &&
+    sameTicketCommitEvidenceList(
+      parsed.commitEvidence,
+      lastResult.commitEvidence,
+    );
   if (
     duplicateRun &&
     (!duplicateRun.pendingClarification ||
       (parsed.kind === 'ticket-phase-result' &&
         parsed.clarification?.resolution === undefined)) &&
     lastResult?.actionKey === parsed.actionKey &&
-    lastResult.attempt === parsed.attempt
+    lastResult.attempt === parsed.attempt &&
+    (!continuingInterruptedFinish || sameFinishFrontier)
   ) {
     try {
       parsed = extractTicketResultEnvelope(
@@ -316,10 +353,11 @@ export function ingestTicketResult(
       : completed && parsed.operation === 'finish'
         ? exitAutoModeControlUpdates()
         : {};
+  const retryInterruptedFinish = parsed.operation === 'finish' && !completed;
   let nextState: WorkflowState = {
     ...state,
     ...stopped,
-    autoPendingAction: undefined,
+    autoPendingAction: retryInterruptedFinish ? pending : undefined,
     autoLastPrompt: undefined,
     ticketRun: {
       ...runWithoutClaim,
@@ -356,6 +394,11 @@ export function ingestTicketResult(
         ...(parsed.commitEvidence
           ? { commitEvidence: parsed.commitEvidence }
           : {}),
+        ...(parsed.finishStage ? { finishStage: parsed.finishStage } : {}),
+        ...(parsed.operation === 'finish' && parsed.activity?.kind
+          ? { finishActivityKind: parsed.activity.kind }
+          : {}),
+        ...(parsed.terminal ? { terminal: parsed.terminal } : {}),
         ...(parsed.clarification
           ? {
               manual: true as const,
@@ -372,6 +415,15 @@ export function ingestTicketResult(
       nextState = clearTicketClarification(
         resolveTicketClarification(nextState, resolution),
       );
+  }
+  if (completed && parsed.operation === 'finish') {
+    const completedRun = nextState.ticketRun!;
+    nextState = {
+      ...nextState,
+      executionSource: undefined,
+      ticketRun: undefined,
+      ticketHistory: [...(state.ticketHistory ?? []), completedRun],
+    };
   }
   return {
     state: nextState,
