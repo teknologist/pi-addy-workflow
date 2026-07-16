@@ -69,6 +69,8 @@ const TICKET_SLICE_FORWARD_STATUSES: ExternalProgressTicketSliceStatus[] = [
   'reviewing',
   'merging',
 ];
+const TICKET_SLICE_TERMINAL_STATUSES =
+  new Set<ExternalProgressTicketSliceStatus>(['done', 'failed']);
 const TICKET_SLICE_FIELDS = new Set(['key', 'title', 'status']);
 const TICKET_SLICE_UPDATE_FIELDS = new Set(['status']);
 const SNAPSHOT_FIELDS = new Set([
@@ -606,6 +608,14 @@ export function finishExternalProgress(
         TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
       ) {
         throw new Error('Terminal external progress runs are immutable');
+      }
+      if (
+        previous.ticketSlices?.some(
+          (ticketSlice) =>
+            !TICKET_SLICE_TERMINAL_STATUSES.has(ticketSlice.status),
+        )
+      ) {
+        throw new Error('Cannot finish with non-terminal Ticket Slices');
       }
       const timestamp = isoNowAfter(input.now, previous.updatedAt);
       const finished = parseIssueImplementationProgressSnapshot({

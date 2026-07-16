@@ -417,6 +417,29 @@ test('dashboard projects issue workflows without changing empty dashboard data',
       false,
     );
     assert.equal('runId' in (snapshot.externalRuns?.[0] ?? {}), false);
+    const browserPayload = JSON.stringify(snapshot.externalRuns);
+    for (const forbiddenField of [
+      'body',
+      'comments',
+      'criteria',
+      'prompt',
+      'arguments',
+      'script',
+      'logs',
+      'results',
+      'journal',
+      'token',
+      'credentials',
+      'secret',
+      'agents',
+      'nativeAgents',
+    ]) {
+      assert.doesNotMatch(browserPayload, new RegExp(`"${forbiddenField}"`));
+    }
+    assert.deepEqual(
+      Object.keys(snapshot.externalRuns?.[0]?.ticketSlices?.[0] ?? {}),
+      ['key', 'title', 'status'],
+    );
     assert.equal(
       snapshot.externalProgressWarning,
       'Some issue workflow snapshots could not be read.',

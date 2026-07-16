@@ -562,7 +562,12 @@ test('invalid Ticket Slice data is omitted with one diagnostic while its aggrega
         ...run,
         ticketSlices: [
           { key: 'TEST-1', title: 'Valid child', status: 'queued' },
-          { key: '', title: 'Invalid child', status: 'queued' },
+          {
+            key: 'SENSITIVE-TRACKER-REF',
+            title: 'Sensitive child title',
+            status: 'queued',
+            secretCredential: 'TOP-SECRET',
+          },
         ],
       })}\n`,
     );
@@ -576,6 +581,10 @@ test('invalid Ticket Slice data is omitted with one diagnostic while its aggrega
     assert.equal(result.snapshots[0]?.ticketSlices, undefined);
     assert.equal(result.diagnostics.length, 1);
     assert.match(result.diagnostics[0]!.message, /Ticket Slice data omitted/);
+    assert.doesNotMatch(
+      result.diagnostics[0]!.message,
+      /SENSITIVE|secretCredential|TOP-SECRET/,
+    );
     assert.equal(
       startExternalProgress({
         cwd: fixture.cwd,
@@ -1136,6 +1145,211 @@ test('Ticket Slice failed is legal from every non-terminal state and remains imm
         /immutable/,
       );
     }
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('graceful finish requires terminal Ticket Slices and newest terminal selection retains them', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    initializeExternalProgressTicketSlices({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      ticketSlices: [
+        { key: 'TEST-1', title: 'Completed ticket', status: 'queued' },
+        { key: 'TEST-2', title: 'Failed ticket', status: 'queued' },
+      ],
+      now: new Date(TIME.getTime() + 1),
+    });
+    const update = (key: string, status: string) =>
+      updateExternalProgressTicketSlice({
+        runId: run.runId,
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+        source: 'df-implement-issues',
+        key,
+        patch: { status },
+      });
+    update('TEST-1', 'merging');
+    update('TEST-1', 'done');
+    assert.throws(
+      () =>
+        finishExternalProgress({
+          runId: run.runId,
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+          source: 'df-implement-issues',
+          status: 'completed',
+        }),
+      /non-terminal Ticket Slices/,
+    );
+    update('TEST-2', 'failed');
+    const finished = finishExternalProgress({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      status: 'completed',
+    });
+    assert.deepEqual(
+      finished.ticketSlices?.map(({ key, status }) => ({ key, status })),
+      [
+        { key: 'TEST-1', status: 'done' },
+        { key: 'TEST-2', status: 'failed' },
+      ],
+    );
+    assert.deepEqual(
+      selectExternalProgress({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).terminal?.snapshot.ticketSlices,
+      finished.ticketSlices,
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('unclean crash leaves stale Ticket Slices visible and resume reuses the original run', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    initializeExternalProgressTicketSlices({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      ticketSlices: [
+        { key: 'TEST-1', title: 'Resume ticket', status: 'queued' },
+      ],
+      now: new Date(TIME.getTime() + 1),
+    });
+    updateExternalProgressTicketSlice({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      key: 'TEST-1',
+      patch: { status: 'implementing' },
+      now: new Date(TIME.getTime() + 2),
+    });
+    const crashed = selectExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      now: new Date(TIME.getTime() + 31 * 60 * 1000),
+    }).active[0]!;
+    assert.equal(crashed.stale, true);
+    assert.equal(crashed.snapshot.ticketSlices?.[0]?.status, 'implementing');
+    assert.equal(crashed.snapshot.finishedAt, undefined);
+
+    const resumed = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: new Date(TIME.getTime() + 31 * 60 * 1000 + 1),
+    });
+    assert.equal(resumed.runId, run.runId);
+    assert.equal(resumed.ticketSlices?.[0]?.status, 'implementing');
+    const reconciled = updateExternalProgressTicketSlice({
+      runId: resumed.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      key: 'TEST-1',
+      patch: { status: 'failed' },
+    });
+    assert.equal(reconciled.runId, run.runId);
+    assert.equal(reconciled.ticketSlices?.[0]?.status, 'failed');
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('persisted and runtime Ticket Slice payloads contain only the approved display contract', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    initializeExternalProgressTicketSlices({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      ticketSlices: [
+        { key: 'TEST-1', title: 'Display title', status: 'queued' },
+      ],
+    });
+    const persisted = JSON.parse(
+      readFileSync(
+        join(
+          externalProgressRunsDir({
+            cwd: fixture.cwd,
+            homeDir: fixture.homeDir,
+          }),
+          `${run.runId}.json`,
+        ),
+        'utf8',
+      ),
+    ) as Record<string, unknown>;
+    const runtime = readExternalProgressProject({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    }).snapshots[0]!;
+    const forbidden = [
+      'body',
+      'comments',
+      'criteria',
+      'prompt',
+      'arguments',
+      'script',
+      'logs',
+      'results',
+      'journal',
+      'token',
+      'credentials',
+      'secret',
+      'agents',
+      'nativeAgents',
+    ];
+    const keys = (value: unknown, result = new Set<string>()): Set<string> => {
+      if (Array.isArray(value)) for (const entry of value) keys(entry, result);
+      else if (value && typeof value === 'object') {
+        for (const [key, entry] of Object.entries(value)) {
+          result.add(key);
+          keys(entry, result);
+        }
+      }
+      return result;
+    };
+    for (const payload of [persisted, runtime]) {
+      const payloadKeys = keys(payload);
+      for (const field of forbidden)
+        assert.equal(payloadKeys.has(field), false, field);
+    }
+    assert.deepEqual(
+      Object.keys(
+        (persisted.ticketSlices as Record<string, unknown>[])[0] ?? {},
+      ),
+      ['key', 'title', 'status'],
+    );
   } finally {
     fixture.cleanup();
   }
