@@ -338,6 +338,14 @@ test('dashboard projects issue workflows without changing empty dashboard data',
       run({
         runId: '11111111-1111-4111-8111-111111111111',
         currentItem: '<script>alert(1)</script>',
+        ticketSlices: [
+          {
+            key: 'TEST-1',
+            title: 'First <script>alert(1)</script>',
+            status: 'queued',
+          },
+          { key: 'TEST-2', title: 'Second & final', status: 'queued' },
+        ],
       }),
       { homeDir },
     );
@@ -394,6 +402,14 @@ test('dashboard projects issue workflows without changing empty dashboard data',
       snapshot.externalRuns?.[0]?.currentItem,
       '<script>alert(1)</script>',
     );
+    assert.deepEqual(snapshot.externalRuns?.[0]?.ticketSlices, [
+      {
+        key: 'TEST-1',
+        title: 'First <script>alert(1)</script>',
+        status: 'queued',
+      },
+      { key: 'TEST-2', title: 'Second & final', status: 'queued' },
+    ]);
     assert.equal(
       snapshot.externalRuns?.some(
         (entry) => entry.currentItem === 'older terminal',
@@ -445,6 +461,27 @@ test('dashboard client escapes issue workflow text and renders partial counters'
   assert.match(completedOnly, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
   assert.match(completedOnly, /&lt;img src=x&gt;/);
   assert.doesNotMatch(completedOnly, /<script>|<img/);
+
+  const queued = runInNewContext(`${helpers}; issueWorkflow(run);`, {
+    run: {
+      source: 'df-implement-issues',
+      status: 'running',
+      loopPhase: 'queue',
+      stale: false,
+      ticketSlices: [
+        {
+          key: 'TEST-1',
+          title: 'First <script>alert(1)</script>',
+          status: 'queued',
+        },
+        { key: 'TEST-2', title: 'Second & final', status: 'queued' },
+      ],
+    },
+  }) as string;
+  assert.ok(queued.indexOf('TEST-1') < queued.indexOf('TEST-2'));
+  assert.match(queued, /First &lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(queued, /Second &amp; final/);
+  assert.doesNotMatch(queued, /<script>|First <script>/);
 
   const totalOnly = runInNewContext(`${helpers}; issueWorkflow(run);`, {
     run: {

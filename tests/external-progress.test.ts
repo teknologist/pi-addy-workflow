@@ -768,6 +768,153 @@ test('Ticket Slice initialization is normalized-idempotent and conflicts do not 
   }
 });
 
+test('concurrent Ticket Slice initialization is idempotent and conflicting writes preserve one complete winner', async () => {
+  const fixture = setup();
+  try {
+    const identicalRun = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    const script = `
+      import { initializeExternalProgressTicketSlices } from ${JSON.stringify(EXTERNAL_PROGRESS_MODULE_URL)};
+      try {
+        const snapshot = initializeExternalProgressTicketSlices({
+          runId: process.argv[1],
+          cwd: process.argv[2],
+          homeDir: process.argv[3],
+          source: process.argv[4],
+          ticketSlices: JSON.parse(process.argv[5]),
+        });
+        process.stdout.write(JSON.stringify(snapshot.ticketSlices));
+      } catch (error) {
+        process.stderr.write(error instanceof Error ? error.message : String(error));
+        process.exitCode = 2;
+      }
+    `;
+    const queued = [
+      { key: 'TEST-1', title: 'First ticket', status: 'queued' },
+      { key: 'TEST-2', title: 'Second ticket', status: 'queued' },
+    ];
+    const identical = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        runChild(script, [
+          identicalRun.runId,
+          fixture.cwd,
+          fixture.homeDir,
+          'df-implement-issues',
+          JSON.stringify(queued),
+        ]),
+      ),
+    );
+    assert.deepEqual(
+      identical.map((result) => result.code),
+      Array(8).fill(0),
+    );
+    assert.equal(new Set(identical.map((result) => result.stdout)).size, 1);
+
+    const conflictingRun = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'implement-from-issues',
+      now: TIME,
+    });
+    const first = [{ key: 'FIRST-1', title: 'First winner', status: 'queued' }];
+    const second = [
+      { key: 'SECOND-1', title: 'Second winner', status: 'queued' },
+    ];
+    const conflicting = await Promise.all(
+      [first, second].map((ticketSlices) =>
+        runChild(script, [
+          conflictingRun.runId,
+          fixture.cwd,
+          fixture.homeDir,
+          'implement-from-issues',
+          JSON.stringify(ticketSlices),
+        ]),
+      ),
+    );
+    assert.deepEqual(conflicting.map((result) => result.code).sort(), [0, 2]);
+    const stored = readExternalProgressProject({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+    }).snapshots.find((snapshot) => snapshot.runId === conflictingRun.runId);
+    assert.ok(
+      JSON.stringify(stored?.ticketSlices) === JSON.stringify(first) ||
+        JSON.stringify(stored?.ticketSlices) === JSON.stringify(second),
+    );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('Ticket Slice collections stay isolated by project and source while starts reuse one logical run', () => {
+  const firstProject = setup();
+  const secondProject = setup();
+  try {
+    const firstRun = startExternalProgress({
+      cwd: firstProject.cwd,
+      homeDir: firstProject.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    assert.equal(
+      startExternalProgress({
+        cwd: firstProject.cwd,
+        homeDir: firstProject.homeDir,
+        source: 'df-implement-issues',
+        now: TIME,
+      }).runId,
+      firstRun.runId,
+    );
+    const otherSourceRun = startExternalProgress({
+      cwd: firstProject.cwd,
+      homeDir: firstProject.homeDir,
+      source: 'implement-from-issues',
+      now: TIME,
+    });
+    const secondProjectRun = startExternalProgress({
+      cwd: secondProject.cwd,
+      homeDir: secondProject.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    for (const [run, fixture, source, key] of [
+      [firstRun, firstProject, 'df-implement-issues', 'FIRST-DF'],
+      [otherSourceRun, firstProject, 'implement-from-issues', 'FIRST-OTHER'],
+      [secondProjectRun, secondProject, 'df-implement-issues', 'SECOND-DF'],
+    ] as const) {
+      initializeExternalProgressTicketSlices({
+        runId: run.runId,
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+        source,
+        ticketSlices: [{ key, title: key, status: 'queued' }],
+      });
+    }
+    assert.deepEqual(
+      readExternalProgressProject({
+        cwd: firstProject.cwd,
+        homeDir: firstProject.homeDir,
+      })
+        .snapshots.map((snapshot) => snapshot.ticketSlices?.[0]?.key)
+        .sort(),
+      ['FIRST-DF', 'FIRST-OTHER'],
+    );
+    assert.deepEqual(
+      readExternalProgressProject({
+        cwd: secondProject.cwd,
+        homeDir: secondProject.homeDir,
+      }).snapshots.map((snapshot) => snapshot.ticketSlices?.[0]?.key),
+      ['SECOND-DF'],
+    );
+  } finally {
+    firstProject.cleanup();
+    secondProject.cleanup();
+  }
+});
+
 test('Ticket Slice updates reject unknown or malformed input without changing siblings', () => {
   const fixture = setup();
   try {
