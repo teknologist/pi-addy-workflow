@@ -1,0 +1,7 @@
+{
+  "setup": ["npm ci"],
+  "teardown": [],
+  "run": [
+    "node --experimental-strip-types bin/addy-dashboard.ts --project-path \"$SUPERSET_WORKSPACE_PATH\""
+  ]
+}
