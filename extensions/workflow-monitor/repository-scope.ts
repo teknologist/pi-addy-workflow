@@ -111,6 +111,29 @@ function extractOwnerAndCompanionRepos(markdown: string): string[] {
   return repos;
 }
 
+function normalizedRepositoryScopes(
+  ownershipMarkdown: string,
+  scopeMarkdown: string,
+  baseCwd: string | undefined,
+): string[] {
+  return uniqueDefined([
+    baseCwd,
+    ...extractOwnerAndCompanionRepos(ownershipMarkdown).map((value) =>
+      normalizeRepositoryScope(value, baseCwd),
+    ),
+    ...extractRepositoryScopeLineValues(scopeMarkdown).map((value) =>
+      normalizeRepositoryScope(value, baseCwd),
+    ),
+  ]);
+}
+
+export function repositoryScopesFromMarkdown(
+  markdown: string,
+  baseCwd: string,
+): string[] {
+  return normalizedRepositoryScopes(markdown, markdown, baseCwd);
+}
+
 export function repositoryScopesForPlan(
   planPath: string | undefined,
   baseCwd?: string,
@@ -137,15 +160,11 @@ export function repositoryScopesForPlan(
       }
     }
 
-    return uniqueDefined([
+    return normalizedRepositoryScopes(
+      indexMarkdown || markdown,
+      markdown,
       baseCwd,
-      ...extractOwnerAndCompanionRepos(indexMarkdown || markdown).map((value) =>
-        normalizeRepositoryScope(value, baseCwd),
-      ),
-      ...extractRepositoryScopeLineValues(markdown).map((value) =>
-        normalizeRepositoryScope(value, baseCwd),
-      ),
-    ]);
+    );
   } catch {
     return baseCwd ? [baseCwd] : [];
   }

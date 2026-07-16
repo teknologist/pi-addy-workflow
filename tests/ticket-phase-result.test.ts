@@ -107,6 +107,84 @@ test('missing, duplicate, malformed, unknown, stale, and mismatched envelopes fa
   );
 });
 
+test('manual clarification is bounded, structured, and outcome-bound', () => {
+  const blocked = ticketResult({
+    outcome: 'blocked',
+    lifecycle: { implemented: true, verified: true, reviewed: false },
+    clarification: {
+      kind: 'completion-transition',
+      prompt: 'Close or keep open?',
+    },
+  } as never);
+  const manualExpectation = { ...expectation, manual: true };
+  const parsedBlocked = extractTicketResultEnvelope(
+    envelope(blocked),
+    manualExpectation,
+  );
+  assert.equal(parsedBlocked.kind, 'ticket-phase-result');
+  if (parsedBlocked.kind !== 'ticket-phase-result')
+    assert.fail('expected Ticket phase result');
+  assert.deepEqual(parsedBlocked.clarification, blocked.clarification);
+  assert.throws(() =>
+    extractTicketResultEnvelope(envelope(blocked), expectation),
+  );
+
+  const resolved = ticketResult({
+    clarification: {
+      kind: 'completion-transition',
+      prompt: 'Close or keep open?',
+      resolution: 'close',
+    },
+  } as never);
+  const parsedResolved = extractTicketResultEnvelope(envelope(resolved), {
+    ...manualExpectation,
+    pendingClarification: blocked.clarification as never,
+  });
+  assert.equal(parsedResolved.kind, 'ticket-phase-result');
+  if (parsedResolved.kind !== 'ticket-phase-result')
+    assert.fail('expected Ticket phase result');
+  assert.equal(parsedResolved.clarification?.resolution, 'close');
+
+  for (const clarification of [
+    { kind: 'completion-transition', prompt: 'line one\nline two' },
+    { kind: 'completion-transition', prompt: 'x'.repeat(513) },
+    {
+      kind: 'completion-transition',
+      prompt: 'Question?',
+      resolution: 'x'.repeat(513),
+    },
+    { kind: 'other', prompt: 'Question?' },
+    {
+      kind: 'completion-transition',
+      prompt: 'Question?',
+      narrative: 'because',
+    },
+  ])
+    assert.throws(() =>
+      extractTicketResultEnvelope(
+        envelope(ticketResult({ outcome: 'blocked', clarification } as never)),
+        manualExpectation,
+      ),
+    );
+  assert.throws(() =>
+    extractTicketResultEnvelope(
+      envelope(ticketResult({ clarification: blocked.clarification } as never)),
+      manualExpectation,
+    ),
+  );
+  assert.throws(() =>
+    extractTicketResultEnvelope(
+      envelope(
+        ticketResult({
+          outcome: 'blocked',
+          clarification: resolved.clarification,
+        } as never),
+      ),
+      manualExpectation,
+    ),
+  );
+});
+
 test('forbids narrative and sensitive payload fields or content', () => {
   for (const forbidden of [
     'body',
@@ -257,20 +335,53 @@ test('repository scope is immutable outside approval and FINISH evidence is exac
       expectation,
     ),
   );
+  assert.throws(() =>
+    extractTicketResultEnvelope(
+      envelope(
+        ticketResult({
+          operation: 'build',
+          lifecycle: {
+            implemented: true,
+            verified: false,
+            reviewed: false,
+          },
+          reviewDisposition: undefined,
+          repositoryScope: ['/work/owner', '/work/extra'],
+        } as never),
+      ),
+      {
+        ...expectation,
+        operation: 'build',
+        previousLifecycle: {
+          implemented: false,
+          verified: false,
+          reviewed: false,
+        },
+        previousRepositoryScope: ['/work/owner'],
+      },
+    ),
+  );
 
   const approval = ticketResult({
-    operation: 'repository-scope-approval',
+    operation: 'add-repository',
     repository: 'extra',
     reviewDisposition: undefined,
     repositoryScope: ['.', 'extra'],
   } as never);
   const approvalExpectation = {
     ...expectation,
-    operation: 'repository-scope-approval' as const,
+    operation: 'add-repository' as const,
     repository: 'extra',
   };
   assert.equal(
     extractTicketResultEnvelope(envelope(approval), approvalExpectation).kind,
+    'ticket-phase-result',
+  );
+  assert.equal(
+    extractTicketResultEnvelope(envelope(approval), {
+      ...approvalExpectation,
+      previousRepositoryScope: ['.', 'extra'],
+    }).kind,
     'ticket-phase-result',
   );
   for (const repositoryScope of [

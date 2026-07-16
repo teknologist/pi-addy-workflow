@@ -48,10 +48,10 @@ export type WorkflowAction =
   | TicketWorkflowAction
   | undefined;
 
-function ticketOperationForRun(run: TicketRunState): TicketOperation {
+export function ticketOperationForRun(run: TicketRunState): TicketOperation {
   if (!run.claim) return 'claim';
   if (!run.lifecycle.implemented) return 'build';
-  if (run.lifecycle.lastCompletedPhase === 'build') return 'simplify';
+  if (run.lifecycle.lastCompletedPhase === 'fix-all') return 'verify';
   if (!run.lifecycle.verified) return 'verify';
   if (
     run.lastValidatedResult?.operation === 'review' &&

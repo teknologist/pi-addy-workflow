@@ -9,6 +9,7 @@ import {
   autoRecoveryPrompt,
   completedPlanAutoContinuation,
   latestCompletedActiveStatsTarget,
+  nextWorkflowActionForExecutionSource,
   planTaskIsComplete,
   reviewedTaskWasCompleted,
   stateWithCompletedLifecyclePhasesFromPlan,
@@ -244,6 +245,35 @@ test('auto lifecycle advances closed slice to next unfinished slice', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('Ticket Auto frontier never dispatches optional SIMPLIFY', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: '#10' },
+      runId: 'run-1',
+      claim: {
+        id: 'claim-1',
+        owner: 'agent',
+        claimedAt: '2026-07-15T00:00:00.000Z',
+      },
+      lifecycle: {
+        implemented: true,
+        verified: false,
+        reviewed: false,
+        lastCompletedPhase: 'build' as const,
+      },
+      repositoryScope: ['/repo'],
+    },
+  };
+
+  assert.equal(
+    nextWorkflowActionForExecutionSource(state)?.prompt,
+    '/addy-verify --ticket #10',
+  );
 });
 
 test('auto lifecycle renders same-phase retry guidance', () => {

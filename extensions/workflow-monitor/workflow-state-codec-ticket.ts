@@ -63,6 +63,15 @@ function optionalString(value: unknown): value is string | undefined {
   return value === undefined || nonEmptyString(value);
 }
 
+function boundedLine(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 512 &&
+    !/[\r\n]/.test(value)
+  );
+}
+
 function oneOf<T extends string>(
   value: unknown,
   values: readonly T[],
@@ -150,12 +159,18 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
   if (value.pendingClarification !== undefined) {
     if (
       !record(value.pendingClarification) ||
-      !exactKeys(value.pendingClarification, ['kind', 'prompt']) ||
+      !exactKeys(
+        value.pendingClarification,
+        ['kind', 'prompt'],
+        ['resolution'],
+      ) ||
       !oneOf(value.pendingClarification.kind, [
         'tracker-routing',
         'completion-transition',
       ] as const) ||
-      !nonEmptyString(value.pendingClarification.prompt)
+      !boundedLine(value.pendingClarification.prompt) ||
+      (value.pendingClarification.resolution !== undefined &&
+        !boundedLine(value.pendingClarification.resolution))
     )
       return undefined;
   }
@@ -179,6 +194,9 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
           'claimId',
           'staleClaimId',
           'repository',
+          'repositoryAppended',
+          'manual',
+          'pendingClarification',
           'reviewDisposition',
           'commitEvidence',
         ],
@@ -190,10 +208,54 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
       (result.attempt as number) < 0 ||
       !optionalString(result.revision) ||
       !optionalString(result.claimId) ||
-      (result.operation === 'reclaim') !==
-        nonEmptyString(result.staleClaimId) ||
-      (result.operation === 'repository-scope-approval') !==
-        nonEmptyString(result.repository)
+      (result.operation === 'reclaim') !== nonEmptyString(result.staleClaimId)
+    )
+      return undefined;
+    if (
+      (result.manual !== undefined ||
+        result.pendingClarification !== undefined) &&
+      (result.manual !== true ||
+        !record(result.pendingClarification) ||
+        !exactKeys(
+          result.pendingClarification,
+          ['kind', 'prompt'],
+          ['resolution'],
+        ) ||
+        !oneOf(result.pendingClarification.kind, [
+          'tracker-routing',
+          'completion-transition',
+        ] as const) ||
+        !boundedLine(result.pendingClarification.prompt) ||
+        (result.pendingClarification.resolution !== undefined &&
+          !boundedLine(result.pendingClarification.resolution)))
+    )
+      return undefined;
+    const repositoryOperation =
+      result.operation === 'add-repository' ||
+      result.operation === 'repository-scope-approval';
+    const legacyPendingRepository =
+      result.operation === 'add-repository' &&
+      result.repository === undefined &&
+      record(value.pendingScopeRequest) &&
+      nonEmptyString(value.pendingScopeRequest.repository)
+        ? value.pendingScopeRequest.repository
+        : undefined;
+    const repository = result.repository ?? legacyPendingRepository;
+    const repositoryAppended =
+      result.repositoryAppended ??
+      (legacyPendingRepository
+        ? false
+        : repositoryOperation
+          ? (result.outcome === 'succeeded' ||
+              result.outcome === 'reconciled') &&
+            value.repositoryScope.at(-1) === repository
+          : undefined);
+    if (
+      repositoryOperation !== nonEmptyString(repository) ||
+      repositoryOperation !== (typeof repositoryAppended === 'boolean') ||
+      (repositoryAppended === true &&
+        ((result.outcome !== 'succeeded' && result.outcome !== 'reconciled') ||
+          value.repositoryScope.at(-1) !== repository))
     )
       return undefined;
     if (result.reviewDisposition !== undefined) {
@@ -244,6 +306,33 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
         : successfulFinish)
     )
       return undefined;
+  }
+  if (value.lastValidatedResult !== undefined) {
+    const result = value.lastValidatedResult as Record<string, unknown>;
+    const repositoryOperation =
+      result.operation === 'add-repository' ||
+      result.operation === 'repository-scope-approval';
+    if (repositoryOperation) {
+      const legacyRepository =
+        result.repository ??
+        (record(value.pendingScopeRequest)
+          ? value.pendingScopeRequest.repository
+          : undefined);
+      return {
+        ...value,
+        lastValidatedResult: {
+          ...result,
+          repository: legacyRepository,
+          repositoryAppended:
+            result.repositoryAppended ??
+            (result.repository === undefined
+              ? false
+              : (result.outcome === 'succeeded' ||
+                  result.outcome === 'reconciled') &&
+                value.repositoryScope.at(-1) === legacyRepository),
+        },
+      } as TicketRunState;
+    }
   }
   return value as TicketRunState;
 }

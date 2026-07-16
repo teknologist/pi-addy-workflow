@@ -52,6 +52,47 @@ test('valid ticket state round-trips strictly', () => {
   assert.equal(parsed?.ticketRecovery, undefined);
 });
 
+test('legacy add-repository evidence migrates its safe pending repository identity', () => {
+  const legacyRun = {
+    ...validTicketRun,
+    pendingScopeRequest: { repository: '/repo/companion' },
+    lastValidatedResult: {
+      operation: 'add-repository' as const,
+      outcome: 'succeeded' as const,
+      actionKey: 'add-repository-1',
+      attempt: 0,
+    },
+  };
+  const parsed = parsePersistedWorkflowState(
+    serializeWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: legacyRun,
+    }),
+  );
+  assert.equal(
+    parsed?.ticketRun?.lastValidatedResult?.repository,
+    '/repo/companion',
+  );
+  assert.equal(
+    parsed?.ticketRun?.lastValidatedResult?.repositoryAppended,
+    false,
+  );
+
+  const unsafe = parsePersistedWorkflowState(
+    serializeWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketRun: {
+        ...legacyRun,
+        pendingScopeRequest: undefined,
+      },
+    }),
+  );
+  assert.equal(unsafe?.ticketRun, undefined);
+  assert.equal(unsafe?.ticketRecovery?.possibleClaim, true);
+});
+
 test('Ticket operation pauses round-trip durably', () => {
   for (const autoPausedReason of [
     'ticket-operation-blocked',

@@ -81,6 +81,10 @@ export type TicketReviewDisposition =
   | { status: 'clean' }
   | { status: 'findings'; count: number };
 
+export type TicketClarificationResult = NonNullable<
+  TicketRunState['pendingClarification']
+>;
+
 export type TicketPhaseResult = {
   schemaVersion: 1;
   kind: 'ticket-phase-result';
@@ -100,6 +104,7 @@ export type TicketPhaseResult = {
   repository?: string;
   reviewDisposition?: TicketReviewDisposition;
   commitEvidence?: Array<{ repository: string; commit: string }>;
+  clarification?: TicketClarificationResult;
 };
 
 export type TicketResult = TicketQueueResult | TicketPhaseResult;
@@ -118,8 +123,11 @@ export type TicketResultExpectation = {
   outcome?: TicketOutcome;
   previousLifecycle?: TicketLifecycleSnapshot;
   previousRepositoryScope?: string[];
+  initialRepositoryScope?: string[];
   selector?: TicketQueueResult['selector'];
   repository?: string;
+  manual?: boolean;
+  pendingClarification?: TicketClarificationResult;
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -339,6 +347,18 @@ function parseReviewDisposition(value: unknown): TicketReviewDisposition {
   throw new Error('Ticket review disposition is malformed.');
 }
 
+function parseClarification(value: unknown): TicketClarificationResult {
+  if (
+    !record(value) ||
+    !exactKeys(value, ['kind', 'prompt'], ['resolution']) ||
+    !oneOf(value.kind, ['tracker-routing', 'completion-transition'] as const) ||
+    !safeString(value.prompt) ||
+    (value.resolution !== undefined && !safeString(value.resolution))
+  )
+    throw new Error('Ticket clarification is malformed.');
+  return value as TicketClarificationResult;
+}
+
 function parseCommitEvidence(
   value: unknown,
 ): TicketPhaseResult['commitEvidence'] {
@@ -414,6 +434,7 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
         'repository',
         'reviewDisposition',
         'commitEvidence',
+        'clarification',
       ],
     ) ||
     value.schemaVersion !== 1 ||
@@ -498,6 +519,17 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
       'REVIEW disposition conflicts with Reviewed lifecycle state.',
     );
 
+  const clarification =
+    value.clarification === undefined
+      ? undefined
+      : parseClarification(value.clarification);
+  const clarificationResolved = clarification?.resolution !== undefined;
+  if (
+    clarification &&
+    (clarificationResolved ? !successful : value.outcome !== 'blocked')
+  )
+    throw new Error('Ticket clarification conflicts with result outcome.');
+
   const commitEvidence =
     value.commitEvidence === undefined
       ? undefined
@@ -533,6 +565,7 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
     ...(safeString(repository) ? { repository } : {}),
     ...(reviewDisposition ? { reviewDisposition } : {}),
     ...(commitEvidence ? { commitEvidence } : {}),
+    ...(clarification ? { clarification } : {}),
   };
 }
 
@@ -552,6 +585,27 @@ function assertExpectation(
         expected.claimId === expected.staleClaimId))
   )
     throw new Error('Ticket result expectation identity is malformed.');
+  if (result.kind === 'ticket-phase-result' && result.clarification) {
+    if (!expected.manual)
+      throw new Error(
+        'Ticket clarification is allowed only for manual actions.',
+      );
+    const pending = expected.pendingClarification;
+    if (
+      pending &&
+      (result.clarification.kind !== pending.kind ||
+        result.clarification.prompt !== pending.prompt)
+    )
+      throw new Error('Ticket clarification is stale or mismatched.');
+  }
+  if (
+    result.kind === 'ticket-phase-result' &&
+    expected.pendingClarification &&
+    (!result.clarification ||
+      (result.outcome !== 'blocked' &&
+        result.clarification.resolution === undefined))
+  )
+    throw new Error('Pending Ticket clarification was not resolved.');
   if (
     result.operation !== expected.operation ||
     result.actionKey !== expected.actionKey ||
@@ -620,13 +674,28 @@ function assertExpectation(
     expected.previousLifecycle,
     result.lifecycle,
   );
-  if (expected.previousRepositoryScope) {
+  const establishesScope =
+    result.operation === 'claim' &&
+    (result.outcome === 'succeeded' || result.outcome === 'reconciled') &&
+    expected.initialRepositoryScope;
+  if (establishesScope) {
+    if (
+      result.repositoryScope.length !== establishesScope.length ||
+      !establishesScope.every(
+        (repository, index) => result.repositoryScope[index] === repository,
+      )
+    )
+      throw new Error('claim returned an invalid initial repository scope.');
+  } else if (expected.previousRepositoryScope) {
     const previous = expected.previousRepositoryScope;
     const preservesScope = previous.every(
       (repository, index) => result.repositoryScope[index] === repository,
     );
     const expectedScope =
-      result.operation === 'repository-scope-approval' && expected.repository
+      (result.operation === 'add-repository' ||
+        result.operation === 'repository-scope-approval') &&
+      expected.repository &&
+      !previous.includes(expected.repository)
         ? [...previous, expected.repository]
         : previous;
     if (

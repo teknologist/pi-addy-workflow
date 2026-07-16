@@ -56,13 +56,13 @@
   - function validPendingFreshContinuation: (state) => state is WorkflowState &
   - _...8 more_
 - `extensions/workflow-monitor/auto-lifecycle.ts`
+  - function ticketOperationForRun: (run) => TicketOperation
   - function nextWorkflowActionForExecutionSource: (state, baseCwd?) => WorkflowAction
   - function reviewedTaskWasCompleted: (previousState, state) => boolean
   - function planTaskIsComplete: (planPath, baseCwd, target) => boolean
   - function actionTargetsCompletePlanTask: (state, action, baseCwd?) => boolean
   - function completedPlanAutoContinuation: (state, action, baseCwd?) => |
-  - function latestCompletedActiveStatsTarget: (state, baseCwd?) => WorkflowStatsTarget | undefined
-  - _...5 more_
+  - _...6 more_
 - `extensions/workflow-monitor/auto-loop.ts` — function createAutoLoopDispatchPort: () => void
 - `extensions/workflow-monitor/auto-prompt-dispatcher.ts` — function createAutoPromptDispatcher: (deps) => void
 - `extensions/workflow-monitor/auto-recovery-prompt-policy.ts` — function addAutoRecoveryGuidance: (message, prompt) => string
@@ -184,6 +184,7 @@
 - `extensions/workflow-monitor/repository-scope.ts`
   - function normalizeTicketRepositoryRequest: (value, repositoryRoot?) => string
   - function normalizeRepositoryScope: (value, baseCwd?) => string | undefined
+  - function repositoryScopesFromMarkdown: (markdown, baseCwd) => string[]
   - function repositoryScopesForPlan: (planPath, baseCwd?) => string[]
   - function repositoryScopeForPlan: (planPath, baseCwd?) => string | undefined
 - `extensions/workflow-monitor/review-control.ts` — function reviewFixKey: (state) => string, function legacyReviewFixKey: (state) => string
@@ -222,6 +223,10 @@
   - function withPlanTaskId: (target, baseCwd?) => WorkflowStatsTarget | undefined
   - function recordCommittedTask: (state, target, commitSha) => WorkflowState
   - function actionCommitTarget: (state, action) => WorkflowStatsTarget | undefined
+- `extensions/workflow-monitor/ticket-clarification.ts`
+  - function setTicketClarification: (state, clarification) => WorkflowState
+  - function resolveTicketClarification: (state, resolution) => WorkflowState
+  - function clearTicketClarification: (state) => WorkflowState
 - `extensions/workflow-monitor/ticket-command.ts`
   - function parseTicketCommand: (command, args) => TicketCommandIntent
   - type TicketLifecycleCommand
@@ -237,7 +242,7 @@
   - type TicketLifecycleSnapshot
   - type TicketQueueResult
   - type TicketReviewDisposition
-  - _...3 more_
+  - _...4 more_
 - `extensions/workflow-monitor/ticket-prompt.ts` — function buildTicketPrompt: (request) => string, type TicketPromptRequest
 - `extensions/workflow-monitor/ticket-result-ingestion.ts` — function ingestTicketResult: (state, text, repositoryRoot?) => TicketResultIngestion, type TicketResultIngestion
 - `extensions/workflow-monitor/ticket-source-switch.ts` — function ticketStateBlocksReset: (state) => boolean, function ticketClaimSafetyWarning: (state, input) => string | undefined

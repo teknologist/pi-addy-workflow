@@ -125,7 +125,7 @@ test('Ticket queue dispatch uses the gateway and ingests one agent result idempo
     postRevision: 'rev-claim',
     lifecycle: { implemented: false, verified: false, reviewed: false },
     activity: { marker: `${claimPending.key}:0`, id: 'claim-comment' },
-    repositoryScope: ['.'],
+    repositoryScope: [harness.ctx.cwd],
   });
   await harness.events.get('agent_end')!(
     {
@@ -247,7 +247,7 @@ test('registered manual BUILD claims an unclaimed Ticket before lifecycle work',
     postRevision: 'rev-claim',
     lifecycle: { implemented: false, verified: false, reviewed: false },
     activity: { marker: `${pending.key}:0` },
-    repositoryScope: ['.'],
+    repositoryScope: [harness.ctx.cwd],
   });
   await harness.events.get('agent_end')!(
     {
@@ -261,6 +261,51 @@ test('registered manual BUILD claims an unclaimed Ticket before lifecycle work',
   assert.equal(harness.ctx.state.ticketRun.claim.id, pending.claimId);
   assert.equal(harness.ctx.state.ticketRun.lifecycle.implemented, false);
   assert.equal(harness.ctx.state.autoMode, false);
+});
+
+test('manual BUILD rejects a mismatched unclaimed run ref and retries the matching ref', async () => {
+  const harness = createAddyWorkflowHarness({
+    cwd: mkdtempSync(join(tmpdir(), 'addy-ticket-manual-build-retry-')),
+    id: 'ticket-manual-build-retry',
+  });
+  harness.ctx.state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket',
+    autoMode: false,
+    ticketRun: {
+      schemaVersion: 1,
+      source: { kind: 'github', ref: '#9' },
+      runId: 'run-1',
+      repositoryRoot: harness.ctx.cwd,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+    },
+  };
+
+  await harness.commands
+    .get('addy-build')!
+    .handler({ args: ['--ticket', '#10'] }, harness.ctx);
+
+  assert.equal(harness.sentMessages.length, 0);
+  assert.equal(harness.ctx.state.autoPendingAction, undefined);
+  assert.equal(harness.ctx.state.ticketRun.source.ref, '#9');
+  assert.equal(harness.notices.length, 1);
+  assert.match(harness.notices[0].message, /requested #10.*unclaimed run #9/i);
+
+  await harness.commands
+    .get('addy-build')!
+    .handler({ args: ['--ticket', '#9'] }, harness.ctx);
+
+  const pending = harness.ctx.state.autoPendingAction;
+  assert.equal(pending?.executionSource, 'ticket');
+  if (pending?.executionSource !== 'ticket')
+    assert.fail('expected Ticket action');
+  assert.equal(pending.operation, 'claim');
+  assert.equal(harness.notices.length, 1);
+  assert.equal(pending.ticketRef, '#9');
+  assert.equal(pending.runId, 'run-1');
+  assert.match(harness.lastPrompt() ?? '', /Operation: claim/);
+  assert.match(harness.lastPrompt() ?? '', /Ticket ref: #9/);
 });
 
 test('registered manual Ticket lifecycle dispatches a contract prompt and ingests its result', async () => {
@@ -329,6 +374,130 @@ test('registered manual Ticket lifecycle dispatches a contract prompt and ingest
   assert.equal(harness.ctx.state.ticketRun.lifecycle.verified, true);
   assert.equal(harness.ctx.state.autoPendingAction, undefined);
   assert.equal(harness.ctx.state.autoMode, false);
+});
+
+test('registered manual command persists canceled clarification and clears it after resolved retry', async () => {
+  const harness = createAddyWorkflowHarness({
+    cwd: mkdtempSync(join(tmpdir(), 'addy-ticket-manual-clarification-')),
+    id: 'ticket-manual-clarification',
+  });
+  const claim = {
+    id: 'claim-1',
+    owner: 'agent',
+    claimedAt: '2026-07-15T00:00:00.000Z',
+  };
+  harness.ctx.state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket',
+    ticketRun: {
+      schemaVersion: 1,
+      source: { kind: 'github', ref: '#9' },
+      runId: 'run-1',
+      repositoryRoot: harness.ctx.cwd,
+      claim,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+    },
+  };
+
+  await harness.commands
+    .get('addy-build')!
+    .handler({ args: ['--ticket', '#9'] }, harness.ctx);
+  const first = harness.ctx.state.autoPendingAction;
+  if (first?.executionSource !== 'ticket')
+    assert.fail('expected Ticket action');
+  const clarification = {
+    kind: 'completion-transition' as const,
+    prompt: 'Close or keep open?',
+  };
+  await harness.events.get('agent_end')!(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: formatTicketResultEnvelope({
+                schemaVersion: 1,
+                kind: 'ticket-phase-result',
+                operation: 'build',
+                outcome: 'blocked',
+                source: { kind: 'github', ref: '#9' },
+                runId: 'run-1',
+                claimId: claim.id,
+                claim,
+                actionKey: first.key,
+                attempt: Number(first.attemptMarker.slice('attempt-'.length)),
+                postRevision: 'rev-blocked',
+                lifecycle: {
+                  implemented: false,
+                  verified: false,
+                  reviewed: false,
+                },
+                repositoryScope: ['.'],
+                clarification,
+              }),
+            },
+          ],
+        },
+      ],
+    },
+    harness.ctx,
+  );
+  assert.deepEqual(
+    harness.ctx.state.ticketRun.pendingClarification,
+    clarification,
+  );
+  assert.equal(harness.ctx.state.ticketRun.claim.id, claim.id);
+
+  await harness.commands
+    .get('addy-build')!
+    .handler({ args: ['--ticket', '#9'] }, harness.ctx);
+  const retry = harness.ctx.state.autoPendingAction;
+  if (retry?.executionSource !== 'ticket')
+    assert.fail('expected Ticket action');
+  assert.match(harness.lastPrompt() ?? '', /Close or keep open\?/);
+  await harness.events.get('agent_end')!(
+    {
+      messages: [
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: formatTicketResultEnvelope({
+                schemaVersion: 1,
+                kind: 'ticket-phase-result',
+                operation: 'build',
+                outcome: 'succeeded',
+                source: { kind: 'github', ref: '#9' },
+                runId: 'run-1',
+                claimId: claim.id,
+                claim,
+                actionKey: retry.key,
+                attempt: Number(retry.attemptMarker.slice('attempt-'.length)),
+                postRevision: 'rev-built',
+                lifecycle: {
+                  implemented: true,
+                  verified: false,
+                  reviewed: false,
+                },
+                activity: {
+                  marker: `${retry.key}:${Number(retry.attemptMarker.slice('attempt-'.length))}`,
+                },
+                repositoryScope: ['.'],
+                clarification: { ...clarification, resolution: 'close' },
+              }),
+            },
+          ],
+        },
+      ],
+    },
+    harness.ctx,
+  );
+  assert.equal(harness.ctx.state.ticketRun.pendingClarification, undefined);
+  assert.equal(harness.ctx.state.ticketRun.lifecycle.implemented, true);
 });
 
 test('accepted successful or reconciled Ticket FINISH stops Auto without redispatch', async () => {

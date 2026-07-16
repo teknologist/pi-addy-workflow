@@ -9,6 +9,12 @@ import {
   type TicketPhaseResult,
   type TicketResultExpectation,
 } from './ticket-phase-result.ts';
+import {
+  clearTicketClarification,
+  resolveTicketClarification,
+  setTicketClarification,
+} from './ticket-clarification.ts';
+import { repositoryScopesFromMarkdown } from './repository-scope.ts';
 import type {
   TicketOperation,
   TicketRunState,
@@ -45,6 +51,8 @@ function expectationFromPending(
     ...(pending.repository ? { repository: pending.repository } : {}),
     previousLifecycle: state.ticketRun?.lifecycle,
     previousRepositoryScope: state.ticketRun?.repositoryScope,
+    manual: !state.autoMode,
+    pendingClarification: state.ticketRun?.pendingClarification,
   };
 }
 
@@ -76,9 +84,15 @@ function expectationFromLastResult(
               : {}),
         previousLifecycle: run.lifecycle,
         previousRepositoryScope:
-          last.operation === 'repository-scope-approval' && last.repository
+          last.repositoryAppended === true
             ? run.repositoryScope.slice(0, -1)
             : run.repositoryScope,
+        ...(last.manual
+          ? {
+              manual: true,
+              pendingClarification: last.pendingClarification,
+            }
+          : {}),
       }
     : undefined;
 }
@@ -117,6 +131,8 @@ function expectationFromState(
         ),
         previousLifecycle: run.lifecycle,
         previousRepositoryScope: run.repositoryScope,
+        manual: !state.autoMode,
+        pendingClarification: run.pendingClarification,
       };
   }
 
@@ -169,8 +185,21 @@ export function ingestTicketResult(
   text: string,
   repositoryRoot?: string,
 ): TicketResultIngestion {
-  const expected = expectationFromState(state);
-  if (!expected) return { state, status: 'none' };
+  const baseExpectation = expectationFromState(state);
+  if (!baseExpectation) return { state, status: 'none' };
+  const repositoryScopeRoot = repositoryRoot ?? state.ticketRun?.repositoryRoot;
+  const expected: TicketResultExpectation =
+    baseExpectation.operation === 'claim' &&
+    !state.ticketRun?.claim &&
+    repositoryScopeRoot
+      ? {
+          ...baseExpectation,
+          initialRepositoryScope: repositoryScopesFromMarkdown(
+            text,
+            repositoryScopeRoot,
+          ),
+        }
+      : baseExpectation;
   const hasEnvelope = text.includes('<!-- ADDY-TICKET-RESULT ');
   const pendingTicket = state.autoPendingAction?.executionSource === 'ticket';
   if (!hasEnvelope && !pendingTicket) return { state, status: 'none' };
@@ -185,6 +214,9 @@ export function ingestTicketResult(
   const lastResult = duplicateRun?.lastValidatedResult;
   if (
     duplicateRun &&
+    (!duplicateRun.pendingClarification ||
+      (parsed.kind === 'ticket-phase-result' &&
+        parsed.clarification?.resolution === undefined)) &&
     lastResult?.actionKey === parsed.actionKey &&
     lastResult.attempt === parsed.attempt
   ) {
@@ -270,11 +302,11 @@ export function ingestTicketResult(
     parsed.outcome === 'succeeded' || parsed.outcome === 'reconciled';
   const phase = completed ? completedPhase(parsed.operation) : undefined;
   const pendingScopeRequest =
-    completed && parsed.operation === 'add-repository' && expected.repository
-      ? { repository: expected.repository }
-      : completed && parsed.operation === 'repository-scope-approval'
-        ? undefined
-        : previousScopeRequest;
+    completed &&
+    (parsed.operation === 'add-repository' ||
+      parsed.operation === 'repository-scope-approval')
+      ? undefined
+      : previousScopeRequest;
   const stopped =
     parsed.outcome === 'blocked' || parsed.outcome === 'failed'
       ? {
@@ -284,44 +316,65 @@ export function ingestTicketResult(
       : completed && parsed.operation === 'finish'
         ? exitAutoModeControlUpdates()
         : {};
-  return {
-    state: {
-      ...state,
-      ...stopped,
-      autoPendingAction: undefined,
-      autoLastPrompt: undefined,
-      ticketRun: {
-        ...runWithoutClaim,
-        ...(parsed.claim ? { claim: parsed.claim } : {}),
+  let nextState: WorkflowState = {
+    ...state,
+    ...stopped,
+    autoPendingAction: undefined,
+    autoLastPrompt: undefined,
+    ticketRun: {
+      ...runWithoutClaim,
+      ...(parsed.claim ? { claim: parsed.claim } : {}),
+      revision: parsed.postRevision,
+      lifecycle: {
+        ...parsed.lifecycle,
+        ...(phase ? { lastCompletedPhase: phase } : {}),
+      },
+      repositoryScope: parsed.repositoryScope,
+      ...(pendingScopeRequest ? { pendingScopeRequest } : {}),
+      activityMarker: parsed.activity?.marker ?? run.activityMarker,
+      lastValidatedResult: {
+        operation: parsed.operation,
+        outcome: parsed.outcome,
+        actionKey: parsed.actionKey,
+        attempt: parsed.attempt,
         revision: parsed.postRevision,
-        lifecycle: {
-          ...parsed.lifecycle,
-          ...(phase ? { lastCompletedPhase: phase } : {}),
-        },
-        repositoryScope: parsed.repositoryScope,
-        ...(pendingScopeRequest ? { pendingScopeRequest } : {}),
-        activityMarker: parsed.activity?.marker ?? run.activityMarker,
-        lastValidatedResult: {
-          operation: parsed.operation,
-          outcome: parsed.outcome,
-          actionKey: parsed.actionKey,
-          attempt: parsed.attempt,
-          revision: parsed.postRevision,
-          ...(parsed.claimId ? { claimId: parsed.claimId } : {}),
-          ...(parsed.staleClaimId ? { staleClaimId: parsed.staleClaimId } : {}),
-          ...(parsed.operation === 'repository-scope-approval' &&
-          parsed.repository
-            ? { repository: parsed.repository }
-            : {}),
-          ...(parsed.reviewDisposition
-            ? { reviewDisposition: parsed.reviewDisposition }
-            : {}),
-          ...(parsed.commitEvidence
-            ? { commitEvidence: parsed.commitEvidence }
-            : {}),
-        },
+        ...(parsed.claimId ? { claimId: parsed.claimId } : {}),
+        ...(parsed.staleClaimId ? { staleClaimId: parsed.staleClaimId } : {}),
+        ...((parsed.operation === 'add-repository' ||
+          parsed.operation === 'repository-scope-approval') &&
+        parsed.repository
+          ? {
+              repository: parsed.repository,
+              repositoryAppended: !expected.previousRepositoryScope?.includes(
+                parsed.repository,
+              ),
+            }
+          : {}),
+        ...(parsed.reviewDisposition
+          ? { reviewDisposition: parsed.reviewDisposition }
+          : {}),
+        ...(parsed.commitEvidence
+          ? { commitEvidence: parsed.commitEvidence }
+          : {}),
+        ...(parsed.clarification
+          ? {
+              manual: true as const,
+              pendingClarification: parsed.clarification,
+            }
+          : {}),
       },
     },
+  };
+  if (parsed.clarification) {
+    const { resolution, ...clarification } = parsed.clarification;
+    nextState = setTicketClarification(nextState, clarification);
+    if (resolution !== undefined)
+      nextState = clearTicketClarification(
+        resolveTicketClarification(nextState, resolution),
+      );
+  }
+  return {
+    state: nextState,
     status: 'accepted',
     outcome: parsed.outcome,
   };

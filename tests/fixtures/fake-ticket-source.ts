@@ -26,6 +26,7 @@ export type FakeTicketOperation = {
   owner?: string;
   claimId?: string;
   staleOwner?: FakeStaleOwner;
+  repository?: string;
   removeSelector?: boolean;
   activity?: string;
   targetedReplacement?: { from: string; to: string };
@@ -43,6 +44,7 @@ export class FakeTicketSource {
   #loseNext = false;
   #backendFailure?: string;
   #staleOwner?: FakeStaleOwner;
+  #originatingSelector?: string;
 
   constructor(options: {
     ref: string;
@@ -52,6 +54,7 @@ export class FakeTicketSource {
     repositoryScope: string[];
   }) {
     this.#targetKind = options.targetKind ?? 'issue';
+    this.#originatingSelector = options.selector;
     this.#state = {
       ref: options.ref,
       revision: '0',
@@ -101,6 +104,11 @@ export class FakeTicketSource {
     this.#loseNext = true;
   }
 
+  removeSelectorWithoutClaim(): void {
+    this.#state.selector = undefined;
+    this.#bumpRevision();
+  }
+
   makeRoutingAmbiguous(): void {
     this.#routingAmbiguous = true;
   }
@@ -125,6 +133,16 @@ export class FakeTicketSource {
     if (input.expectedRevision !== this.#state.revision)
       throw new Error('revision conflict');
 
+    if (
+      input.operation === 'claim' &&
+      this.#originatingSelector &&
+      this.#state.selector === undefined &&
+      this.#state.claimId === undefined
+    )
+      throw new Error(
+        'selector removal without claim identity requires manual repair',
+      );
+
     let changed = false;
     if (input.operation === 'release') {
       if (!input.claimId || this.#state.claimId !== input.claimId)
@@ -136,6 +154,8 @@ export class FakeTicketSource {
       if (input.stopAfter === 'native-owner') return this.#finish(changed);
       this.#state.claimId = undefined;
       this.#staleOwner = undefined;
+      if (this.#originatingSelector && this.#state.selector === undefined)
+        this.#state.selector = this.#originatingSelector;
       changed = true;
     } else if (input.operation === 'reclaim') {
       const stale = input.staleOwner;
@@ -163,6 +183,17 @@ export class FakeTicketSource {
       this.#state.claimId = input.claimId;
       this.#staleOwner = undefined;
       changed = true;
+    } else if (input.operation === 'add-repository') {
+      if (!input.claimId || this.#state.claimId !== input.claimId)
+        throw new Error(
+          'repository approval requires the exact claim identity',
+        );
+      if (!input.repository?.trim())
+        throw new Error('repository approval requires a repository');
+      if (!this.#state.repositoryScope.includes(input.repository)) {
+        this.#state.repositoryScope.push(input.repository);
+        changed = true;
+      }
     } else {
       if (input.owner !== undefined) {
         if (this.#state.nativeOwner && this.#state.nativeOwner !== input.owner)

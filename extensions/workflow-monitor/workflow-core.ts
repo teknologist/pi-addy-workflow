@@ -96,6 +96,7 @@ export type TicketRunState = {
   pendingClarification?: {
     kind: 'tracker-routing' | 'completion-transition';
     prompt: string;
+    resolution?: string;
   };
   pendingScopeRequest?: { repository: string };
   lastValidatedResult?: {
@@ -107,6 +108,13 @@ export type TicketRunState = {
     claimId?: string;
     staleClaimId?: string;
     repository?: string;
+    repositoryAppended?: boolean;
+    manual?: true;
+    pendingClarification?: {
+      kind: 'tracker-routing' | 'completion-transition';
+      prompt: string;
+      resolution?: string;
+    };
     reviewDisposition?:
       | { status: 'clean' }
       | { status: 'findings'; count: number };

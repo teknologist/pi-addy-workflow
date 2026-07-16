@@ -149,6 +149,8 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
         repository: pending.repository,
         repositoryRoot: state.ticketRun?.repositoryRoot,
         selector: pending.selector,
+        manual: !state.autoMode,
+        pendingClarification: state.ticketRun?.pendingClarification,
         actionKey: pending.key,
         attempt: Number(pending.attemptMarker.slice('attempt-'.length)),
       });

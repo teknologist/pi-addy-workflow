@@ -268,7 +268,111 @@ test('Queue selector is bound to the pending selection', () => {
     );
 });
 
-test('repository request and approval stay bound to the normalized repository', () => {
+test('CLAIM establishes normalized unique scope from authoritative markdown', () => {
+  const repositoryRoot = '/work/owner';
+  const action = pending('claim', '#9', 'claim-1');
+  const claim = {
+    id: 'claim-1',
+    owner: 'agent',
+    claimedAt: '2026-07-15T00:00:00.000Z',
+  };
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    autoPendingAction: action,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: '#9' },
+      runId: 'run-1',
+      repositoryRoot,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+    },
+  };
+  const result = formatTicketResultEnvelope({
+    schemaVersion: 1,
+    kind: 'ticket-phase-result',
+    operation: 'claim',
+    outcome: 'succeeded',
+    source: state.ticketRun.source,
+    runId: state.ticketRun.runId,
+    claimId: claim.id,
+    claim,
+    actionKey: action.key,
+    attempt: 1,
+    postRevision: 'rev-claim',
+    lifecycle: state.ticketRun.lifecycle,
+    activity: { marker: `${action.key}:1` },
+    repositoryScope: [repositoryRoot, '/work/companion'],
+  });
+  const markdown = [
+    'Repository scope: current repository, `../companion`',
+    '**Owner repo:** `owner`',
+    '**Companion repo:** sibling `../companion`',
+  ].join('\n');
+
+  const accepted = ingestTicketResult(state, `${markdown}\n${result}`);
+  assert.equal(accepted.status, 'accepted');
+  assert.deepEqual(accepted.state.ticketRun?.repositoryScope, [
+    repositoryRoot,
+    '/work/companion',
+  ]);
+
+  const unnormalized = ingestTicketResult(
+    state,
+    `${markdown}\n${result.replace('/work/companion', '../companion')}`,
+  );
+  assert.equal(unnormalized.status, 'rejected');
+});
+
+test('a later CLAIM cannot replace an already locked repository scope', () => {
+  const action = pending('claim', '#9', 'claim-1');
+  const claim = {
+    id: 'claim-1',
+    owner: 'agent',
+    claimedAt: '2026-07-15T00:00:00.000Z',
+  };
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    autoPendingAction: action,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: '#9' },
+      runId: 'run-1',
+      repositoryRoot: '/work/owner',
+      claim,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['/work/owner'],
+    },
+  };
+  const result = formatTicketResultEnvelope({
+    schemaVersion: 1,
+    kind: 'ticket-phase-result',
+    operation: 'claim',
+    outcome: 'reconciled',
+    source: state.ticketRun.source,
+    runId: state.ticketRun.runId,
+    claimId: claim.id,
+    claim,
+    actionKey: action.key,
+    attempt: 1,
+    postRevision: 'rev-claim',
+    lifecycle: state.ticketRun.lifecycle,
+    activity: { marker: `${action.key}:1` },
+    repositoryScope: ['/work/owner', '/work/extra'],
+  });
+
+  assert.equal(
+    ingestTicketResult(
+      state,
+      `Repository scope: current repository, ../extra\n${result}`,
+    ).status,
+    'rejected',
+  );
+});
+
+test('explicit add-repository approval expands locked scope once', () => {
   const repository = '/repo/extra';
   const claimId = 'claim-1';
   const run = {
@@ -306,35 +410,21 @@ test('repository request and approval stay bound to the normalized repository', 
       repositoryScope,
     });
 
-  const request = pending('add-repository', '#9', claimId, repository);
-  const requested = ingestTicketResult(
+  const approval = pending('add-repository', '#9', claimId, repository);
+  const approved = ingestTicketResult(
     {
       ...createInitialWorkflowState(),
       executionSource: 'ticket' as const,
-      autoPendingAction: request,
+      autoPendingAction: approval,
       ticketRun: run,
     },
-    resultFor(request, 'add-repository', ['/repo']),
-  );
-  assert.equal(requested.status, 'accepted');
-  assert.deepEqual(requested.state.ticketRun?.pendingScopeRequest, {
-    repository,
-  });
-
-  const approval = pending(
-    'repository-scope-approval',
-    '#9',
-    claimId,
-    repository,
-  );
-  const approved = ingestTicketResult(
-    {
-      ...requested.state,
-      autoPendingAction: approval,
-    },
-    resultFor(approval, 'repository-scope-approval', ['/repo', repository]),
+    resultFor(approval, 'add-repository', ['/repo', repository]),
   );
   assert.equal(approved.status, 'accepted');
+  assert.deepEqual(approved.state.ticketRun?.repositoryScope, [
+    '/repo',
+    repository,
+  ]);
   assert.equal(approved.state.ticketRun?.pendingScopeRequest, undefined);
 
   const persistedApproval = parsePersistedWorkflowState(
@@ -342,10 +432,63 @@ test('repository request and approval stay bound to the normalized repository', 
   )!;
   const duplicate = ingestTicketResult(
     persistedApproval,
-    resultFor(approval, 'repository-scope-approval', ['/repo', repository]),
+    resultFor(approval, 'add-repository', ['/repo', repository]),
   );
   assert.equal(duplicate.status, 'duplicate');
   assert.equal(duplicate.state, persistedApproval);
+});
+
+test('duplicate add-repository preserves scope when the repository already existed', () => {
+  const repository = '/repo/extra';
+  const claim = {
+    id: 'claim-1',
+    owner: 'agent',
+    claimedAt: '2026-07-15T00:00:00.000Z',
+  };
+  const action = pending('add-repository', '#9', claim.id, repository);
+  const result = formatTicketResultEnvelope({
+    schemaVersion: 1,
+    kind: 'ticket-phase-result',
+    operation: 'add-repository',
+    outcome: 'reconciled',
+    source: { kind: 'github', ref: '#9' },
+    runId: 'run-1',
+    claimId: claim.id,
+    claim,
+    repository,
+    actionKey: action.key,
+    attempt: 1,
+    postRevision: 'rev-existing',
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    activity: { marker: `${action.key}:1` },
+    repositoryScope: ['/repo', repository],
+  });
+  const accepted = ingestTicketResult(
+    {
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      autoPendingAction: action,
+      ticketRun: {
+        schemaVersion: 1,
+        source: { kind: 'github', ref: '#9' },
+        runId: 'run-1',
+        claim,
+        lifecycle: { implemented: false, verified: false, reviewed: false },
+        repositoryScope: ['/repo', repository],
+      },
+    },
+    result,
+  );
+  assert.equal(accepted.status, 'accepted');
+  assert.equal(
+    accepted.state.ticketRun?.lastValidatedResult?.repositoryAppended,
+    false,
+  );
+
+  const persisted = parsePersistedWorkflowState(
+    serializeWorkflowState(accepted.state),
+  )!;
+  assert.equal(ingestTicketResult(persisted, result).status, 'duplicate');
 });
 
 test('unclaimed STATUS ingestion does not require an active Ticket run', () => {
@@ -427,6 +570,79 @@ test('claim and release apply the authoritative claim snapshot', () => {
       assert.equal(ingestion.status, 'accepted');
       assert.deepEqual(ingestion.state.ticketRun?.claim, claim ?? undefined);
     }
+});
+
+test('persisted blocked clarification replays only with the exact manual context', () => {
+  const claim = {
+    id: 'claim-1',
+    owner: 'agent',
+    claimedAt: '2026-07-15T00:00:00.000Z',
+  };
+  const state = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    ticketRun: {
+      schemaVersion: 1 as const,
+      source: { kind: 'github' as const, ref: '#9' },
+      runId: 'run-1',
+      claim,
+      lifecycle: { implemented: false, verified: false, reviewed: false },
+      repositoryScope: ['.'],
+    },
+  };
+  const action = pendingAutoActionForPrompt(
+    '/addy-build --ticket #9',
+    state,
+    undefined,
+    'next-action',
+    'ignored',
+  );
+  assert.equal(action.executionSource, 'ticket');
+  if (action.executionSource !== 'ticket')
+    assert.fail('expected Ticket action');
+  const clarification = {
+    kind: 'completion-transition' as const,
+    prompt: 'Close or keep open?',
+  };
+  const result = {
+    schemaVersion: 1 as const,
+    kind: 'ticket-phase-result' as const,
+    operation: 'build' as const,
+    outcome: 'blocked' as const,
+    source: state.ticketRun.source,
+    runId: state.ticketRun.runId,
+    claimId: claim.id,
+    claim,
+    actionKey: action.key,
+    attempt: Number(action.attemptMarker.slice('attempt-'.length)),
+    postRevision: 'rev-blocked',
+    lifecycle: state.ticketRun.lifecycle,
+    repositoryScope: state.ticketRun.repositoryScope,
+    clarification,
+  };
+  const accepted = ingestTicketResult(
+    { ...state, autoPendingAction: action },
+    formatTicketResultEnvelope(result),
+  );
+  assert.equal(accepted.status, 'accepted');
+
+  const persisted = parsePersistedWorkflowState(
+    serializeWorkflowState(accepted.state),
+  )!;
+  assert.equal(
+    ingestTicketResult(persisted, formatTicketResultEnvelope(result)).status,
+    'duplicate',
+  );
+  assert.equal(
+    ingestTicketResult(
+      persisted,
+      formatTicketResultEnvelope({
+        ...result,
+        clarification: { ...clarification, prompt: 'Use a different state?' },
+      }),
+    ).status,
+    'rejected',
+  );
 });
 
 test('phase duplicate rejects altered operation, source, claim, repository, or outcome', () => {
