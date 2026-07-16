@@ -605,7 +605,7 @@ test('Ticket Slice parsing rejects null, empty, duplicate-normalized, unknown, m
         valid,
         { key: ' TEST-1 ', title: 'Duplicate', status: 'queued' },
       ]),
-    /Duplicate Ticket Slice key/,
+    /Duplicate normalized Ticket Slice key/,
   );
   assert.throws(
     () => parseExternalProgressTicketSlices([{ ...valid, unknown: true }]),
