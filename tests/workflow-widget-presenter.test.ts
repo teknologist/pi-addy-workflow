@@ -808,6 +808,10 @@ test('workflow widget appends selected external runs after unchanged Addy lines'
         currentItem: 'Issue #3',
         completed: 1,
         total: 3,
+        ticketSlices: [
+          { key: 'TEST-1', title: 'First ticket', status: 'queued' },
+          { key: 'TEST-2', title: 'Second ticket', status: 'queued' },
+        ],
         startedAt: '2026-07-14T12:00:00.000Z',
         updatedAt: '2026-07-14T12:00:00.000Z',
       },

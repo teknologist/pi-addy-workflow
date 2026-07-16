@@ -24,6 +24,9 @@ const SCHEMA_VERSION = 1;
 const STALE_AFTER_MS = 30 * 60 * 1000;
 const LOCK_STALE_AFTER_MS = 30_000;
 const MAX_SNAPSHOT_BYTES = 64 * 1024;
+const MAX_TICKET_SLICE_INPUT_BYTES = 56 * 1024;
+const MAX_TICKET_SLICE_DATA_BYTES = 48 * 1024;
+const MAX_TICKET_SLICES = 100;
 const MAX_LOCK_BYTES = 1_024;
 const SLEEP_BUFFER = new Int32Array(new SharedArrayBuffer(4));
 const TERMINAL_STATUSES = new Set<ExternalProgressTerminalStatus>([
@@ -50,6 +53,26 @@ const LOOP_PHASES = new Set<ExternalProgressLoopPhase>([
   'post-loop',
 ]);
 const PROGRESS_UNITS = new Set<ExternalProgressUnit>(['issues', 'waves']);
+const TICKET_SLICE_STATUSES = new Set<ExternalProgressTicketSliceStatus>([
+  'queued',
+  'implementing',
+  'verifying',
+  'reviewing',
+  'merging',
+  'done',
+  'failed',
+]);
+const TICKET_SLICE_FORWARD_STATUSES: ExternalProgressTicketSliceStatus[] = [
+  'queued',
+  'implementing',
+  'verifying',
+  'reviewing',
+  'merging',
+];
+const TICKET_SLICE_TERMINAL_STATUSES =
+  new Set<ExternalProgressTicketSliceStatus>(['done', 'failed']);
+const TICKET_SLICE_FIELDS = new Set(['key', 'title', 'status']);
+const TICKET_SLICE_UPDATE_FIELDS = new Set(['status']);
 const SNAPSHOT_FIELDS = new Set([
   'schemaVersion',
   'projectKey',
@@ -65,6 +88,7 @@ const SNAPSHOT_FIELDS = new Set([
   'startedAt',
   'updatedAt',
   'finishedAt',
+  'ticketSlices',
 ]);
 const PATCH_FIELDS = new Set([
   'status',
@@ -93,6 +117,20 @@ type ExternalProgressLoopPhase =
   | 'commit-merge'
   | 'post-loop';
 type ExternalProgressUnit = 'issues' | 'waves';
+export type ExternalProgressTicketSliceStatus =
+  | 'queued'
+  | 'implementing'
+  | 'verifying'
+  | 'reviewing'
+  | 'merging'
+  | 'done'
+  | 'failed';
+
+export type ExternalProgressTicketSlice = {
+  key: string;
+  title: string;
+  status: ExternalProgressTicketSliceStatus;
+};
 
 export type IssueImplementationProgressSnapshot = {
   schemaVersion: 1;
@@ -109,6 +147,7 @@ export type IssueImplementationProgressSnapshot = {
   startedAt: string;
   updatedAt: string;
   finishedAt?: string;
+  ticketSlices?: ExternalProgressTicketSlice[];
 };
 
 export type ExternalProgressDiagnostic = {
@@ -166,6 +205,23 @@ export type UpdateExternalProgressInput = StorageOptions & {
       | 'total'
     >
   >;
+  now?: Date;
+};
+
+export type InitializeExternalProgressTicketSlicesInput = StorageOptions & {
+  runId: string;
+  cwd?: string;
+  source?: ExternalProgressSource;
+  ticketSlices: unknown;
+  now?: Date;
+};
+
+export type UpdateExternalProgressTicketSliceInput = StorageOptions & {
+  runId: string;
+  cwd?: string;
+  source?: ExternalProgressSource;
+  key: string;
+  patch: unknown;
   now?: Date;
 };
 
@@ -305,6 +361,10 @@ export function parseIssueImplementationProgressSnapshot(
   } else if (finishedAt !== undefined) {
     throw new Error('Active snapshots cannot have finishedAt');
   }
+  const ticketSlices =
+    value.ticketSlices === undefined
+      ? undefined
+      : parseExternalProgressTicketSlices(value.ticketSlices);
 
   return omitUndefined({
     schemaVersion: SCHEMA_VERSION,
@@ -321,7 +381,47 @@ export function parseIssueImplementationProgressSnapshot(
     startedAt,
     updatedAt,
     finishedAt,
+    ticketSlices,
   });
+}
+
+/** Normalizes and validates one complete, ordered Ticket Slice collection. */
+export function parseExternalProgressTicketSlices(
+  value: unknown,
+): ExternalProgressTicketSlice[] {
+  if (!Array.isArray(value)) throw new Error('ticketSlices must be an array');
+  if (value.length === 0) throw new Error('ticketSlices must not be empty');
+  if (value.length > MAX_TICKET_SLICES)
+    throw new Error(`ticketSlices exceeds ${MAX_TICKET_SLICES} children`);
+
+  const keys = new Set<string>();
+  const ticketSlices = value.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`Invalid ticketSlices[${index}]`);
+    for (const key of Object.keys(entry)) {
+      if (!TICKET_SLICE_FIELDS.has(key))
+        throw new Error(`Unknown ticketSlices[${index}] field`);
+    }
+    const key = normalizedTicketSliceKey(
+      entry.key,
+      `ticketSlices[${index}].key`,
+    );
+    if (keys.has(key)) throw new Error('Duplicate normalized Ticket Slice key');
+    keys.add(key);
+    return {
+      key,
+      title: normalizedTicketSliceTitle(
+        entry.title,
+        `ticketSlices[${index}].title`,
+      ),
+      status: requiredEnum(entry, 'status', TICKET_SLICE_STATUSES),
+    };
+  });
+  if (
+    Buffer.byteLength(JSON.stringify(ticketSlices)) >
+    MAX_TICKET_SLICE_DATA_BYTES
+  )
+    throw new Error('ticketSlices exceeds 48 KiB of serialized child data');
+  return ticketSlices;
 }
 
 /** Starts or reuses the one active progress run for a project/source pair. */
@@ -332,7 +432,14 @@ export function startExternalProgress(
   return withRunsDirectory(projectKey, input, true, () =>
     withFileLock('.start.lock', () => {
       const stored = readProjectFromRunsDirectory(projectKey);
-      if (stored.diagnostics.length > 0) {
+      if (
+        stored.diagnostics.some(
+          (diagnostic) =>
+            !diagnostic.message.startsWith(
+              'Invalid Ticket Slice data omitted:',
+            ),
+        )
+      ) {
         throw new Error('Cannot establish external progress run ownership');
       }
       const existing = stored.snapshots
@@ -408,6 +515,84 @@ export function updateExternalProgress(
   );
 }
 
+/** Atomically initializes the complete ordered Ticket Slice collection. */
+export function initializeExternalProgressTicketSlices(
+  input: InitializeExternalProgressTicketSlicesInput,
+): IssueImplementationProgressSnapshot {
+  assertTicketSliceInitializerInputSize(input.ticketSlices);
+  const ticketSlices = parseExternalProgressTicketSlices(input.ticketSlices);
+  if (ticketSlices.some((ticketSlice) => ticketSlice.status !== 'queued'))
+    throw new Error('Ticket Slice collections must start queued');
+  const located = locateRun(input.runId, input);
+  return withRunsDirectory(located.projectKey, input, false, () =>
+    withFileLock(runLockPath(located.file, input.runId), () => {
+      const previous = readSnapshotFile(located.file);
+      if (
+        TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
+      ) {
+        throw new Error('Terminal external progress runs are immutable');
+      }
+      if (previous.ticketSlices !== undefined) {
+        if (ticketSlicesEqual(previous.ticketSlices, ticketSlices))
+          return previous;
+        throw new Error('Ticket Slice collection is already initialized');
+      }
+      const next = parseIssueImplementationProgressSnapshot({
+        ...previous,
+        ticketSlices,
+        updatedAt: isoNowAfter(input.now, previous.updatedAt),
+      });
+      persistSnapshot(next, true);
+      return next;
+    }),
+  );
+}
+
+/** Applies one validated status update without replacing or reordering siblings. */
+export function updateExternalProgressTicketSlice(
+  input: UpdateExternalProgressTicketSliceInput,
+): IssueImplementationProgressSnapshot {
+  const key = normalizedTicketSliceKey(input.key, 'key');
+  if (!isRecord(input.patch))
+    throw new Error('Ticket Slice patch must be an object');
+  for (const [field, value] of Object.entries(input.patch)) {
+    if (!TICKET_SLICE_UPDATE_FIELDS.has(field) || value === undefined)
+      throw new Error(`Unknown Ticket Slice patch field: ${field}`);
+  }
+  const status = requiredEnum(input.patch, 'status', TICKET_SLICE_STATUSES);
+  const located = locateRun(input.runId, input);
+  return withRunsDirectory(located.projectKey, input, false, () =>
+    withFileLock(runLockPath(located.file, input.runId), () => {
+      const previous = readSnapshotFile(located.file);
+      if (
+        TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
+      ) {
+        throw new Error('Terminal external progress runs are immutable');
+      }
+      if (previous.ticketSlices === undefined)
+        throw new Error('Ticket Slice collection is not initialized');
+      const index = previous.ticketSlices.findIndex(
+        (ticketSlice) => ticketSlice.key === key,
+      );
+      if (index === -1) throw new Error(`Unknown Ticket Slice key: ${key}`);
+      const previousStatus = previous.ticketSlices[index]!.status;
+      if (previousStatus === status) return previous;
+      validateTicketSliceTransition(previousStatus, status);
+      const ticketSlices = previous.ticketSlices.map(
+        (ticketSlice, childIndex) =>
+          childIndex === index ? { ...ticketSlice, status } : ticketSlice,
+      );
+      const next = parseIssueImplementationProgressSnapshot({
+        ...previous,
+        ticketSlices,
+        updatedAt: isoNowAfter(input.now, previous.updatedAt),
+      });
+      persistSnapshot(next, true);
+      return next;
+    }),
+  );
+}
+
 /** Marks one active run terminal, then best-effort retains the newest ten terminals. */
 export function finishExternalProgress(
   input: FinishExternalProgressInput,
@@ -423,6 +608,14 @@ export function finishExternalProgress(
         TERMINAL_STATUSES.has(previous.status as ExternalProgressTerminalStatus)
       ) {
         throw new Error('Terminal external progress runs are immutable');
+      }
+      if (
+        previous.ticketSlices?.some(
+          (ticketSlice) =>
+            !TICKET_SLICE_TERMINAL_STATUSES.has(ticketSlice.status),
+        )
+      ) {
+        throw new Error('Cannot finish with non-terminal Ticket Slices');
       }
       const timestamp = isoNowAfter(input.now, previous.updatedAt);
       const finished = parseIssueImplementationProgressSnapshot({
@@ -579,11 +772,15 @@ function readProjectFromRunsDirectory(
     name.endsWith('.json'),
   )) {
     try {
-      const parsed = readSnapshotFile(file);
+      const { snapshot: parsed, ticketSliceDiagnostic } =
+        readSnapshotFileForProject(file);
       if (parsed.projectKey !== projectKey || file !== `${parsed.runId}.json`) {
         throw new Error('Snapshot does not belong to this project/path');
       }
       snapshots.push(parsed);
+      if (ticketSliceDiagnostic !== undefined) {
+        diagnostics.push({ file, message: ticketSliceDiagnostic });
+      }
     } catch (error) {
       diagnostics.push({ file, message: conciseError(error) });
     }
@@ -918,14 +1115,38 @@ function readSnapshotFile(file: string): IssueImplementationProgressSnapshot {
   );
 }
 
+function readSnapshotFileForProject(file: string): {
+  snapshot: IssueImplementationProgressSnapshot;
+  ticketSliceDiagnostic?: string;
+} {
+  const value: unknown = JSON.parse(
+    readBoundedRegularFile(file, MAX_SNAPSHOT_BYTES).contents,
+  );
+  if (!isRecord(value) || value.ticketSlices === undefined) {
+    return { snapshot: parseIssueImplementationProgressSnapshot(value) };
+  }
+  try {
+    return { snapshot: parseIssueImplementationProgressSnapshot(value) };
+  } catch (error) {
+    const { ticketSlices: _invalidTicketSlices, ...aggregate } = value;
+    return {
+      snapshot: parseIssueImplementationProgressSnapshot(aggregate),
+      ticketSliceDiagnostic: `Invalid Ticket Slice data omitted: ${conciseError(error)}`,
+    };
+  }
+}
+
 function persistSnapshot(
   snapshot: IssueImplementationProgressSnapshot,
   overwrite: boolean,
 ): void {
   const destination = `${snapshot.runId}.json`;
   const temp = `.${destination}.tmp-${process.pid}-${randomUUID()}`;
+  const contents = `${JSON.stringify(snapshot)}\n`;
+  if (Buffer.byteLength(contents) > MAX_SNAPSHOT_BYTES)
+    throw new Error('Snapshot exceeds the size limit');
   try {
-    writeFileSync(temp, `${JSON.stringify(snapshot)}\n`, {
+    writeFileSync(temp, contents, {
       encoding: 'utf8',
       mode: 0o600,
       flag: 'wx',
@@ -1251,6 +1472,75 @@ function compareTerminalSnapshots(
 ): number {
   const timeDifference = Date.parse(b.finishedAt!) - Date.parse(a.finishedAt!);
   return timeDifference || b.runId.localeCompare(a.runId);
+}
+
+function validateTicketSliceTransition(
+  previous: ExternalProgressTicketSliceStatus,
+  next: ExternalProgressTicketSliceStatus,
+): void {
+  if (previous === 'done' || previous === 'failed')
+    throw new Error(`Terminal Ticket Slice status ${previous} is immutable`);
+  if (next === 'failed') return;
+  if (next === 'done') {
+    if (previous === 'merging') return;
+    throw new Error(`Invalid Ticket Slice transition: ${previous} -> ${next}`);
+  }
+  if (
+    (previous === 'reviewing' && next === 'verifying') ||
+    (previous === 'merging' && (next === 'verifying' || next === 'reviewing'))
+  ) {
+    return;
+  }
+  const previousIndex = TICKET_SLICE_FORWARD_STATUSES.indexOf(previous);
+  const nextIndex = TICKET_SLICE_FORWARD_STATUSES.indexOf(next);
+  if (previousIndex !== -1 && nextIndex > previousIndex) return;
+  throw new Error(`Invalid Ticket Slice transition: ${previous} -> ${next}`);
+}
+
+function assertTicketSliceInitializerInputSize(value: unknown): void {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    throw new Error('ticketSlices input must be serializable JSON');
+  }
+  if (
+    serialized === undefined ||
+    Buffer.byteLength(serialized) > MAX_TICKET_SLICE_INPUT_BYTES
+  ) {
+    throw new Error('ticketSlices initializer input exceeds 56 KiB');
+  }
+}
+
+function ticketSlicesEqual(
+  left: ExternalProgressTicketSlice[],
+  right: ExternalProgressTicketSlice[],
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function normalizedTicketSliceKey(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new Error(`Invalid ${field}`);
+  if (/[<>&\u0000-\u001F\u007F]/u.test(value))
+    throw new Error(`${field} contains markup or control delimiters`);
+  const normalized = value.normalize('NFC').replace(/\s+/gu, ' ').trim();
+  if (!normalized) throw new Error(`Invalid ${field}`);
+  if (Array.from(normalized).length > 64)
+    throw new Error(`${field} exceeds 64 Unicode code points`);
+  return normalized;
+}
+
+function normalizedTicketSliceTitle(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new Error(`Invalid ${field}`);
+  const normalized = value
+    .normalize('NFC')
+    .replace(/[\u0000-\u001F\u007F]+/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (!normalized) throw new Error(`Invalid ${field}`);
+  if (Array.from(normalized).length > 256)
+    throw new Error(`${field} exceeds 256 Unicode code points`);
+  return normalized;
 }
 
 function requiredString(value: Record<string, unknown>, field: string): string {

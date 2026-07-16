@@ -22,6 +22,7 @@ import {
 } from './ticket-presentation.ts';
 import {
   selectExternalProgress,
+  type ExternalProgressTicketSlice,
   type SelectedExternalProgress,
 } from './external-progress.ts';
 
@@ -98,6 +99,7 @@ type DashboardExternalRun = {
   startedAt: string;
   updatedAt: string;
   finishedAt?: string;
+  ticketSlices?: ExternalProgressTicketSlice[];
   stale: boolean;
 };
 
@@ -523,6 +525,9 @@ function dashboardExternalRun({
     startedAt: snapshot.startedAt,
     updatedAt: snapshot.updatedAt,
     finishedAt: snapshot.finishedAt,
+    ticketSlices: snapshot.ticketSlices?.map((ticketSlice) => ({
+      ...ticketSlice,
+    })),
     stale,
   };
 }
@@ -741,6 +746,11 @@ export function dashboardHtml(): string {
     .issue-workflow-meta { color: var(--muted); font-size: .8125rem; margin-top: .25rem; overflow-wrap: anywhere; }
     .issue-workflow-status { align-self: start; color: var(--muted); font-size: .8125rem; text-align: right; }
     .issue-workflow-boundary { color: var(--muted); font-size: .8125rem; }
+    .issue-workflow-tickets { grid-column: 1 / -1; display: grid; gap: 1px; min-width: 0; border: 1px solid var(--line-soft); background: var(--line-soft); }
+    .ticket-slice { display: grid; grid-template-columns: minmax(5rem, max-content) minmax(0, 1fr) max-content; gap: var(--space-3); align-items: baseline; min-width: 0; padding: .5rem .625rem; background: var(--surface); font-size: .8125rem; line-height: 1.35; }
+    .ticket-slice-key { color: var(--accent); font-family: var(--font-mono); overflow-wrap: anywhere; }
+    .ticket-slice-title { min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+    .ticket-slice-status { color: var(--muted); white-space: nowrap; }
     .issue-workflow-warning { color: var(--warn); }
     pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-family: var(--font-mono); font-size: .75rem; line-height: 1.5; color: var(--text); font-variant-numeric: tabular-nums; }
 
@@ -749,7 +759,7 @@ export function dashboardHtml(): string {
     @keyframes currentStepPulse { 0%, 100% { border-color: oklch(0.42 0.07 78); } 50% { border-color: var(--warn); } }
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; } }
     @media (max-width: 1120px) { .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .progress-grid { grid-template-columns: 1fr; } summary.slice-summary { grid-template-columns: 1fr repeat(3, max-content); } .hide-md { display: none; } }
-    @media (max-width: 720px) { body { padding: .875rem; } header { flex-direction: column; align-items: stretch; } .header-actions { justify-content: flex-start; } h1 { font-size: 1.3125rem; } .summary { grid-template-columns: 1fr; } .metric, .section { padding: 12px; } .section-head { align-items: start; flex-direction: column; } .phase { flex: 1 1 96px; text-align: center; } summary.slice-summary { grid-template-columns: 1fr; gap: 6px; } .slice-stat { text-align: left; } table { min-width: 760px; } }
+    @media (max-width: 720px) { body { padding: .875rem; } header { flex-direction: column; align-items: stretch; } .header-actions { justify-content: flex-start; } h1 { font-size: 1.3125rem; } .summary { grid-template-columns: 1fr; } .metric, .section { padding: 12px; } .section-head { align-items: start; flex-direction: column; } .phase { flex: 1 1 96px; text-align: center; } summary.slice-summary { grid-template-columns: 1fr; gap: 6px; } .slice-stat { text-align: left; } .ticket-slice { grid-template-columns: minmax(0, 1fr) max-content; gap: .25rem var(--space-2); } .ticket-slice-title { grid-column: 1 / -1; } table { min-width: 760px; } }
   </style>
 </head>
 <body>
@@ -861,7 +871,9 @@ export function dashboardHtml(): string {
       const boundary = run.loopPhase === 'pre-loop' || run.loopPhase === 'post-loop';
       const phase = escapeHtml(run.loopPhase);
       const progress = escapeHtml(issueWorkflowProgress(run));
-      return '<div class="issue-workflow"><div><div class="issue-workflow-primary">' + phase + (progress ? ' · ' + progress : '') + '</div><div class="issue-workflow-meta">' + escapeHtml(run.currentItem) + '</div><div class="issue-workflow-meta">' + escapeHtml(run.source) + (boundary ? ' <span class="issue-workflow-boundary">boundary state</span>' : '') + '</div></div><div class="issue-workflow-status">' + escapeHtml(run.status) + (run.stale ? ' · stale' : '') + '</div></div>';
+      const ticketSlices = (run.ticketSlices || []).map((ticketSlice) => '<div class="ticket-slice"><span class="ticket-slice-key">' + escapeHtml(ticketSlice.key) + '</span><span class="ticket-slice-title">' + escapeHtml(ticketSlice.title) + '</span><span class="ticket-slice-status">' + escapeHtml(ticketSlice.status) + '</span></div>').join('');
+      const tickets = ticketSlices ? '<div class="issue-workflow-tickets" aria-label="Ticket Slices">' + ticketSlices + '</div>' : '';
+      return '<div class="issue-workflow"><div><div class="issue-workflow-primary">' + phase + (progress ? ' · ' + progress : '') + '</div><div class="issue-workflow-meta">' + escapeHtml(run.currentItem) + '</div><div class="issue-workflow-meta">' + escapeHtml(run.source) + (boundary ? ' <span class="issue-workflow-boundary">boundary state</span>' : '') + '</div></div><div class="issue-workflow-status">' + escapeHtml(run.status) + (run.stale ? ' · stale' : '') + '</div>' + tickets + '</div>';
     }
     function renderIssueWorkflows(data) {
       const runs = data.externalRuns || [];

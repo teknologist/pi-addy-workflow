@@ -2,8 +2,10 @@
 import { readSync } from 'node:fs';
 import {
   finishExternalProgress,
+  initializeExternalProgressTicketSlices,
   startExternalProgress,
   updateExternalProgress,
+  updateExternalProgressTicketSlice,
 } from '../extensions/workflow-monitor/external-progress.ts';
 
 type ExternalProgressSource = Parameters<
@@ -17,9 +19,11 @@ const USAGE = `Usage:
   addy-progress start --cwd PATH --source SOURCE
   addy-progress update --cwd PATH --source SOURCE --run UUID --stdin
   addy-progress finish --cwd PATH --source SOURCE --run UUID --stdin
+  addy-progress init-tickets --cwd PATH --source SOURCE --run UUID --stdin
+  addy-progress update-ticket --cwd PATH --source SOURCE --run UUID --ticket KEY --stdin
 
 SOURCE is df-implement-issues or implement-from-issues.
-update and finish read one JSON object from stdin.
+Mutation commands read one JSON object from stdin.
 `;
 
 function parseArgs(args: string[]): {
@@ -27,6 +31,7 @@ function parseArgs(args: string[]): {
   cwd?: string;
   source?: string;
   runId?: string;
+  ticketKey?: string;
   stdin: boolean;
 } {
   const command = args[0] ?? '';
@@ -35,6 +40,7 @@ function parseArgs(args: string[]): {
     cwd?: string;
     source?: string;
     runId?: string;
+    ticketKey?: string;
     stdin: boolean;
   } = { command, stdin: false };
   const seen = new Set<string>();
@@ -52,6 +58,7 @@ function parseArgs(args: string[]): {
     if (arg === '--cwd') result.cwd = value;
     else if (arg === '--source') result.source = value;
     else if (arg === '--run') result.runId = value;
+    else if (arg === '--ticket') result.ticketKey = value;
     else throw new Error(`unknown option: ${arg}`);
     index += 1;
   }
@@ -63,8 +70,7 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
-function readStdinObject(): Record<string, unknown> {
-  const limit = 16 * 1024;
+function readStdinObject(limit = 16 * 1024): Record<string, unknown> {
   const input = Buffer.alloc(limit + 1);
   let bytesRead = 0;
   while (bytesRead < input.length) {
@@ -90,13 +96,17 @@ function main(args: string[]): void {
     return;
   }
   const parsed = parseArgs(args);
-  if (!['start', 'update', 'finish'].includes(parsed.command))
+  if (
+    !['start', 'update', 'finish', 'init-tickets', 'update-ticket'].includes(
+      parsed.command,
+    )
+  )
     throw new Error(`unknown command: ${parsed.command || '(missing)'}`);
   const cwd = required(parsed.cwd, '--cwd');
   const source = required(parsed.source, '--source') as ExternalProgressSource;
 
   if (parsed.command === 'start') {
-    if (parsed.stdin || parsed.runId)
+    if (parsed.stdin || parsed.runId || parsed.ticketKey)
       throw new Error('start accepts only --cwd and --source');
     const snapshot = startExternalProgress({ cwd, source });
     process.stdout.write(`${snapshot.runId}\n`);
@@ -105,7 +115,36 @@ function main(args: string[]): void {
 
   const runId = required(parsed.runId, '--run');
   if (!parsed.stdin) throw new Error('--stdin is required');
-  const payload = readStdinObject();
+  const payload = readStdinObject(
+    parsed.command === 'init-tickets' ? 56 * 1024 : undefined,
+  );
+  if (parsed.command === 'init-tickets') {
+    if (parsed.ticketKey)
+      throw new Error('init-tickets does not accept --ticket');
+    for (const key of Object.keys(payload)) {
+      if (key !== 'ticketSlices')
+        throw new Error(`unknown init-tickets field: ${key}`);
+    }
+    initializeExternalProgressTicketSlices({
+      cwd,
+      source,
+      runId,
+      ticketSlices: payload.ticketSlices,
+    });
+    return;
+  }
+  if (parsed.command === 'update-ticket') {
+    updateExternalProgressTicketSlice({
+      cwd,
+      source,
+      runId,
+      key: required(parsed.ticketKey, '--ticket'),
+      patch: payload,
+    });
+    return;
+  }
+  if (parsed.ticketKey)
+    throw new Error(`${parsed.command} does not accept --ticket`);
   if (parsed.command === 'update') {
     updateExternalProgress({
       cwd,
