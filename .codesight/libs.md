@@ -133,8 +133,8 @@
   - function externalProgressRoot: ({...}) => string
   - function externalProgressRunsDir: ({...}, homeDir, }) => string
   - function parseIssueImplementationProgressSnapshot: (value) => IssueImplementationProgressSnapshot
-  - function startExternalProgress: (input) => IssueImplementationProgressSnapshot
-  - _...15 more_
+  - function parseExternalProgressTicketSlices: (value) => ExternalProgressTicketSlice[]
+  - _...22 more_
 - `extensions/workflow-monitor/fresh-continuation-delivery.ts`
   - function createPendingFreshDelivery: (deps, consumedAutoFreshKeys) => void
   - type FreshContinuationDispatchOptions
