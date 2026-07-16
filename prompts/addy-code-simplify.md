@@ -10,9 +10,11 @@ Pi adaptation of Addy Osmani's `code-simplify` command.
 
 Use the Pi `code-simplification` skill.
 
-Argument: `/addy-code-simplify [plan-path]`.
+Argument: `/addy-code-simplify [plan-path]` or `/addy-code-simplify --ticket <ticket-ref>`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
+
+Ticket form requires the current run's live claim, is allowed only after BUILD and before VERIFY, and is lifecycle-status neutral. The workflow monitor supplies the source-neutral tracker contract.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available, otherwise simplify the specified/recent change scope.
 

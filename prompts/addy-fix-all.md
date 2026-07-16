@@ -8,9 +8,11 @@ argument-hint: "[plan-path]"
 
 Pi adaptation of Addy Osmani's fix-after-review loop.
 
-Argument: `/addy-fix-all [plan-path]`.
+Argument: `/addy-fix-all [plan-path]` or `/addy-fix-all --ticket <ticket-ref>`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
+
+Ticket form requires the current run's live claim and does not bypass VERIFY or REVIEW. The workflow monitor supplies the source-neutral tracker contract and records the phase Activity without changing lifecycle status directly.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available.
 

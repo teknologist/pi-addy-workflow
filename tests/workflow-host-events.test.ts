@@ -20,6 +20,10 @@ test('workflow host events parse command args from strings and objects', () => {
     '--fresh',
     'before-step',
   ]);
+  assert.deepEqual(parseCommandArgs({ input: '--ticket "ENG 42"' }), [
+    '--ticket',
+    'ENG 42',
+  ]);
 });
 
 test('workflow host events parse auto fresh reasons', () => {

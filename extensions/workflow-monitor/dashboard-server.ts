@@ -17,6 +17,10 @@ import {
 } from './workflow-state.ts';
 import type { WorkflowPhase, WorkflowTaskStats } from './workflow-core.ts';
 import {
+  boundedTicketDisplay,
+  ticketLifecycleFrontier,
+} from './ticket-presentation.ts';
+import {
   selectExternalProgress,
   type SelectedExternalProgress,
 } from './external-progress.ts';
@@ -68,8 +72,19 @@ export type DashboardSnapshot = {
   tasks: DashboardTask[];
   sliceGroups: DashboardSliceGroup[];
   planGroups: DashboardPlanGroup[];
+  ticket?: DashboardTicket;
   externalRuns?: DashboardExternalRun[];
   externalProgressWarning?: string;
+};
+
+type DashboardTicket = {
+  source: { kind: 'github' | 'linear' | 'local'; ref: string };
+  lifecycle: { implemented: boolean; verified: boolean; reviewed: boolean };
+  frontier: 'build' | 'verify' | 'review' | 'finish';
+  claim: 'claimed' | 'unclaimed';
+  pausedReason?: string;
+  selector?: { kind: 'default' | 'label' | 'status'; value: string };
+  queue?: { active: true; lastOutcome?: string };
 };
 
 type DashboardExternalRun = {
@@ -455,6 +470,44 @@ function planGroups(
     });
 }
 
+function dashboardTicket(state: WorkflowState): DashboardTicket | undefined {
+  const run = state.ticketRun;
+  if (!run) return undefined;
+  const selector = run.queueSelector ?? state.ticketQueue?.selector;
+  return {
+    source: {
+      kind: run.source.kind,
+      ref: boundedTicketDisplay(run.source.ref),
+    },
+    lifecycle: {
+      implemented: run.lifecycle.implemented,
+      verified: run.lifecycle.verified,
+      reviewed: run.lifecycle.reviewed,
+    },
+    frontier: ticketLifecycleFrontier(run.lifecycle),
+    claim: run.claim ? 'claimed' : 'unclaimed',
+    ...(state.autoPausedReason ? { pausedReason: state.autoPausedReason } : {}),
+    ...(selector
+      ? {
+          selector: {
+            kind: selector.kind,
+            value: boundedTicketDisplay(selector.value),
+          },
+        }
+      : {}),
+    ...(state.ticketQueue
+      ? {
+          queue: {
+            active: true as const,
+            ...(run.lastValidatedResult?.operation === 'select'
+              ? { lastOutcome: run.lastValidatedResult.outcome }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 function dashboardExternalRun({
   snapshot,
   stale,
@@ -594,6 +647,9 @@ export function dashboardSnapshot(
     tasks,
     sliceGroups: slices,
     planGroups: planGroups(slices, state?.activePlan),
+    ...(state?.executionSource === 'ticket'
+      ? { ticket: dashboardTicket(state) }
+      : {}),
     ...externalProgress,
   };
 }
@@ -704,15 +760,15 @@ export function dashboardHtml(): string {
     </header>
     <div class="muted topline" id="cwd"></div>
     <section class="status-strip"><div><div class="metric-label">Phase</div><div class="metric-value" id="phase">-</div></div><div class="phases" id="phases"></div></section>
-    <section class="summary">
+    <section class="summary" id="planChrome">
       <div class="metric"><div class="metric-label">Active plan</div><div class="metric-value" id="plan">-</div><div class="metric-note" id="planSuite"></div></div>
       <div class="metric"><div class="metric-label">Total tasks</div><div class="metric-value" id="totalPercent">-</div><div class="bar"><div class="fill" id="totalFill"></div></div><div class="metric-note" id="totalLabel"></div></div>
       <div class="metric"><div class="metric-label">Current task</div><div class="metric-value" id="task">-</div><div class="metric-note" id="taskSummary"></div><div class="metric-note next-line">Next: <span id="nextTask">-</span><span id="nextSummary"></span></div></div>
     </section>
     <section class="progress-grid" id="progress"></section>
     <section class="panel section" id="issueWorkflows" hidden><div class="section-head"><div class="section-title">Issue workflows</div></div><div class="issue-workflow-list" id="issueWorkflowRuns"></div></section>
-    <section class="panel section"><div class="section-head"><div class="section-title">Slices</div></div><div class="slice-list" id="slices"></div></section>
-    <section class="panel section"><div class="section-head"><div class="section-title">Raw state summary</div></div><pre id="raw"></pre></section>
+    <section class="panel section" id="planSlices"><div class="section-head"><div class="section-title">Slices</div></div><div class="slice-list" id="slices"></div></section>
+    <section class="panel section" id="rawState"><div class="section-head"><div class="section-title">Raw state summary</div></div><pre id="raw"></pre></section>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
@@ -779,6 +835,21 @@ export function dashboardHtml(): string {
       if (!selected) return '';
       return '<div class="panel progress-card"><div class="progress-head"><div class="metric-label">Plan performance</div><strong>' + escapeHtml(selected.duration) + '</strong></div><div class="metric-note">avg ' + escapeHtml(selected.averageTaskDuration) + ' / timed task · ' + selected.timedTaskCount + ' timed · ' + selected.turns + ' turns</div><div class="metric-note">' + selected.verifyRuns + ' verify · ' + selected.reviewRuns + ' review · ' + selected.issues + ' issues</div></div>';
     }
+    function ticketLifecycle(ticket) {
+      const phases = [
+        ['build', ticket.lifecycle.implemented],
+        ['verify', ticket.lifecycle.verified],
+        ['review', ticket.lifecycle.reviewed],
+        ['finish', false],
+      ];
+      return phases.map(([name, complete]) => '<span class="phase phase-' + name + ' ' + (complete ? 'complete' : name === ticket.frontier ? 'active' : 'pending') + '">' + name + '</span>').join('');
+    }
+    function ticketQueueCard(ticket) {
+      const selector = ticket.selector ? 'selector ' + escapeHtml(ticket.selector.kind) + ':' + escapeHtml(ticket.selector.value) : 'manual run';
+      const queue = ticket.queue ? 'queue active' + (ticket.queue.lastOutcome ? ' · ' + escapeHtml(ticket.queue.lastOutcome) : '') : 'queue inactive';
+      const pause = ticket.pausedReason ? ' · paused ' + escapeHtml(ticket.pausedReason) : '';
+      return '<div class="panel progress-card"><div class="progress-head"><div class="metric-label">Ticket queue</div><strong>' + escapeHtml(ticket.claim) + '</strong></div><div class="metric-value">' + escapeHtml(ticket.source.kind) + ':' + escapeHtml(ticket.source.ref) + '</div><div class="metric-note">' + queue + ' · ' + selector + pause + '</div></div>';
+    }
     function issueWorkflowProgress(run) {
       const unit = run.progressUnit ? ' ' + run.progressUnit : '';
       if (Number.isInteger(run.completed) && Number.isInteger(run.total)) return run.completed + ' / ' + run.total + unit;
@@ -802,48 +873,62 @@ export function dashboardHtml(): string {
     async function refresh() {
       const res = await fetch('/api/state');
       const data = await res.json();
-      const groups = data.planGroups || [];
-      renderPlanPicker(groups);
-      currentPlan = planDefault(data);
-      $('planPicker').value = currentPlan || '';
-      const selected = groups.find((group) => group.plan === currentPlan);
-      const isActive = Boolean(selected && selected.active);
-      const selectedTasks = selected ? selected.slices.flatMap((slice) => slice.tasks) : [];
-      const selectedActiveTask = selectedTasks.find((task) => task.status === 'active');
       $('refresh').classList.remove('is-refreshing');
       void $('refresh').offsetWidth;
       $('refresh').classList.add('is-refreshing');
       $('cwd').textContent = data.cwd + ' · ' + data.stateCount + ' state file(s) · updated ' + value(data.stateLastUpdatedAt ? new Date(data.stateLastUpdatedAt).toLocaleTimeString() : undefined) + ' · refreshed ' + new Date(data.updatedAt).toLocaleTimeString();
       $('mode').textContent = data.autoMode ? 'Addy auto running' : 'Addy auto idle';
       $('mode').className = 'pill ' + (data.autoMode ? 'on' : 'off');
-      $('plan').textContent = value(selected ? selected.displayName : data.activePlanDisplayName || data.activePlan);
-      $('plan').title = value(selected ? selected.plan : data.activePlan, '');
-      $('planSuite').textContent = isActive && data.activeSuitePlanDisplayName ? 'Suite: ' + data.activeSuitePlanDisplayName : '';
-      $('phase').textContent = isActive ? value(data.currentPhase) : selected ? 'Archived plan' : '-';
-      const totalProgress = isActive ? data.progress && data.progress.totalTasks : undefined;
-      if (totalProgress) {
-        $('totalPercent').textContent = totalProgress.percent + '%';
-        $('totalFill').style.width = totalProgress.percent + '%';
-        $('totalLabel').textContent = totalProgress.current + ' / ' + totalProgress.total + ' total tasks · ' + (selected ? selected.duration : '-') + ' accumulated';
-      } else if (selected) {
-        $('totalPercent').textContent = selected.completionPercent + '%';
-        $('totalFill').style.width = selected.completionPercent + '%';
-        $('totalLabel').textContent = selected.completedTaskCount + ' / ' + selected.taskCount + ' tasks recorded · ' + selected.duration + ' accumulated';
+      if (data.ticket) {
+        $('planPicker').hidden = true;
+        $('planChrome').hidden = true;
+        $('planSlices').hidden = true;
+        $('rawState').hidden = true;
+        $('phase').textContent = 'Ticket lifecycle';
+        setHtmlIfChanged($('phases'), ticketLifecycle(data.ticket));
+        setHtmlIfChanged($('progress'), ticketQueueCard(data.ticket));
       } else {
-        $('totalPercent').textContent = '-';
-        $('totalFill').style.width = '0%';
-        $('totalLabel').textContent = 'No plan selected';
+        $('planPicker').hidden = false;
+        $('planChrome').hidden = false;
+        $('planSlices').hidden = false;
+        $('rawState').hidden = false;
+        const groups = data.planGroups || [];
+        renderPlanPicker(groups);
+        currentPlan = planDefault(data);
+        $('planPicker').value = currentPlan || '';
+        const selected = groups.find((group) => group.plan === currentPlan);
+        const isActive = Boolean(selected && selected.active);
+        const selectedTasks = selected ? selected.slices.flatMap((slice) => slice.tasks) : [];
+        const selectedActiveTask = selectedTasks.find((task) => task.status === 'active');
+        $('plan').textContent = value(selected ? selected.displayName : data.activePlanDisplayName || data.activePlan);
+        $('plan').title = value(selected ? selected.plan : data.activePlan, '');
+        $('planSuite').textContent = isActive && data.activeSuitePlanDisplayName ? 'Suite: ' + data.activeSuitePlanDisplayName : '';
+        $('phase').textContent = isActive ? value(data.currentPhase) : selected ? 'Archived plan' : '-';
+        const totalProgress = isActive ? data.progress && data.progress.totalTasks : undefined;
+        if (totalProgress) {
+          $('totalPercent').textContent = totalProgress.percent + '%';
+          $('totalFill').style.width = totalProgress.percent + '%';
+          $('totalLabel').textContent = totalProgress.current + ' / ' + totalProgress.total + ' total tasks · ' + (selected ? selected.duration : '-') + ' accumulated';
+        } else if (selected) {
+          $('totalPercent').textContent = selected.completionPercent + '%';
+          $('totalFill').style.width = selected.completionPercent + '%';
+          $('totalLabel').textContent = selected.completedTaskCount + ' / ' + selected.taskCount + ' tasks recorded · ' + selected.duration + ' accumulated';
+        } else {
+          $('totalPercent').textContent = '-';
+          $('totalFill').style.width = '0%';
+          $('totalLabel').textContent = 'No plan selected';
+        }
+        $('task').textContent = isActive ? value([data.currentTaskIndex && ('#' + data.currentTaskIndex), data.currentTask].filter(Boolean).join(' ')) : selectedActiveTask ? value(selectedActiveTask.taskTitle || selectedActiveTask.taskId) : '-';
+        $('taskSummary').textContent = isActive ? value(data.currentTaskSummary, '') : selected ? 'No active task for this archived plan.' : '';
+        $('nextTask').textContent = isActive ? value(data.nextTask) : '-';
+        $('nextSummary').textContent = isActive ? (data.nextTaskSummary && data.nextTaskSummary !== data.nextTask ? ' · ' + data.nextTaskSummary : '') : selected ? ' · Select another plan from the dropdown to inspect its history.' : '';
+        setHtmlIfChanged($('progress'), isActive ? progressCard('Current slice', data.progress && data.progress.slice) + progressCard('Current slice tasks', data.progress && data.progress.task) + planKpiCard(selected) : planProgressCard(selected) + planKpiCard(selected));
+        setHtmlIfChanged($('phases'), isActive ? (data.phases || []).map((phase) => '<span class="phase phase-' + escapeHtml(phase.name) + ' ' + escapeHtml(phase.status) + '">' + escapeHtml(phase.name) + '</span>').join('') : '<span class="phase complete">archived: complete</span>');
+        captureSliceOpenState();
+        setHtmlIfChanged($('slices'), selected ? selected.slices.map((slice) => sliceBlock(slice, data.activePlan)).join('') : '<div class="empty">' + (data.activePlan ? 'No stats recorded for the selected plan.' : "No active plan in this directory's state.") + '</div>');
+        $('raw').textContent = JSON.stringify({ selectedPlan: selected && selected.plan, activePlan: data.activePlan, stateFile: data.stateFile, pending: data.autoPendingAction, warnings: data.warnings, paused: data.autoPausedReason }, null, 2);
       }
-      $('task').textContent = isActive ? value([data.currentTaskIndex && ('#' + data.currentTaskIndex), data.currentTask].filter(Boolean).join(' ')) : selectedActiveTask ? value(selectedActiveTask.taskTitle || selectedActiveTask.taskId) : '-';
-      $('taskSummary').textContent = isActive ? value(data.currentTaskSummary, '') : selected ? 'No active task for this archived plan.' : '';
-      $('nextTask').textContent = isActive ? value(data.nextTask) : '-';
-      $('nextSummary').textContent = isActive ? (data.nextTaskSummary && data.nextTaskSummary !== data.nextTask ? ' · ' + data.nextTaskSummary : '') : selected ? ' · Select another plan from the dropdown to inspect its history.' : '';
-      setHtmlIfChanged($('progress'), isActive ? progressCard('Current slice', data.progress && data.progress.slice) + progressCard('Current slice tasks', data.progress && data.progress.task) + planKpiCard(selected) : planProgressCard(selected) + planKpiCard(selected));
-      setHtmlIfChanged($('phases'), isActive ? (data.phases || []).map((phase) => '<span class="phase phase-' + escapeHtml(phase.name) + ' ' + escapeHtml(phase.status) + '">' + escapeHtml(phase.name) + '</span>').join('') : '<span class="phase complete">archived: complete</span>');
       renderIssueWorkflows(data);
-      captureSliceOpenState();
-      setHtmlIfChanged($('slices'), selected ? selected.slices.map((slice) => sliceBlock(slice, data.activePlan)).join('') : '<div class="empty">' + (data.activePlan ? 'No stats recorded for the selected plan.' : "No active plan in this directory's state.") + '</div>');
-      $('raw').textContent = JSON.stringify({ selectedPlan: selected && selected.plan, activePlan: data.activePlan, stateFile: data.stateFile, pending: data.autoPendingAction, warnings: data.warnings, paused: data.autoPausedReason }, null, 2);
     }
     const themeKey = 'addy-dashboard-theme';
     const themePicker = $('themePicker');

@@ -23,6 +23,10 @@ import {
   recordManualTaskTurn,
   type WorkflowStatsTarget,
 } from './workflow-stats.ts';
+import {
+  ticketClaimSafetyWarning,
+  ticketStateBlocksReset,
+} from './ticket-source-switch.ts';
 
 export { summarizeWorkflowTasks } from './workflow-task-summary.ts';
 
@@ -33,11 +37,11 @@ export function handleWorkflowEvent(
 ): WorkflowState {
   const previous = getContextWorkflowState(ctx);
   const transitioned = transitionWorkflow(previous, event);
-  const next = recordManualTaskTurn(
-    previous,
-    refreshWorkflowTasksFromPlan(transitioned, ctx.cwd),
-    event,
-  );
+  const refreshed =
+    transitioned.executionSource === 'ticket'
+      ? transitioned
+      : refreshWorkflowTasksFromPlan(transitioned, ctx.cwd);
+  const next = recordManualTaskTurn(previous, refreshed, event);
   setContextWorkflowState(ctx, next, appendEntry);
   scheduleWorkflowTaskSummary(ctx, next, appendEntry);
   return ctx.state ?? next;
@@ -54,6 +58,13 @@ export function resetWorkflow(
   appendEntry?: AppendEntry,
 ): WorkflowState {
   const previous = getContextWorkflowState(ctx);
+  if (ticketStateBlocksReset(previous)) {
+    ctx.ui?.notify?.(
+      ticketClaimSafetyWarning(previous, '/addy-workflow-reset')!,
+      'warning',
+    );
+    return previous;
+  }
   const state = {
     ...createInitialWorkflowState(),
     stats: archiveWorkflowStats(previous, 'reset').stats,

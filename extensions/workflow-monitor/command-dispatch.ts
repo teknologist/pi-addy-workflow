@@ -54,7 +54,10 @@ export function stateAfterAutoPrompt(
   const nextState = {
     ...state,
     autoLastPrompt: prompt,
-    autoPendingAction: undefined,
+    autoPendingAction:
+      state.autoPendingAction?.executionSource === 'ticket'
+        ? state.autoPendingAction
+        : undefined,
     autoRetryKey: undefined,
     autoRetryCount: undefined,
     autoFreshPrompt: undefined,
@@ -88,7 +91,7 @@ export function stateAfterAutoPrompt(
         : autoStatsCommand(cmd)
           ? recordWorkflowTaskTurn(nextState, target, phaseForStatsCommand(cmd))
           : nextState;
-  return cmd?.startsWith('/addy-')
+  return cmd?.startsWith('/addy-') && state.executionSource !== 'ticket'
     ? transitionWorkflow(stateWithStats, {
         source: 'user-input',
         text: prompt,

@@ -10,9 +10,11 @@ Pi adaptation of Addy Osmani's `build` command.
 
 Use the Pi `incremental-implementation` skill alongside `test-driven-development`.
 
-Argument: `/addy-build [plan-path]`.
+Argument: `/addy-build [plan-path]` or `/addy-build --ticket <ticket-ref>`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
+
+Ticket form is first-class and may create the claim. The workflow monitor supplies the source-neutral tracker contract; do not interpret the ticket reference as a plan path or bypass claim, blocker, eligibility, or targeted-mutation checks.
 
 Plan selection rules:
 

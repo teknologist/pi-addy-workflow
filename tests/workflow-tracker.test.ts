@@ -86,6 +86,16 @@ test('prompt triggers map to phases', () => {
   );
 });
 
+test('ticket queue labels are not extracted as active plans', () => {
+  const auto = transitionWorkflow(createInitialWorkflowState(), {
+    source: 'command',
+    text: '/addy-auto --tickets --label docs/plans/backend.md',
+    artifact: 'docs/plans/backend.md',
+  });
+
+  assert.equal(auto.activePlan, undefined);
+});
+
 test('manual Addy command exits auto mode', () => {
   const auto = transitionWorkflow(createInitialWorkflowState(), {
     source: 'user-input',

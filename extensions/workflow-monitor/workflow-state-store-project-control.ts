@@ -3,6 +3,7 @@ import {
   withProjectAutoControl,
 } from './auto-control.ts';
 import { parseWorkflowState, type WorkflowState } from './workflow-state.ts';
+import { preserveWorkflowControlState } from './workflow-state-control.ts';
 
 export function sanitizedProjectFallbackWorkflowState(
   state: WorkflowState | undefined,
@@ -26,5 +27,17 @@ export function resolveWorkflowStateWithProjectControl(
     !projectState.autoFreshPrompt
   )
     return parseWorkflowState(projectState);
+  if (
+    projectState?.executionSource === 'ticket' &&
+    (projectState.ticketQueue ||
+      projectState.ticketRun ||
+      projectState.ticketRecovery)
+  )
+    return parseWorkflowState(
+      preserveWorkflowControlState(
+        { ...state, warnings: projectState.warnings },
+        projectState,
+      ),
+    );
   return withProjectAutoControl(state, projectState);
 }

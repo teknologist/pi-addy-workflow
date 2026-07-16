@@ -1,5 +1,6 @@
 import { FRESH_CONTEXT_STEP_COMMANDS } from './command-router.ts';
 import {
+  commandFromArgs,
   parseAutoFreshReason,
   parseCommandArgs,
   type CommandEvent,
@@ -9,6 +10,11 @@ import {
   type AutoFreshReason,
   type WorkflowPhase,
 } from './workflow-transitions.ts';
+import {
+  parseTicketCommand,
+  TICKET_COMMAND_USAGE,
+  type TicketCommandIntent,
+} from './ticket-command.ts';
 
 export const AUTO_CONTINUE_USAGE =
   'Usage: /addy-auto-continue --fresh <between-tasks|before-step|before-review>';
@@ -20,17 +26,45 @@ export function registeredFreshStepCommandNames(): string[] {
   return FRESH_CONTEXT_STEP_COMMANDS.map((command) => command.slice(1));
 }
 
+function commandArgs(event: CommandEvent): string[] | undefined {
+  try {
+    return parseCommandArgs(event);
+  } catch {
+    return undefined;
+  }
+}
+
 export function planFreshStepCommand(
   command: string,
   event: CommandEvent,
-): {
-  input: string;
-  workflowEvent: { source: 'command'; text: string; manualAddyCommand: true };
-} {
-  const args = parseCommandArgs(event);
-  const input = `${command}${args.length ? ` ${args.join(' ')}` : ''}`;
+):
+  | {
+      kind: 'run';
+      input: string;
+      intent?: Exclude<TicketCommandIntent, { kind: 'error' }>;
+      workflowEvent: {
+        source: 'command';
+        text: string;
+        manualAddyCommand: true;
+      };
+    }
+  | { kind: 'warn'; message: string } {
+  const args = commandArgs(event);
+  if (!args) return { kind: 'warn', message: TICKET_COMMAND_USAGE };
+  const intent =
+    command === '/addy-define' || command === '/addy-plan'
+      ? undefined
+      : parseTicketCommand(command, args);
+  if (intent?.kind === 'error')
+    return { kind: 'warn', message: intent.message };
+  const input =
+    intent?.kind === 'ticket-lifecycle'
+      ? commandFromArgs(command, args)
+      : `${command}${args.length ? ` ${args.join(' ')}` : ''}`;
   return {
+    kind: 'run',
     input,
+    ...(intent ? { intent } : {}),
     workflowEvent: { source: 'command', text: input, manualAddyCommand: true },
   };
 }
@@ -46,13 +80,20 @@ export function planAutoContinueCommand(
     : { kind: 'warn', message: AUTO_CONTINUE_USAGE };
 }
 
-export function planStatsCommand(event: CommandEvent): {
-  planPath?: string;
-  all?: boolean;
-} {
-  const args = parseCommandArgs(event);
-  if (args.length === 1 && args[0] === '--all') return { all: true };
-  return { planPath: args.join(' ') || undefined };
+export function planStatsCommand(event: CommandEvent): TicketCommandIntent {
+  const args = commandArgs(event);
+  return args
+    ? parseTicketCommand('/addy-stats', args)
+    : { kind: 'error', message: TICKET_COMMAND_USAGE };
+}
+
+export function planTicketManagementCommand(
+  event: CommandEvent,
+): TicketCommandIntent {
+  const args = commandArgs(event);
+  return args
+    ? parseTicketCommand('/addy-ticket', args)
+    : { kind: 'error', message: TICKET_COMMAND_USAGE };
 }
 
 function isWorkflowPhase(value: string | undefined): value is WorkflowPhase {
@@ -67,7 +108,9 @@ export function planWorkflowNextCommand(event: CommandEvent):
       workflowEvent: { source: 'command'; text: string; artifact?: string };
     }
   | { kind: 'warn'; message: string } {
-  const [phase, ...artifactParts] = parseCommandArgs(event);
+  const args = commandArgs(event);
+  if (!args) return { kind: 'warn', message: WORKFLOW_NEXT_USAGE };
+  const [phase, ...artifactParts] = args;
   if (!isWorkflowPhase(phase))
     return { kind: 'warn', message: WORKFLOW_NEXT_USAGE };
 

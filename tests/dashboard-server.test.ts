@@ -29,6 +29,23 @@ import { workflowTaskCommitKey } from '../extensions/workflow-monitor/plan-task-
 import { serializeWorkflowState } from '../extensions/workflow-monitor/workflow-state.ts';
 import { projectWorkflowStateKey } from '../extensions/workflow-monitor/workflow-state-store-scope.ts';
 
+test('dashboard html branches Ticket lifecycle and queue from plan-only chrome', () => {
+  const html = readFileSync(
+    join(process.cwd(), 'extensions/workflow-monitor/dashboard-server.ts'),
+    'utf8',
+  );
+
+  assert.match(html, /if \(data\.ticket\) \{/);
+  assert.match(html, /Ticket lifecycle/);
+  assert.match(html, /Ticket queue/);
+  assert.match(html, /escapeHtml\(ticket\.source\.ref\)/);
+  assert.match(html, /escapeHtml\(ticket\.selector\.value\)/);
+  assert.match(html, /planPicker.*hidden/);
+  assert.match(html, /planChrome.*hidden/);
+  assert.match(html, /planSlices.*hidden/);
+  assert.match(html, /\} else \{[\s\S]*renderPlanPicker\(groups\)/);
+});
+
 test('dashboard html preserves slice expansion state across refreshes', () => {
   const html = readFileSync(
     join(process.cwd(), 'extensions/workflow-monitor/dashboard-server.ts'),
@@ -124,6 +141,133 @@ test('dashboard snapshot reads the project-scoped active plan state', () => {
       { phase: 'build', ms: 120_000, duration: '2m 0s' },
       { phase: 'verify', ms: 30_000, duration: '30s' },
     ]);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('dashboard snapshot projects only bounded Ticket presentation fields', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-ticket-'));
+  const stateDir = join(cwd, 'state');
+  try {
+    mkdirSync(stateDir, { recursive: true });
+    const key = projectWorkflowStateKey({ cwd });
+    const base = createInitialWorkflowState();
+    writeFileSync(
+      join(stateDir, `${key}.json`),
+      serializeWorkflowState({
+        ...base,
+        executionSource: 'ticket',
+        activePlan: 'must-not-be-read.md',
+        current: 'review',
+        currentTask: 'external progress must survive',
+        currentTaskIndex: 2,
+        taskCount: 4,
+        currentSliceIndex: 1,
+        sliceCount: 2,
+        autoMode: true,
+        autoPausedReason: 'ticket-operation-blocked',
+        autoLastPrompt: 'raw prompt must not render',
+        ticketQueue: {
+          schemaVersion: 1,
+          selector: { kind: 'label', value: 'A&B<script>' },
+          drainId: 'drain-1',
+        },
+        ticketRun: {
+          schemaVersion: 1,
+          source: { kind: 'linear', ref: 'A&B<script>' },
+          runId: 'run-1',
+          claim: {
+            id: 'claim-1',
+            owner: 'secret owner',
+            claimedAt: '2026-07-15T00:00:00.000Z',
+          },
+          lifecycle: { implemented: true, verified: true, reviewed: false },
+          repositoryScope: ['.'],
+        },
+      }),
+    );
+
+    const snapshot = dashboardSnapshot({ cwd, stateDir });
+    assert.deepEqual(snapshot.ticket?.lifecycle, {
+      implemented: true,
+      verified: true,
+      reviewed: false,
+    });
+    assert.equal(snapshot.ticket?.frontier, 'review');
+    assert.equal(snapshot.ticket?.claim, 'claimed');
+    assert.equal(snapshot.ticket?.source.ref, 'A&B<script>');
+    assert.equal(snapshot.ticket?.selector?.value, 'A&B<script>');
+    assert.equal(snapshot.activePlan, 'must-not-be-read.md');
+    assert.equal(snapshot.currentTask, 'external progress must survive');
+    assert.deepEqual(snapshot.progress, {
+      slice: { current: 1, total: 2, percent: 50 },
+      task: { current: 2, total: 4, percent: 50 },
+      totalTasks: undefined,
+    });
+    const encoded = JSON.stringify(snapshot.ticket);
+    assert.doesNotMatch(
+      encoded,
+      /raw prompt|secret owner|repositoryScope|body|comments/,
+    );
+    assert.doesNotMatch(encoded, /\\n/);
+    assert.ok((snapshot.ticket?.source.ref.length ?? 0) <= 121);
+    assert.ok((snapshot.ticket?.selector?.value.length ?? 0) <= 121);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('dashboard snapshot keeps the no-Ticket shape unchanged', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'pi-addy-dashboard-legacy-shape-'));
+  const stateDir = join(cwd, 'state');
+  try {
+    mkdirSync(stateDir, { recursive: true });
+    const path = join(stateDir, `${projectWorkflowStateKey({ cwd })}.json`);
+    const base = {
+      ...createInitialWorkflowState(),
+      activePlan: 'plans/active.md',
+      currentTask: 'Keep bytes stable',
+    };
+    const bytes = () => {
+      const snapshot = dashboardSnapshot({ cwd, stateDir });
+      assert.equal(Object.hasOwn(snapshot, 'ticket'), false);
+      return JSON.stringify({
+        ...snapshot,
+        updatedAt: '<time>',
+        stateLastUpdatedAt: '<time>',
+      });
+    };
+
+    writeFileSync(path, serializeWorkflowState(base));
+    const before = bytes();
+    writeFileSync(
+      path,
+      serializeWorkflowState({
+        ...base,
+        stats: {
+          active: {
+            tasks: {},
+            tickets: {
+              hidden: {
+                target: {
+                  kind: 'ticket',
+                  source: { kind: 'github', ref: '42' },
+                },
+                turns: 1,
+                verifyRuns: 0,
+                reviewRuns: 0,
+                fixRuns: 0,
+                findings: 0,
+                recordedAttempts: [],
+              },
+            },
+          },
+          history: [],
+        },
+      }),
+    );
+    assert.equal(bytes(), before);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

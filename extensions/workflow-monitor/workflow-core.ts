@@ -41,8 +41,30 @@ export type WorkflowTaskCommitRecord = {
   committedAt: string;
 };
 
+export type WorkflowTicketStats = {
+  target: {
+    kind: 'ticket';
+    source: TicketRunState['source'];
+  };
+  startedAt?: string;
+  finishedAt?: string;
+  phaseDurationsMs?: Partial<
+    Record<
+      'build' | 'simplify' | 'verify' | 'review' | 'fix-all' | 'finish',
+      number
+    >
+  >;
+  turns: number;
+  verifyRuns: number;
+  reviewRuns: number;
+  fixRuns: number;
+  findings: number;
+  recordedAttempts: string[];
+};
+
 export type WorkflowStatsSession = {
   tasks: Record<string, WorkflowTaskStats>;
+  tickets?: Record<string, WorkflowTicketStats>;
   endedReason?: string;
 };
 
@@ -53,13 +75,120 @@ export type WorkflowStats = {
 
 export type AutoFreshReason = 'between-tasks' | 'before-step' | 'before-review';
 
+export type TicketOperation =
+  | 'select'
+  | 'claim'
+  | 'build'
+  | 'simplify'
+  | 'verify'
+  | 'review'
+  | 'fix-all'
+  | 'finish'
+  | 'status'
+  | 'release'
+  | 'reclaim'
+  | 'add-repository'
+  | 'repository-scope-approval';
+
+export type TicketCommitEvidence =
+  | {
+      repository: string;
+      result: 'committed';
+      commitSha: string;
+      recordedAt: string;
+    }
+  | {
+      repository: string;
+      result: 'no-changes';
+      recordedAt: string;
+    };
+
+export type TicketTerminalEvidence = {
+  state: 'closed' | 'completed' | 'resolved';
+  confirmedAt: string;
+};
+
+export type TicketRunState = {
+  schemaVersion: 1;
+  source: { kind: 'github' | 'linear' | 'local'; ref: string };
+  runId: string;
+  repositoryRoot?: string;
+  claim?: { id: string; owner: string; claimedAt: string };
+  revision?: string;
+  queueSelector?: {
+    kind: 'default' | 'label' | 'status';
+    value: string;
+  };
+  queueDrainId?: string;
+  lifecycle: {
+    implemented: boolean;
+    verified: boolean;
+    reviewed: boolean;
+    lastCompletedPhase?:
+      | 'build'
+      | 'simplify'
+      | 'verify'
+      | 'review'
+      | 'fix-all'
+      | 'finish';
+  };
+  repositoryScope: string[];
+  activityMarker?: string;
+  pendingClarification?: {
+    kind: 'tracker-routing' | 'completion-transition';
+    prompt: string;
+    resolution?: string;
+  };
+  pendingScopeRequest?: { repository: string };
+  lastValidatedResult?: {
+    operation: TicketOperation;
+    outcome: 'succeeded' | 'reconciled' | 'blocked' | 'failed';
+    actionKey: string;
+    attempt: number;
+    revision?: string;
+    claimId?: string;
+    staleClaimId?: string;
+    repository?: string;
+    repositoryAppended?: boolean;
+    manual?: true;
+    pendingClarification?: {
+      kind: 'tracker-routing' | 'completion-transition';
+      prompt: string;
+      resolution?: string;
+    };
+    reviewDisposition?:
+      | { status: 'clean' }
+      | { status: 'findings'; count: number };
+    commitEvidence?: TicketCommitEvidence[];
+    finishStage?:
+      | 'repository-evidence'
+      | 'final-activity'
+      | 'terminal-transition'
+      | 'terminal-refetch';
+    finishActivityKind?: 'failure' | 'final';
+    terminal?: TicketTerminalEvidence;
+  };
+};
+
+export type TicketQueueState = {
+  schemaVersion: 1;
+  selector: NonNullable<TicketRunState['queueSelector']>;
+  drainId: string;
+};
+
+export type TicketRecoveryState = {
+  possibleClaim: true;
+  ticketRef?: string;
+  reason: string;
+};
+
 export type AutoPendingActionReason =
   | 'next-action'
   | 'fresh-fallback'
   | 'idle-retry'
   | 'commit-frontier';
 
-export type WorkflowAutoPendingAction = {
+type WorkflowAutoPendingActionBase = {
   key: string;
   prompt: string;
   expandedPrompt?: string;
@@ -73,14 +202,44 @@ export type WorkflowAutoPendingAction = {
   createdAt: string;
 };
 
+export type WorkflowPlanPendingAction = WorkflowAutoPendingActionBase & {
+  executionSource?: 'plan';
+};
+
+export type WorkflowTicketPendingAction = WorkflowAutoPendingActionBase & {
+  executionSource: 'ticket';
+  sourceKind?: TicketRunState['source']['kind'];
+  ticketRef: string;
+  runId: string;
+  claimId?: string;
+  staleClaimId?: string;
+  selector?: TicketRunState['queueSelector'];
+  repository?: string;
+  operation: TicketOperation;
+  attemptMarker: string;
+};
+
+export type WorkflowAutoPendingAction =
+  | WorkflowPlanPendingAction
+  | WorkflowTicketPendingAction;
+
 export type WorkflowAutoPausedReason =
   | 'max-review-fix-loops'
   | 'repeated-review-finding'
   | 'same-phase-retry-limit'
+  | 'ticket-operation-blocked'
+  | 'ticket-operation-failed'
+  | 'configuration-ambiguous'
+  | 'scope-expansion-required'
   | 'user-stopped';
 
 export type WorkflowState = {
   current?: WorkflowPhase;
+  executionSource?: 'plan' | 'ticket';
+  ticketQueue?: TicketQueueState;
+  ticketRun?: TicketRunState;
+  ticketHistory?: TicketRunState[];
+  ticketRecovery?: TicketRecoveryState;
   phases: Record<WorkflowPhase, PhaseStatus>;
   warnings: string[];
   stats?: WorkflowStats;

@@ -8696,8 +8696,7 @@ test('addy-stats sends markdown table when custom messages are available', async
   const ctx: any = {
     id: 'custom-message-stats',
     state: {
-      phases: {},
-      warnings: [],
+      ...createInitialWorkflowState(),
       stats: {
         active: {
           tasks: {

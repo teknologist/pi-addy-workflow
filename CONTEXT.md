@@ -92,6 +92,34 @@ _Avoid_: transition constants, command phase map
 A markdown plan that breaks work into small tasks tracked by lifecycle checkboxes.
 _Avoid_: task list, checklist, todo file
 
+**Ticket Slice**:
+A tracker ticket selected for Addy execution; one Ticket Slice maps to one Addy Workflow slice regardless of whether it comes from Linear, GitHub, or local files.
+_Avoid_: issue task, remote plan
+
+**Ticket Lifecycle Block**:
+The delimited Addy-owned section of a Ticket Slice body that records lifecycle statuses, stable identity, and commit evidence.
+_Avoid_: status heading, ticket metadata blob
+
+**Ticket Acceptance Criterion**:
+A checkbox in a Ticket Slice body that records whether one required outcome has been implemented; it supplements rather than replaces Addy's Lifecycle Statuses.
+_Avoid_: lifecycle checkbox, completion status
+
+**Ticket Queue**:
+The deterministic set of Ticket Slices selected from the configured tracker by the AFK-ready label or an explicit label override.
+_Avoid_: issue list, label group, backlog
+
+**Ticket Claim**:
+The ownership record that removes a Ticket Slice from its Ticket Queue and binds it to one Addy Workflow run before implementation starts.
+_Avoid_: assignment, in-progress label
+
+**Ticket Activity**:
+The chronological comment trail for implementation progress, verification proof, review findings, fixes, and final commit/closure details; local Ticket Slices store it under the configured `Comments` section.
+_Avoid_: lifecycle state, execution log
+
+**Ticket Phase Result**:
+The versioned machine-readable envelope by which one agent-mediated phase reports tracker mutation evidence to Addy without replacing the ticket as the authoritative source.
+_Avoid_: final response, tracker snapshot
+
 **Slice Plan Progress**:
 The Slice Plan Module that reads Slice Plan markdown and Workflow State to produce one snapshot of the Task Frontier, Task Closure state, next workflow action, slice progress, and footer progress data.
 _Avoid_: tracker helpers, plan rendering logic
@@ -317,6 +345,13 @@ _Avoid_: state parser, JSON helper
 - **Workflow Dispatch Options** keeps auto/fresh delivery flags consistent across **Fresh Continuation**, **Auto Agent-End**, **Auto Watchdog**, **Session Start Handler**, and **Task Commit Coordinator**.
 - **Auto Prompt Dispatcher** consumes **Command Dispatch** plans and delegates side effects to **Workflow Delivery** or **Fresh Continuation**, keeping current-session versus fresh-session prompt routing out of the monitor entrypoint.
 - A **Slice Plan** contains one or more tasks with **Lifecycle Statuses**.
+- A **Ticket Slice** is one Addy Workflow slice and must not be grouped with other label-matched tickets merely because they share a queue.
+- A **Ticket Slice** body contains at most one **Ticket Lifecycle Block**; Addy mutates that block and its **Ticket Acceptance Criteria** while preserving all other ticket-body content.
+- A **Ticket Slice** cannot advance past BUILD until all required **Ticket Acceptance Criteria** are checked and its `Implemented` **Lifecycle Status** is checked.
+- A **Ticket Queue** contains only tickets matching its selector; Addy chooses the oldest unblocked Ticket Slice and creates a **Ticket Claim** before BUILD.
+- A **Ticket Claim** locks the Ticket Slice's normalized **Repository Scope** in its Ticket Lifecycle Block before BUILD; later scope expansion requires an explicit human decision.
+- Local Ticket Queue selection matches `Status` for existing `/to-tickets` files and may also match an optional `Labels` list for arbitrary selectors.
+- GitHub and Linear store **Ticket Activity** as native comments; local files append equivalent timestamped entries under the configured `Comments` section.
 - **Slice Plan Progress** is the domain-level read Interface that re-exports **Slice Plan Action**, **Slice Plan Snapshot**, and **Slice Plan Evidence** facts for **Task Frontier**, **Task Closure**, next action, slice progress, and footer progress data; presentation Modules should render from this snapshot instead of recalculating plan traversal.
 - **Slice Plan Series** keeps suite and numbered-slice heuristics local and consumes **Slice Plan Repository** for filesystem facts so **Slice Plan Progress**, **Auto Lifecycle**, and **Task Commit Coordinator** consume series facts instead of repeating path scanning rules.
 - **Workflow Plan Continuation** owns the repeated Slice Plan handoff state shape so **Auto Lifecycle**, **Task Commit Coordinator**, and **Slice Plan Progress** do not duplicate stale task-context cleanup.

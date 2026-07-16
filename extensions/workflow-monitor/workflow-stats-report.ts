@@ -5,7 +5,9 @@ import {
   type WorkflowState,
   type WorkflowStatsSession,
   type WorkflowTaskStats,
+  type WorkflowTicketStats,
 } from './workflow-transitions.ts';
+import { boundedTicketDisplay } from './ticket-presentation.ts';
 import {
   addIssueStats,
   emptyIssueStats,
@@ -159,10 +161,89 @@ function taskStepDurations(task: WorkflowTaskStats): string {
   return parts.length ? parts.join(', ') : '—';
 }
 
+export type WorkflowStatsFilter =
+  | string
+  | {
+      kind: 'ticket';
+      source: { kind: 'github' | 'linear' | 'local'; ref: string };
+    };
+
+function ticketStats(
+  state: WorkflowState,
+  source: { kind: 'github' | 'linear' | 'local'; ref: string },
+): WorkflowTicketStats[] {
+  const stats = normalizeWorkflowStats(state.stats);
+  return [stats.active, ...stats.history].flatMap((session) =>
+    Object.values(session.tickets ?? {}).filter(
+      (ticket) =>
+        ticket.target.source.kind === source.kind &&
+        ticket.target.source.ref === source.ref,
+    ),
+  );
+}
+
+function ticketDuration(ticket: WorkflowTicketStats): number {
+  return Object.values(ticket.phaseDurationsMs ?? {}).reduce(
+    (sum, duration) => sum + duration,
+    0,
+  );
+}
+
+function renderTicketStatsText(
+  state: WorkflowState,
+  source: { kind: 'github' | 'linear' | 'local'; ref: string },
+): string {
+  const tickets = ticketStats(state, source);
+  const display = `${source.kind}:${boundedTicketDisplay(source.ref)}`;
+  if (!tickets.length) return `No Addy stats recorded for Ticket ${display}`;
+  const totals = tickets.reduce(
+    (sum, ticket) => ({
+      turns: sum.turns + ticket.turns,
+      verifyRuns: sum.verifyRuns + ticket.verifyRuns,
+      reviewRuns: sum.reviewRuns + ticket.reviewRuns,
+      fixRuns: sum.fixRuns + ticket.fixRuns,
+      findings: sum.findings + ticket.findings,
+      duration: sum.duration + ticketDuration(ticket),
+    }),
+    {
+      turns: 0,
+      verifyRuns: 0,
+      reviewRuns: 0,
+      fixRuns: 0,
+      findings: 0,
+      duration: 0,
+    },
+  );
+  return [
+    'Addy Ticket stats',
+    `Ticket ${display}`,
+    `Turns: ${totals.turns}`,
+    `Verify runs: ${totals.verifyRuns}`,
+    `Review runs: ${totals.reviewRuns}`,
+    `Fix-all runs: ${totals.fixRuns}`,
+    `Findings: ${totals.findings}`,
+    `Duration: ${durationFromMs(totals.duration)}`,
+  ].join('\n');
+}
+
+function renderTicketStatsMarkdown(
+  state: WorkflowState,
+  source: { kind: 'github' | 'linear' | 'local'; ref: string },
+): string {
+  const text = renderTicketStatsText(state, source);
+  if (text.startsWith('No Addy stats'))
+    return `## Addy Ticket stats\n\n${text}`;
+  const lines = text.split('\n');
+  return ['## Addy Ticket stats', '', ...lines.slice(1)].join('\n');
+}
+
 export function renderWorkflowStatsText(
   state: WorkflowState,
-  planPath?: string,
+  filter?: WorkflowStatsFilter,
 ): string {
+  if (typeof filter === 'object')
+    return renderTicketStatsText(state, filter.source);
+  const planPath = filter;
   const stats = normalizeWorkflowStats(state.stats);
   const activeTasks = totalStatsTasks(stats.active, planPath);
   const historyTasks = stats.history.flatMap((session) =>
@@ -192,8 +273,11 @@ export function renderWorkflowStatsText(
 
 export function renderWorkflowStatsMarkdown(
   state: WorkflowState,
-  planPath?: string,
+  filter?: WorkflowStatsFilter,
 ): string {
+  if (typeof filter === 'object')
+    return renderTicketStatsMarkdown(state, filter.source);
+  const planPath = filter;
   const stats = normalizeWorkflowStats(state.stats);
   const activeTasks = totalStatsTasks(stats.active, planPath);
   const historyTasks = stats.history.flatMap((session) =>

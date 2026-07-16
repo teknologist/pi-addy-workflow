@@ -1,7 +1,8 @@
-import type {
-  WorkflowPhase,
-  WorkflowState,
-  WorkflowTaskCommitRecord,
+import {
+  createInitialWorkflowState,
+  type WorkflowPhase,
+  type WorkflowState,
+  type WorkflowTaskCommitRecord,
 } from './workflow-core.ts';
 import { coerceAutoPendingAction } from './workflow-state-codec-auto.ts';
 import { coerceWorkflowAutoControl } from './workflow-state-codec-auto-control.ts';
@@ -17,6 +18,70 @@ import {
   coerceWorkflowCurrent,
   hasWorkflowStateShape,
 } from './workflow-state-codec-shape.ts';
+import {
+  coerceTicketExecution,
+  coerceTicketHistory,
+  coerceTicketQueue,
+  corruptTicketExecution,
+  hasTicketAssociation,
+} from './workflow-state-codec-ticket.ts';
+
+const WORKFLOW_STATE_FIELDS = [
+  'current',
+  'executionSource',
+  'ticketQueue',
+  'ticketRun',
+  'ticketHistory',
+  'ticketRecovery',
+  'phases',
+  'warnings',
+  'stats',
+  'committedTasks',
+  'activeSpec',
+  'activePlan',
+  'activeSuitePlan',
+  'currentTask',
+  'currentTaskId',
+  'nextTask',
+  'nextTaskId',
+  'currentTaskIndex',
+  'taskCount',
+  'currentSliceIndex',
+  'sliceCount',
+  'currentTaskSummary',
+  'nextTaskSummary',
+  'lastTrigger',
+  'lastArtifact',
+  'testStatus',
+  'autoMode',
+  'autoPendingAction',
+  'autoPausedReason',
+  'autoLastPrompt',
+  'autoRetryKey',
+  'autoRetryCount',
+  'autoFreshPrompt',
+  'autoFreshExpandedPrompt',
+  'autoFreshReason',
+  'autoFreshDeliveryKey',
+  'autoFreshConsumedKey',
+  'autoReviewFixKey',
+  'autoReviewFixCount',
+  'autoReviewFindingFingerprint',
+  'autoReviewFixNeedsReview',
+  'autoReviewTask',
+  'autoReviewTaskId',
+  'autoReviewTaskIndex',
+  'reviewStatsKey',
+  'reviewStatsAgent',
+] as const satisfies readonly (keyof WorkflowState)[];
+
+function knownWorkflowFields(candidate: Record<string, unknown>) {
+  return Object.fromEntries(
+    WORKFLOW_STATE_FIELDS.flatMap((field) =>
+      field in candidate ? [[field, candidate[field]]] : [],
+    ),
+  ) as Partial<WorkflowState>;
+}
 
 function migrateCommittedTasks(
   candidate: { stats?: unknown },
@@ -28,41 +93,61 @@ function migrateCommittedTasks(
 }
 
 export function coerceWorkflowState(value: unknown): WorkflowState | undefined {
-  if (!hasWorkflowStateShape(value)) return undefined;
+  if (!hasWorkflowStateShape(value))
+    return hasTicketAssociation(value)
+      ? corruptTicketExecution(
+          value as Record<string, unknown>,
+          createInitialWorkflowState(),
+        )
+      : undefined;
 
   const candidate = value as Omit<Partial<WorkflowState>, 'current'> & {
     current?: WorkflowPhase | 'ship';
   };
+  const invalid = (): WorkflowState | undefined =>
+    hasTicketAssociation(candidate)
+      ? corruptTicketExecution(
+          candidate as Record<string, unknown>,
+          createInitialWorkflowState(),
+        )
+      : undefined;
   const current = coerceWorkflowCurrent(candidate.current);
-  if (candidate.current !== undefined && !current) return undefined;
+  if (candidate.current !== undefined && !current) return invalid();
   const metadata = coerceWorkflowMetadata(candidate);
-  if (!metadata) return undefined;
+  if (!metadata) return invalid();
   const committedTasks = coerceCommittedTasks(candidate.committedTasks);
   if (candidate.committedTasks !== undefined && !committedTasks)
-    return undefined;
+    return invalid();
   const migratedCommittedTasks = migrateCommittedTasks(
     candidate,
     committedTasks,
   );
   const autoControl = coerceWorkflowAutoControl(candidate);
-  if (!autoControl) return undefined;
+  if (!autoControl) return invalid();
   const autoPendingAction = coerceAutoPendingAction(
     candidate.autoPendingAction,
   );
   if (candidate.autoPendingAction !== undefined && !autoPendingAction)
-    return undefined;
-  if (!coerceWorkflowReviewControl(candidate)) return undefined;
-  if (!coerceWorkflowTaskProgress(candidate)) return undefined;
+    return invalid();
+  if (!coerceWorkflowReviewControl(candidate)) return invalid();
+  if (!coerceWorkflowTaskProgress(candidate)) return invalid();
   const phases = coerceWorkflowPhases(candidate.phases);
-  if (!phases) return undefined;
+  if (!phases) return invalid();
+  const ticketHistory = coerceTicketHistory(candidate.ticketHistory);
+  if (candidate.ticketHistory !== undefined && !ticketHistory) return invalid();
+  const ticketQueue = coerceTicketQueue(candidate.ticketQueue);
+  if (candidate.ticketQueue !== undefined && !ticketQueue) return invalid();
 
-  return {
-    ...candidate,
+  const base = {
+    ...knownWorkflowFields(candidate as Record<string, unknown>),
     ...autoControl,
     committedTasks: migratedCommittedTasks,
     autoPendingAction,
+    ticketHistory,
+    ticketQueue,
     current,
     phases,
     warnings: metadata.warnings,
-  };
+  } as WorkflowState;
+  return coerceTicketExecution(candidate as Record<string, unknown>, base);
 }

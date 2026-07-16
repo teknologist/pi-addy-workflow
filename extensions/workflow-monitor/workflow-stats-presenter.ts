@@ -4,7 +4,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { Markdown } from '@earendil-works/pi-tui';
 import { latestActiveStatsTarget } from './workflow-stats-target.ts';
-import type { WorkflowState } from './workflow-transitions.ts';
+import type { TicketRunState, WorkflowState } from './workflow-transitions.ts';
 import {
   renderWorkflowStatsMarkdown,
   renderWorkflowStatsText,
@@ -23,10 +23,17 @@ function addStatsHeading(markdown: string, heading?: string): string {
 
 export function statsMarkdownWithHeading(
   state: WorkflowState,
-  options: { heading?: string; planPath?: string } = {},
+  options: {
+    heading?: string;
+    planPath?: string;
+    ticketSource?: TicketRunState['source'];
+  } = {},
 ): string {
+  const filter = options.ticketSource
+    ? { kind: 'ticket' as const, source: options.ticketSource }
+    : options.planPath;
   return addStatsHeading(
-    renderWorkflowStatsMarkdown(state, options.planPath),
+    renderWorkflowStatsMarkdown(state, filter),
     options.heading,
   );
 }
@@ -35,10 +42,17 @@ export function showWorkflowStats(
   pi: ExtensionAPI,
   ctx: unknown,
   state: WorkflowState,
-  options: { heading?: string; planPath?: string } = {},
+  options: {
+    heading?: string;
+    planPath?: string;
+    ticketSource?: TicketRunState['source'];
+  } = {},
   notify: Notify,
 ): void {
-  const statsText = renderWorkflowStatsText(state, options.planPath);
+  const filter = options.ticketSource
+    ? { kind: 'ticket' as const, source: options.ticketSource }
+    : options.planPath;
+  const statsText = renderWorkflowStatsText(state, filter);
   const fallbackText = options.heading
     ? `${options.heading}\n${statsText}`
     : statsText;

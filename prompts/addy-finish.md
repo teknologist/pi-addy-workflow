@@ -8,9 +8,11 @@ argument-hint: "[plan-path]"
 
 Pi adaptation of Addy Osmani's `finish` workflow step.
 
-Argument: `/addy-finish [plan-path]`.
+Argument: `/addy-finish [plan-path]` or `/addy-finish --ticket <ticket-ref>`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
+
+Ticket form requires the current run's live claim and has no skip-or-ship path. The workflow monitor supplies the source-neutral tracker contract; completion requires all criteria and lifecycle statuses, final Activity, commit evidence for every locked repository, the configured terminal transition, and a confirming refetch.
 
 Use the supplied plan path when present and update the Addy workflow state's active plan. If no path is supplied, use the active plan from workflow state when available.
 
