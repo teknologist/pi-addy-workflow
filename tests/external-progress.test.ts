@@ -654,6 +654,24 @@ test('Ticket Slice initializer rejects collection limits without partial persist
       () =>
         initializeExternalProgressTicketSlices({
           ...input,
+          ticketSlices: [
+            { key: 'TEST-1', title: 'Already started', status: 'implementing' },
+          ],
+        }),
+      /must start queued/,
+    );
+    assert.equal(
+      readExternalProgressProject({
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+      }).snapshots[0]?.ticketSlices,
+      undefined,
+    );
+
+    assert.throws(
+      () =>
+        initializeExternalProgressTicketSlices({
+          ...input,
           ticketSlices: Array.from({ length: 101 }, (_, index) => ({
             key: `TEST-${index}`,
             title: `Ticket ${index}`,
@@ -979,6 +997,145 @@ test('Ticket Slice updates reject unknown or malformed input without changing si
         { key: 'TEST-2', title: 'Second', status: 'queued' },
       ],
     );
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('Ticket Slice lifecycle permits forward skips and repair loops but only merging can become done', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    initializeExternalProgressTicketSlices({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      ticketSlices: [
+        { key: 'FULL', title: 'Full lifecycle', status: 'queued' },
+        { key: 'SKIP', title: 'Missed checkpoints', status: 'queued' },
+      ],
+    });
+    const update = (
+      key: string,
+      status: Parameters<typeof updateExternalProgressTicketSlice>[0]['patch'],
+    ) =>
+      updateExternalProgressTicketSlice({
+        runId: run.runId,
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+        source: 'df-implement-issues',
+        key,
+        patch: status,
+      });
+
+    for (const status of [
+      'implementing',
+      'verifying',
+      'reviewing',
+      'verifying',
+      'reviewing',
+      'merging',
+      'verifying',
+      'reviewing',
+      'merging',
+      'done',
+    ] as const) {
+      update('FULL', { status });
+    }
+    const sameDone = update('FULL', { status: 'done' });
+    assert.equal(sameDone.ticketSlices?.[0]?.status, 'done');
+    assert.throws(() => update('FULL', { status: 'failed' }), /immutable/);
+
+    assert.throws(() => update('SKIP', { status: 'done' }), /transition/);
+    update('SKIP', { status: 'reviewing' });
+    const sameReview = update('SKIP', { status: 'reviewing' });
+    assert.equal(sameReview.ticketSlices?.[1]?.status, 'reviewing');
+    update('SKIP', { status: 'merging' });
+    update('SKIP', { status: 'done' });
+    assert.throws(() => update('SKIP', { status: 'queued' }), /immutable/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('Ticket Slice failed is legal from every non-terminal state and remains immutable', () => {
+  const fixture = setup();
+  try {
+    const run = startExternalProgress({
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      now: TIME,
+    });
+    const nonTerminal = [
+      'queued',
+      'implementing',
+      'verifying',
+      'reviewing',
+      'merging',
+    ] as const;
+    initializeExternalProgressTicketSlices({
+      runId: run.runId,
+      cwd: fixture.cwd,
+      homeDir: fixture.homeDir,
+      source: 'df-implement-issues',
+      ticketSlices: nonTerminal.map((status) => ({
+        key: status.toUpperCase(),
+        title: status,
+        status: 'queued' as const,
+      })),
+    });
+    for (const [index, status] of nonTerminal.entries()) {
+      const key = status.toUpperCase();
+      if (status !== 'queued') {
+        updateExternalProgressTicketSlice({
+          runId: run.runId,
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+          source: 'df-implement-issues',
+          key,
+          patch: { status },
+        });
+      }
+      const failed = updateExternalProgressTicketSlice({
+        runId: run.runId,
+        cwd: fixture.cwd,
+        homeDir: fixture.homeDir,
+        source: 'df-implement-issues',
+        key,
+        patch: { status: 'failed' },
+      });
+      assert.equal(failed.ticketSlices?.[index]?.status, 'failed');
+      assert.equal(
+        updateExternalProgressTicketSlice({
+          runId: run.runId,
+          cwd: fixture.cwd,
+          homeDir: fixture.homeDir,
+          source: 'df-implement-issues',
+          key,
+          patch: { status: 'failed' },
+        }).ticketSlices?.[index]?.status,
+        'failed',
+      );
+      assert.throws(
+        () =>
+          updateExternalProgressTicketSlice({
+            runId: run.runId,
+            cwd: fixture.cwd,
+            homeDir: fixture.homeDir,
+            source: 'df-implement-issues',
+            key,
+            patch: { status: 'done' },
+          }),
+        /immutable/,
+      );
+    }
   } finally {
     fixture.cleanup();
   }

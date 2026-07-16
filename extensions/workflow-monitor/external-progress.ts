@@ -62,6 +62,13 @@ const TICKET_SLICE_STATUSES = new Set<ExternalProgressTicketSliceStatus>([
   'done',
   'failed',
 ]);
+const TICKET_SLICE_FORWARD_STATUSES: ExternalProgressTicketSliceStatus[] = [
+  'queued',
+  'implementing',
+  'verifying',
+  'reviewing',
+  'merging',
+];
 const TICKET_SLICE_FIELDS = new Set(['key', 'title', 'status']);
 const TICKET_SLICE_UPDATE_FIELDS = new Set(['status']);
 const SNAPSHOT_FIELDS = new Set([
@@ -511,6 +518,8 @@ export function initializeExternalProgressTicketSlices(
 ): IssueImplementationProgressSnapshot {
   assertTicketSliceInitializerInputSize(input.ticketSlices);
   const ticketSlices = parseExternalProgressTicketSlices(input.ticketSlices);
+  if (ticketSlices.some((ticketSlice) => ticketSlice.status !== 'queued'))
+    throw new Error('Ticket Slice collections must start queued');
   const located = locateRun(input.runId, input);
   return withRunsDirectory(located.projectKey, input, false, () =>
     withFileLock(runLockPath(located.file, input.runId), () => {
@@ -562,7 +571,9 @@ export function updateExternalProgressTicketSlice(
         (ticketSlice) => ticketSlice.key === key,
       );
       if (index === -1) throw new Error(`Unknown Ticket Slice key: ${key}`);
-      if (previous.ticketSlices[index]!.status === status) return previous;
+      const previousStatus = previous.ticketSlices[index]!.status;
+      if (previousStatus === status) return previous;
+      validateTicketSliceTransition(previousStatus, status);
       const ticketSlices = previous.ticketSlices.map(
         (ticketSlice, childIndex) =>
           childIndex === index ? { ...ticketSlice, status } : ticketSlice,
@@ -1449,6 +1460,29 @@ function compareTerminalSnapshots(
 ): number {
   const timeDifference = Date.parse(b.finishedAt!) - Date.parse(a.finishedAt!);
   return timeDifference || b.runId.localeCompare(a.runId);
+}
+
+function validateTicketSliceTransition(
+  previous: ExternalProgressTicketSliceStatus,
+  next: ExternalProgressTicketSliceStatus,
+): void {
+  if (previous === 'done' || previous === 'failed')
+    throw new Error(`Terminal Ticket Slice status ${previous} is immutable`);
+  if (next === 'failed') return;
+  if (next === 'done') {
+    if (previous === 'merging') return;
+    throw new Error(`Invalid Ticket Slice transition: ${previous} -> ${next}`);
+  }
+  if (
+    (previous === 'reviewing' && next === 'verifying') ||
+    (previous === 'merging' && (next === 'verifying' || next === 'reviewing'))
+  ) {
+    return;
+  }
+  const previousIndex = TICKET_SLICE_FORWARD_STATUSES.indexOf(previous);
+  const nextIndex = TICKET_SLICE_FORWARD_STATUSES.indexOf(next);
+  if (previousIndex !== -1 && nextIndex > previousIndex) return;
+  throw new Error(`Invalid Ticket Slice transition: ${previous} -> ${next}`);
 }
 
 function assertTicketSliceInitializerInputSize(value: unknown): void {
