@@ -1,6 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTicketCommand } from '../extensions/workflow-monitor/ticket-command.ts';
+import {
+  parseTicketCommand,
+  TICKET_COMMAND_USAGE,
+} from '../extensions/workflow-monitor/ticket-command.ts';
+
+test('runtime help lists Ticket forms and claim-management restrictions', () => {
+  for (const command of [
+    '/addy-build --ticket <ticket-ref>',
+    '/addy-auto --tickets --label <label>',
+    '/addy-auto --tickets --status <status>',
+    '/addy-stats --ticket <ticket-ref>',
+    '/addy-ticket status <ticket-ref>',
+    '/addy-ticket release <ticket-ref>',
+    '/addy-ticket reclaim <ticket-ref>',
+    '/addy-ticket add-repository <ticket-ref> <repository>',
+  ])
+    assert.match(
+      TICKET_COMMAND_USAGE,
+      new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+  assert.match(TICKET_COMMAND_USAGE, /BUILD may create.*claim/i);
+  assert.match(TICKET_COMMAND_USAGE, /same live claim/i);
+});
 
 test('preserves legacy positional lifecycle plan forms', () => {
   assert.deepEqual(parseTicketCommand('/addy-build', ['docs/plans/a b.md']), {

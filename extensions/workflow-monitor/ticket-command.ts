@@ -1,5 +1,5 @@
 export const TICKET_COMMAND_USAGE =
-  'Use --ticket <ticket-ref> without positional arguments, /addy-auto --tickets [--label <label>], or /addy-ticket claim|status|release|reclaim <ticket-ref>.';
+  'Use --ticket for lifecycle commands. Ticket forms: /addy-build --ticket <ticket-ref>; later lifecycle commands use the same form; /addy-auto --tickets; /addy-auto --tickets --label <label>; /addy-auto --tickets --status <status>; /addy-stats --ticket <ticket-ref>; /addy-ticket status <ticket-ref>; /addy-ticket release <ticket-ref>; /addy-ticket reclaim <ticket-ref>; /addy-ticket add-repository <ticket-ref> <repository>. BUILD may create a claim; every later lifecycle command requires the same live claim.';
 
 export type TicketLifecycleCommand =
   | '/addy-build'

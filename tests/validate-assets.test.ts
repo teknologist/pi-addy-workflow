@@ -57,6 +57,61 @@ function expandArguments(content: string, args: string): string {
     .replace(/\$@/g, args);
 }
 
+test('Ticket command docs cover the complete matrix, claim restrictions, and opt-in tracker smoke', async () => {
+  const [readme, autoPrompt, smoke] = await Promise.all([
+    readFile('README.md', 'utf8'),
+    readFile('prompts/addy-auto.md', 'utf8'),
+    readFile('docs/ticket-tracker-smoke.md', 'utf8'),
+  ]);
+  for (const command of [
+    '/addy-build --ticket <ticket-ref>',
+    '/addy-code-simplify --ticket <ticket-ref>',
+    '/addy-verify --ticket <ticket-ref>',
+    '/addy-review --ticket <ticket-ref>',
+    '/addy-fix-all --ticket <ticket-ref>',
+    '/addy-finish --ticket <ticket-ref>',
+    '/addy-auto --tickets',
+    '/addy-auto --tickets --label <label>',
+    '/addy-auto --tickets --status <status>',
+    '/addy-stats --ticket <ticket-ref>',
+    '/addy-ticket status <ticket-ref>',
+    '/addy-ticket release <ticket-ref>',
+    '/addy-ticket reclaim <ticket-ref>',
+    '/addy-ticket add-repository <ticket-ref> <repository>',
+  ])
+    assert.match(
+      readme,
+      new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+  for (const command of [
+    '/addy-auto --tickets --label <label>',
+    '/addy-auto --tickets --status <status>',
+  ])
+    assert.match(
+      autoPrompt,
+      new RegExp(command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+  assert.match(readme, /BUILD may create.*claim/i);
+  assert.match(readme, /same live claim/i);
+  assert.match(readme, /external.*read-only.*cannot.*Ticket claim/is);
+  assert.match(smoke, /opt-in.*non-CI/i);
+  assert.match(smoke, /credentials.*never/i);
+  assert.match(smoke, /GitHub/i);
+  assert.match(smoke, /Linear/i);
+  assert.ok(
+    smoke.includes(
+      'GitHub FINISH order: final Activity → terminal transition (close the issue) → confirming refetch.',
+    ),
+  );
+  assert.ok(
+    smoke.includes(
+      'Linear FINISH order: final Activity → terminal transition (move to the configured completed state) → confirming refetch.',
+    ),
+  );
+  assert.match(smoke, /not executed/i);
+  assert.match(smoke, /contract.*harness.*not.*live tracker mutation/is);
+});
+
 test('package manifest exposes Pi resources but not native agents', async () => {
   const manifest = JSON.parse(await readFile('package.json', 'utf8'));
   assert.ok(manifest.keywords.includes('pi-package'));

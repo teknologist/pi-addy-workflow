@@ -4,7 +4,7 @@
 
 > 1 routes (1 inferred) | 0 models | 0 components | 109 lib files | 7 env vars | 2 middleware | 100% test coverage
 > **Token savings:** this file is ~10,000 tokens. Without it, AI exploration would cost ~39,400 tokens. **Saves ~29,400 tokens per conversation.**
-> **Last scanned:** 2026-07-16 14:29 — re-run after significant changes
+> **Last scanned:** 2026-07-16 15:00 — re-run after significant changes
 
 ---
 
@@ -488,7 +488,7 @@
 - `extensions/workflow-monitor/workflow-host-events.ts` — imported by **6** files
 - `extensions/workflow-monitor/ticket-prompt.ts` — imported by **6** files
 - `extensions/workflow-monitor/workflow-phases.ts` — imported by **6** files
-- `extensions/workflow-monitor/ticket-command.ts` — imported by **5** files
+- `extensions/workflow-monitor/repository-scope.ts` — imported by **5** files
 
 ## Import Map (who imports what)
 
@@ -508,7 +508,7 @@
 # Test Coverage
 
 > **100%** of routes and models are covered by tests
-> 106 test files found
+> 107 test files found
 
 ## Covered Routes
 

@@ -15,7 +15,12 @@ Argument forms:
 Supplied argument text, if any: `$ARGUMENTS`.
 
 - `/addy-auto [plan-path]`
+- `/addy-auto --tickets`
+- `/addy-auto --tickets --label <label>`
+- `/addy-auto --tickets --status <status>`
 - `/addy-auto stop`
+
+Ticket queue mode uses the configured tracker guide, claims the oldest unblocked eligible Ticket Slice, and drains BUILD → VERIFY → REVIEW → FINISH in fresh continuations. It never dispatches SIMPLIFY implicitly. A live claim cannot be switched to another Ticket or a Slice Plan; use `/addy-ticket status <ticket-ref>` or `/addy-ticket release <ticket-ref>` when safe.
 
 Plan-selection rules follow the same rules as `/addy-build`:
 

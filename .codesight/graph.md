@@ -21,7 +21,7 @@
 - `extensions/workflow-monitor/workflow-host-events.ts` — imported by **6** files
 - `extensions/workflow-monitor/ticket-prompt.ts` — imported by **6** files
 - `extensions/workflow-monitor/workflow-phases.ts` — imported by **6** files
-- `extensions/workflow-monitor/ticket-command.ts` — imported by **5** files
+- `extensions/workflow-monitor/repository-scope.ts` — imported by **5** files
 
 ## Import Map (who imports what)
 

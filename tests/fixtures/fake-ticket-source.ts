@@ -2,6 +2,7 @@ import type { TicketOperation } from '../../extensions/workflow-monitor/workflow
 import type { TicketLifecycleSnapshot } from '../../extensions/workflow-monitor/ticket-phase-result.ts';
 
 type TargetKind = 'issue' | 'parent' | 'pull-request';
+type FakeTicketSourceKind = 'github' | 'linear' | 'local';
 
 type FakeTicketState = {
   ref: string;
@@ -11,7 +12,7 @@ type FakeTicketState = {
   nativeOwner?: string;
   claimId?: string;
   selector?: string;
-  terminal?: 'resolved';
+  terminal?: 'closed' | 'completed' | 'resolved';
   lifecycle: TicketLifecycleSnapshot;
   repositoryScope: string[];
   commitEvidence: Record<string, string>;
@@ -34,6 +35,8 @@ export type FakeTicketOperation = {
   removeSelector?: boolean;
   activity?: string | FakeFinishActivity;
   targetedReplacement?: { from: string; to: string };
+  lifecycle?: Partial<TicketLifecycleSnapshot>;
+  commitEvidence?: Record<string, string>;
   complete?: boolean;
   stopAfter?: 'native-owner';
 };
@@ -43,6 +46,9 @@ export class LostEnvelopeError extends Error {}
 export class FakeTicketSource {
   #state: FakeTicketState;
   #targetKind: TargetKind;
+  #kind?: FakeTicketSourceKind;
+  #labels: string[] = [];
+  #blockers: string[] = [];
   #routingAmbiguous = false;
   #raceNext = false;
   #loseNext = false;
@@ -51,12 +57,14 @@ export class FakeTicketSource {
   #originatingSelector?: string;
 
   constructor(options: {
+    kind?: FakeTicketSourceKind;
     ref: string;
     body: string;
     selector?: string;
     targetKind?: TargetKind;
     repositoryScope: string[];
   }) {
+    this.#kind = options.kind;
     this.#targetKind = options.targetKind ?? 'issue';
     this.#originatingSelector = options.selector;
     this.#state = {
@@ -78,6 +86,35 @@ export class FakeTicketSource {
   humanEdit(edit: (body: string) => string): void {
     this.#state.body = edit(this.#state.body);
     this.#bumpRevision();
+  }
+
+  setSelector(selector: string | undefined): void {
+    this.#state.selector = selector;
+  }
+
+  setLabels(labels: string[]): void {
+    this.#labels = [...labels];
+  }
+
+  setBlockers(blockers: string[]): void {
+    this.#blockers = [...blockers];
+  }
+
+  isEligible(): boolean {
+    return (
+      /## What to build\s*\n+\S/.test(this.#state.body) &&
+      /## Acceptance criteria[\s\S]*- \[ \]/.test(this.#state.body) &&
+      /## Blocked by\s*\n+\S/.test(this.#state.body) &&
+      this.#blockers.length === 0 &&
+      this.#state.claimId === undefined
+    );
+  }
+
+  matchesQueue(selector: string): boolean {
+    return (
+      this.isEligible() &&
+      (this.#state.selector === selector || this.#labels.includes(selector))
+    );
   }
 
   setLifecycle(lifecycle: TicketLifecycleSnapshot): void {
@@ -221,6 +258,18 @@ export class FakeTicketSource {
       this.#state.selector = undefined;
       changed = true;
     }
+    if (
+      this.#kind === 'local' &&
+      input.operation === 'claim' &&
+      this.#state.claimId &&
+      /^Status: ready-for-agent$/m.test(this.#state.body)
+    ) {
+      this.#state.body = this.#state.body.replace(
+        /^Status: ready-for-agent$/m,
+        'Status: claimed',
+      );
+      changed = true;
+    }
     if (input.targetedReplacement) {
       const { from, to } = input.targetedReplacement;
       const matches = this.#state.body.split(from).length - 1;
@@ -231,6 +280,20 @@ export class FakeTicketSource {
         this.#state.body = next;
         changed = true;
       }
+    }
+    if (input.lifecycle) {
+      this.#state.lifecycle = {
+        ...this.#state.lifecycle,
+        ...input.lifecycle,
+      };
+      changed = true;
+    }
+    if (input.commitEvidence) {
+      this.#state.commitEvidence = {
+        ...this.#state.commitEvidence,
+        ...input.commitEvidence,
+      };
+      changed = true;
     }
     if (input.activity !== undefined) {
       const marker = `<!-- addy-activity:${input.actionKey} -->`;
@@ -246,12 +309,18 @@ export class FakeTicketSource {
       const comment = `${content}\n${marker}`;
       if (index === -1) {
         this.#state.comments.push(comment);
+        if (this.#kind === 'local') this.#state.body += `\n\n${comment}`;
         changed = true;
       } else if (
         typeof input.activity !== 'string' &&
         input.activity.kind === 'final' &&
         this.#state.comments[index] !== comment
       ) {
+        if (this.#kind === 'local')
+          this.#state.body = this.#state.body.replace(
+            this.#state.comments[index],
+            comment,
+          );
         this.#state.comments[index] = comment;
         changed = true;
       }
@@ -276,7 +345,17 @@ export class FakeTicketSource {
       )
         throw new Error('closure requirements are incomplete');
       if (!this.#state.terminal) {
-        this.#state.terminal = 'resolved';
+        this.#state.terminal =
+          this.#kind === 'github'
+            ? 'closed'
+            : this.#kind === 'linear'
+              ? 'completed'
+              : 'resolved';
+        if (this.#kind === 'local')
+          this.#state.body = this.#state.body.replace(
+            /^Status: claimed$/m,
+            'Status: resolved',
+          );
         changed = true;
       }
     }
@@ -296,4 +375,29 @@ export class FakeTicketSource {
   #bumpRevision(): void {
     this.#state.revision = String(Number(this.#state.revision) + 1);
   }
+}
+
+export function selectFakeTicket(
+  tickets: FakeTicketSource[],
+  selection:
+    | { mode: 'direct'; ref: string }
+    | { mode: 'queue'; selector: string },
+): FakeTicketSource | undefined {
+  if (selection.mode === 'direct')
+    return tickets.find(
+      (ticket) => ticket.fetch().ref === selection.ref && ticket.isEligible(),
+    );
+  return tickets
+    .filter((ticket) => ticket.matchesQueue(selection.selector))
+    .sort((left, right) => {
+      const a = left.fetch().ref;
+      const b = right.fetch().ref;
+      const aNumber = /^\D*(\d+)/.exec(a)?.[1];
+      const bNumber = /^\D*(\d+)/.exec(b)?.[1];
+      if (aNumber && bNumber && Number(aNumber) !== Number(bNumber))
+        return Number(aNumber) - Number(bNumber);
+      if (aNumber) return -1;
+      if (bNumber) return 1;
+      return a.localeCompare(b);
+    })[0];
 }

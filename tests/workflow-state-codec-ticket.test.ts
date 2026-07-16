@@ -53,6 +53,34 @@ test('legacy state round-trips without ticket fields', () => {
   assert.equal('ticketRun' in parsed!, false);
 });
 
+test('external issue progress remains outside Workflow State and cannot create Ticket ownership', () => {
+  const externalProgress = {
+    runId: 'external-run',
+    status: 'running',
+    currentItem: 'ENG-42',
+    claimId: 'must-not-be-adopted',
+    operation: 'build',
+  };
+  const withoutTicket = parsePersistedWorkflowState({
+    ...createInitialWorkflowState(),
+    externalProgress,
+  });
+  assert.equal('externalProgress' in withoutTicket!, false);
+  assert.equal(withoutTicket?.executionSource, undefined);
+  assert.equal(withoutTicket?.ticketRun, undefined);
+  assert.equal(withoutTicket?.autoPendingAction, undefined);
+
+  const withTicket = parsePersistedWorkflowState({
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket',
+    ticketRun: validTicketRun,
+    externalProgress,
+  });
+  assert.equal('externalProgress' in withTicket!, false);
+  assert.deepEqual(withTicket?.ticketRun, validTicketRun);
+  assert.notEqual(withTicket?.ticketRun?.claim?.id, externalProgress.claimId);
+});
+
 test('valid ticket state round-trips strictly', () => {
   const state = {
     ...createInitialWorkflowState(),

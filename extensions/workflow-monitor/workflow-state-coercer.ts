@@ -26,6 +26,63 @@ import {
   hasTicketAssociation,
 } from './workflow-state-codec-ticket.ts';
 
+const WORKFLOW_STATE_FIELDS = [
+  'current',
+  'executionSource',
+  'ticketQueue',
+  'ticketRun',
+  'ticketHistory',
+  'ticketRecovery',
+  'phases',
+  'warnings',
+  'stats',
+  'committedTasks',
+  'activeSpec',
+  'activePlan',
+  'activeSuitePlan',
+  'currentTask',
+  'currentTaskId',
+  'nextTask',
+  'nextTaskId',
+  'currentTaskIndex',
+  'taskCount',
+  'currentSliceIndex',
+  'sliceCount',
+  'currentTaskSummary',
+  'nextTaskSummary',
+  'lastTrigger',
+  'lastArtifact',
+  'testStatus',
+  'autoMode',
+  'autoPendingAction',
+  'autoPausedReason',
+  'autoLastPrompt',
+  'autoRetryKey',
+  'autoRetryCount',
+  'autoFreshPrompt',
+  'autoFreshExpandedPrompt',
+  'autoFreshReason',
+  'autoFreshDeliveryKey',
+  'autoFreshConsumedKey',
+  'autoReviewFixKey',
+  'autoReviewFixCount',
+  'autoReviewFindingFingerprint',
+  'autoReviewFixNeedsReview',
+  'autoReviewTask',
+  'autoReviewTaskId',
+  'autoReviewTaskIndex',
+  'reviewStatsKey',
+  'reviewStatsAgent',
+] as const satisfies readonly (keyof WorkflowState)[];
+
+function knownWorkflowFields(candidate: Record<string, unknown>) {
+  return Object.fromEntries(
+    WORKFLOW_STATE_FIELDS.flatMap((field) =>
+      field in candidate ? [[field, candidate[field]]] : [],
+    ),
+  ) as Partial<WorkflowState>;
+}
+
 function migrateCommittedTasks(
   candidate: { stats?: unknown },
   committedTasks: Record<string, WorkflowTaskCommitRecord> | undefined,
@@ -82,7 +139,7 @@ export function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (candidate.ticketQueue !== undefined && !ticketQueue) return invalid();
 
   const base = {
-    ...candidate,
+    ...knownWorkflowFields(candidate as Record<string, unknown>),
     ...autoControl,
     committedTasks: migratedCommittedTasks,
     autoPendingAction,

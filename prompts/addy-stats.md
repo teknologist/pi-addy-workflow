@@ -8,11 +8,11 @@ argument-hint: "[plan-path]"
 
 Pi adaptation of Addy workflow stats inspection.
 
-Argument: `/addy-stats [plan-path]`.
+Argument: `/addy-stats [plan-path]`, `/addy-stats --ticket <ticket-ref>`, or `/addy-stats --all`.
 
 Supplied plan path argument, if any: `$ARGUMENTS`.
 
-Use the supplied plan path when present; otherwise use the active Addy workflow plan from workflow state when available.
+Use the supplied plan path when present; otherwise use the active Addy workflow plan from workflow state when available. Ticket form resolves only recorded Addy Ticket stats by source identity and remains read-only; external issue-progress snapshots cannot satisfy it.
 
 This command is read-only:
 
