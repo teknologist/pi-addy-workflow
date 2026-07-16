@@ -11,6 +11,10 @@ import {
   isValidProgress,
   readSlicePlanProgress,
 } from './slice-plan-progress.ts';
+import {
+  selectExternalProgress,
+  type SelectedExternalProgress,
+} from './external-progress.ts';
 
 export const WORKFLOW_WIDGET_KEY = 'pi-addy-workflow';
 const MIN_ARTIFACT_NAME_WIDTH = 12;
@@ -273,6 +277,74 @@ function shouldRenderTaskFooter(state: WorkflowState): boolean {
   );
 }
 
+function externalProgressLine({
+  snapshot,
+  stale,
+}: SelectedExternalProgress): string {
+  const phase =
+    snapshot.loopPhase === 'pre-loop' || snapshot.loopPhase === 'post-loop'
+      ? `${snapshot.loopPhase} boundary`
+      : snapshot.loopPhase;
+  const unit = snapshot.progressUnit ? ` ${snapshot.progressUnit}` : '';
+  const progress =
+    snapshot.completed !== undefined && snapshot.total !== undefined
+      ? `${snapshot.completed}/${snapshot.total}${unit}`
+      : snapshot.completed !== undefined
+        ? `${snapshot.completed} completed${unit}`
+        : snapshot.total !== undefined
+          ? `${snapshot.total} total${unit}`
+          : snapshot.progressUnit;
+  const primary = [progress, phase]
+    .filter((value): value is string => Boolean(value))
+    .join(' ');
+  const parts = [
+    primary,
+    snapshot.source,
+    snapshot.currentItem && sanitizeExternalText(snapshot.currentItem),
+    snapshot.status,
+    stale ? 'stale' : undefined,
+  ].filter((value): value is string => Boolean(value));
+  return `Issue: ${parts.join(' | ')}`;
+}
+
+function sanitizeExternalText(value: string): string {
+  return value
+    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+const externalProgressLineCache = new Map<
+  string,
+  { expiresAt: number; lines: string[] }
+>();
+
+function externalProgressLines(baseCwd: string | undefined): string[] {
+  if (!baseCwd) return [];
+  const cacheKey = `${process.env.HOME ?? ''}\0${baseCwd}`;
+  const now = Date.now();
+  const cached = externalProgressLineCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) return cached.lines;
+  try {
+    const selection = selectExternalProgress({ cwd: baseCwd });
+    const lines = [
+      ...selection.active.map(externalProgressLine),
+      ...(selection.terminal ? [externalProgressLine(selection.terminal)] : []),
+    ];
+    externalProgressLineCache.set(cacheKey, {
+      expiresAt: Date.now() + 1_000,
+      lines,
+    });
+    return lines;
+  } catch {
+    externalProgressLineCache.set(cacheKey, {
+      expiresAt: Date.now() + 1_000,
+      lines: [],
+    });
+    return [];
+  }
+}
+
 export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
   return (
     _tui?: unknown,
@@ -354,9 +426,12 @@ export function renderWorkflowWidget(state: WorkflowState, baseCwd?: string) {
           ? `${styleLabel('Current task: ')}${currentTask} | ${styleLabel('Next task: ')}${nextTask ?? 'none'}${sliceProgress}${taskProgress}${totalTaskProgress}`
           : workflowTaskFooterLine(state.activePlan, baseCwd, theme, state)
         : undefined;
-      const lines = [line, artifactLine, taskLine].filter(
-        (value): value is string => Boolean(value),
-      );
+      const lines = [
+        line,
+        artifactLine,
+        taskLine,
+        ...externalProgressLines(baseCwd),
+      ].filter((value): value is string => Boolean(value));
       return width
         ? lines.map((value) =>
             truncateToWidth(value, Math.max(1, width), '', true),

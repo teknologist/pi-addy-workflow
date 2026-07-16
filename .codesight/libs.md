@@ -20,10 +20,10 @@
   - function defaultDashboardBinDir: (home) => void
   - function packageRoot: (importMetaUrl) => string
   - function dashboardBinSource: (importMetaUrl) => string
+  - function progressBinSource: (importMetaUrl) => string
   - function dashboardShimContent: (sourcePath) => string
-  - function ensureDashboardShim: (importMetaUrl, options) => Promise<DashboardShimResult>
-  - function dashboardShimUsage: (result) => string
-  - _...5 more_
+  - function progressShimContent: (sourcePath) => string
+  - _...9 more_
 - `extensions/workflow-monitor/addy-auto-command.ts` — function handleAddyAutoCommand: (pi, event, ctx, deps) => Promise<ContinueResult>, type AddyAutoCommandDeps
 - `extensions/workflow-monitor/agent-end-event.ts`
   - function textFromMessage: (message) => string
@@ -118,6 +118,7 @@
   - const DEFAULT_ADDY_WORKFLOW_CONFIG: AddyWorkflowConfig
 - `extensions/workflow-monitor/dashboard-server.ts`
   - function dashboardSnapshot: (options) => DashboardSnapshot
+  - function dashboardHtml: () => string
   - function startAddyDashboard: (options) => void
   - type DashboardSnapshot
 - `extensions/workflow-monitor/event-intake.ts`
@@ -126,6 +127,14 @@
   - function planSubagentStartEvent: (event) => PlannedWorkflowEvent
   - type PlannedWorkflowEvent
 - `extensions/workflow-monitor/event-registry.ts` — function registerWorkflowEvents: (pi, deps) => void
+- `extensions/workflow-monitor/external-progress.ts`
+  - function canonicalGitCommonDir: ({...}, }, 'cwd'>) => string
+  - function externalProgressProjectKey: ({...}, }, 'cwd'>) => string
+  - function externalProgressRoot: ({...}) => string
+  - function externalProgressRunsDir: ({...}, homeDir, }) => string
+  - function parseIssueImplementationProgressSnapshot: (value) => IssueImplementationProgressSnapshot
+  - function startExternalProgress: (input) => IssueImplementationProgressSnapshot
+  - _...15 more_
 - `extensions/workflow-monitor/fresh-continuation-delivery.ts`
   - function createPendingFreshDelivery: (deps, consumedAutoFreshKeys) => void
   - type FreshContinuationDispatchOptions

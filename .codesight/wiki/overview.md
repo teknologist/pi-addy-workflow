@@ -6,13 +6,13 @@
 
 ## Scale
 
-1 API routes · 100 library files · 2 middleware layers · 7 environment variables
+1 API routes · 101 library files · 2 middleware layers · 7 environment variables
 
 ## Subsystems
 
 - **[Dashboard-server](./dashboard-server.md)** — 1 routes — touches: auth, cache, queue
 
-**Libraries:** 100 files — see [libraries.md](./libraries.md)
+**Libraries:** 101 files — see [libraries.md](./libraries.md)
 
 ## High-Impact Files
 
@@ -36,4 +36,4 @@ Changes to these files have the widest blast radius across the codebase:
 - `PI_SUBAGENT_CHILD` — `extensions/workflow-monitor/auto-runner-lock.ts`
 
 ---
-_Back to [index.md](./index.md) · Generated 2026-07-14_
+_Back to [index.md](./index.md) · Generated 2026-07-16_
