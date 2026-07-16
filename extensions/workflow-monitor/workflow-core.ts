@@ -97,6 +97,7 @@ export type TicketRunState = {
     kind: 'default' | 'label' | 'status';
     value: string;
   };
+  queueDrainId?: string;
   lifecycle: {
     implemented: boolean;
     verified: boolean;
@@ -145,6 +146,12 @@ export type TicketRunState = {
     finishActivityKind?: 'failure' | 'final';
     terminal?: TicketTerminalEvidence;
   };
+};
+
+export type TicketQueueState = {
+  schemaVersion: 1;
+  selector: NonNullable<TicketRunState['queueSelector']>;
+  drainId: string;
 };
 
 export type TicketRecoveryState = {
@@ -200,11 +207,14 @@ export type WorkflowAutoPausedReason =
   | 'same-phase-retry-limit'
   | 'ticket-operation-blocked'
   | 'ticket-operation-failed'
+  | 'configuration-ambiguous'
+  | 'scope-expansion-required'
   | 'user-stopped';
 
 export type WorkflowState = {
   current?: WorkflowPhase;
   executionSource?: 'plan' | 'ticket';
+  ticketQueue?: TicketQueueState;
   ticketRun?: TicketRunState;
   ticketHistory?: TicketRunState[];
   ticketRecovery?: TicketRecoveryState;

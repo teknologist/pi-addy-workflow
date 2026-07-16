@@ -47,13 +47,14 @@ test('parses ticket queues strictly', () => {
     kind: 'ticket-queue',
     selector: { kind: 'default', value: 'unbound' },
   });
-  assert.deepEqual(
-    parseTicketCommand('/addy-auto', ['--tickets', '--label', 'backend']),
-    {
-      kind: 'ticket-queue',
-      selector: { kind: 'label', value: 'backend' },
-    },
-  );
+  for (const kind of ['label', 'status'] as const)
+    assert.deepEqual(
+      parseTicketCommand('/addy-auto', ['--tickets', `--${kind}`, 'backend']),
+      {
+        kind: 'ticket-queue',
+        selector: { kind, value: 'backend' },
+      },
+    );
   for (const [command, args] of [
     ['/addy-auto', ['--label', 'backend']],
     ['/addy-auto', ['stop', '--tickets']],

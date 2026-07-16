@@ -258,7 +258,7 @@
   - type WorkflowTaskCommitRecord
   - type WorkflowStatsSession
   - type WorkflowStats
-  - _...13 more_
+  - _...14 more_
 - `extensions/workflow-monitor/workflow-delivery.ts` — function createWorkflowDelivery: (deps) => void, type WorkflowDeliveryOptions
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
@@ -328,10 +328,10 @@
   - function isTicketSourceKind: (value) => value is TicketRunState['source']['kind']
   - function isTicketOperation: (value) => value is TicketOperation
   - function coerceTicketRun: (value) => TicketRunState | undefined
+  - function coerceTicketQueue: (value) => TicketQueueState | undefined
   - function coerceTicketHistory: (value) => TicketRunState[] | undefined
   - function hasTicketAssociation: (value) => boolean
-  - function coerceTicketExecution: (candidate, unknown>, base) => WorkflowState | undefined
-  - _...2 more_
+  - _...3 more_
 - `extensions/workflow-monitor/workflow-state-coercer.ts` — function coerceWorkflowState: (value) => WorkflowState | undefined
 - `extensions/workflow-monitor/workflow-state-control.ts`
   - function clearReviewControlUpdates: () => Partial<WorkflowState>

@@ -177,6 +177,50 @@ test('store project control fails closed when authoritative action mismatches it
   assert.equal(state.ticketRecovery?.ticketRef, 'ENG-42');
 });
 
+test('store project control preserves a fresh queue frontier between tickets', () => {
+  const selector = { kind: 'label' as const, value: 'ready-for-agent' };
+  const project = {
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket' as const,
+    autoMode: true,
+    ticketQueue: {
+      schemaVersion: 1 as const,
+      selector,
+      drainId: 'drain-a',
+    },
+    autoPendingAction: {
+      executionSource: 'ticket' as const,
+      key: ticketAutoWorkflowActionKey(
+        {
+          source: 'ticket',
+          ticketRef: 'ready-for-agent',
+          runId: 'next-run',
+          selector,
+        },
+        'select',
+        'attempt-0',
+      ),
+      prompt: '/addy-auto --tickets --label ready-for-agent',
+      ticketRef: 'ready-for-agent',
+      runId: 'next-run',
+      selector,
+      operation: 'select' as const,
+      attemptMarker: 'attempt-0',
+      reason: 'next-action' as const,
+      attempts: 0,
+      createdAt: '2026-07-15T00:00:00.000Z',
+    },
+  };
+
+  const state = resolveWorkflowStateWithProjectControl(
+    createInitialWorkflowState(),
+    project,
+  );
+  assert.equal(state.executionSource, 'ticket');
+  assert.deepEqual(state.ticketQueue?.selector, selector);
+  assert.equal(state.autoPendingAction?.executionSource, 'ticket');
+});
+
 test('store project control preserves a validated pre-claim ticket run', () => {
   const project = {
     ...createInitialWorkflowState(),

@@ -21,6 +21,8 @@ export function isAutoPausedReason(
     value === 'same-phase-retry-limit' ||
     value === 'ticket-operation-blocked' ||
     value === 'ticket-operation-failed' ||
+    value === 'configuration-ambiguous' ||
+    value === 'scope-expansion-required' ||
     value === 'user-stopped'
   );
 }

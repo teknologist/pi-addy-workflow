@@ -32,6 +32,7 @@ export const PROJECT_FALLBACK_CONTROL_FIELDS = [
 
 const TRANSITION_CONTROL_FIELDS = [
   'executionSource',
+  'ticketQueue',
   'ticketRun',
   'ticketRecovery',
   'autoMode',

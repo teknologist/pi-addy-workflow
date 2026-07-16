@@ -11,6 +11,12 @@ import {
   type TicketResultExpectation,
 } from './ticket-phase-result.ts';
 import {
+  autoFreshContinuationKey,
+  pendingAutoActionForPrompt,
+} from './auto-control.ts';
+import { buildTicketPrompt } from './ticket-prompt.ts';
+import { commandFromArgs } from './workflow-host-events.ts';
+import {
   clearTicketClarification,
   resolveTicketClarification,
   setTicketClarification,
@@ -73,6 +79,13 @@ function expectationFromPending(
     manual: !state.autoMode,
     pendingClarification: state.ticketRun?.pendingClarification,
     ...finishFrontierExpectation(state.ticketRun, pending.operation),
+    ...(pending.operation === 'select'
+      ? {
+          excludedTickets: (state.ticketHistory ?? [])
+            .filter((run) => run.queueDrainId === state.ticketQueue?.drainId)
+            .map((run) => run.source),
+        }
+      : {}),
   };
 }
 
@@ -274,13 +287,25 @@ export function ingestTicketResult(
   }
 
   if (parsed.kind === 'ticket-queue-result') {
-    const stopped =
-      parsed.outcome === 'blocked' || parsed.outcome === 'failed'
-        ? {
-            autoMode: false,
-            autoPausedReason: `ticket-operation-${parsed.outcome}` as const,
-          }
-        : {};
+    const queueComplete = parsed.terminalReason === 'empty';
+    const clearExecutionSource =
+      !parsed.selected &&
+      !state.ticketRun &&
+      !state.ticketRecovery &&
+      !(
+        state.autoPendingAction?.executionSource === 'ticket' &&
+        state.autoPendingAction.operation === 'claim'
+      );
+    const stopped = !parsed.selected
+      ? {
+          ...exitAutoModeControlUpdates(),
+          autoPausedReason: queueComplete
+            ? undefined
+            : parsed.terminalReason === 'configuration-ambiguous'
+              ? ('configuration-ambiguous' as const)
+              : (`ticket-operation-${parsed.outcome}` as const),
+        }
+      : {};
     if (parsed.selected && !expected.runId)
       return rejected(state, new Error('Selected Ticket run is missing.'));
     const selectedRun: TicketRunState | undefined = parsed.selected
@@ -290,6 +315,9 @@ export function ingestTicketResult(
           runId: expected.runId!,
           ...(repositoryRoot ? { repositoryRoot } : {}),
           queueSelector: parsed.selector,
+          ...(state.ticketQueue
+            ? { queueDrainId: state.ticketQueue.drainId }
+            : {}),
           lifecycle: {
             implemented: false,
             verified: false,
@@ -309,6 +337,7 @@ export function ingestTicketResult(
         ...state,
         ...stopped,
         ...(selectedRun ? { ticketRun: selectedRun } : {}),
+        ...(clearExecutionSource ? { executionSource: undefined } : {}),
         autoPendingAction: undefined,
         autoLastPrompt: undefined,
         warnings: [...state.warnings, queuePauseSummary(parsed)],
@@ -330,6 +359,10 @@ export function ingestTicketResult(
     repositoryScope: parsed.repositoryScope,
   };
   if (!run?.runId) return rejected(state, new Error('Ticket run is missing.'));
+  const runQueue =
+    state.ticketQueue?.drainId === run.queueDrainId
+      ? state.ticketQueue
+      : undefined;
   const {
     claim: _previousClaim,
     pendingScopeRequest: previousScopeRequest,
@@ -348,9 +381,11 @@ export function ingestTicketResult(
     parsed.outcome === 'blocked' || parsed.outcome === 'failed'
       ? {
           autoMode: false,
-          autoPausedReason: `ticket-operation-${parsed.outcome}` as const,
+          autoPausedReason:
+            parsed.blockedReason ??
+            (`ticket-operation-${parsed.outcome}` as const),
         }
-      : completed && parsed.operation === 'finish'
+      : completed && parsed.operation === 'finish' && !runQueue
         ? exitAutoModeControlUpdates()
         : {};
   const retryInterruptedFinish = parsed.operation === 'finish' && !completed;
@@ -420,10 +455,50 @@ export function ingestTicketResult(
     const completedRun = nextState.ticketRun!;
     nextState = {
       ...nextState,
-      executionSource: undefined,
+      executionSource: runQueue ? 'ticket' : undefined,
       ticketRun: undefined,
       ticketHistory: [...(state.ticketHistory ?? []), completedRun],
     };
+    if (runQueue && state.autoMode) {
+      const selector = runQueue.selector;
+      const queuePrompt = commandFromArgs(
+        '/addy-auto',
+        selector.kind === 'default'
+          ? ['--tickets']
+          : ['--tickets', `--${selector.kind}`, selector.value],
+      );
+      const pending = pendingAutoActionForPrompt(
+        queuePrompt,
+        nextState,
+        undefined,
+        'next-action',
+        '',
+      );
+      if (pending.executionSource !== 'ticket')
+        throw new Error('Queue continuation did not produce a Ticket action.');
+      const freshState = { ...nextState, autoPendingAction: pending };
+      nextState = {
+        ...freshState,
+        autoFreshPrompt: queuePrompt,
+        autoFreshExpandedPrompt: buildTicketPrompt({
+          operation: 'select',
+          selector: pending.selector,
+          queueDrainId: runQueue.drainId,
+          excludedTickets: (nextState.ticketHistory ?? [])
+            .filter((run) => run.queueDrainId === runQueue.drainId)
+            .map((run) => run.source),
+          runId: pending.runId,
+          actionKey: pending.key,
+          attempt: numericAttempt(pending.attemptMarker) ?? pending.attempts,
+        }),
+        autoFreshReason: 'between-tasks',
+        autoFreshDeliveryKey: autoFreshContinuationKey(
+          queuePrompt,
+          'between-tasks',
+          freshState,
+        ),
+      };
+    }
   }
   return {
     state: nextState,

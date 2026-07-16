@@ -15,6 +15,8 @@ export type TicketPromptRequest = {
   repository?: string;
   repositoryRoot?: string;
   selector?: TicketRunState['queueSelector'];
+  queueDrainId?: string;
+  excludedTickets?: TicketRunState['source'][];
   manual?: boolean;
   pendingClarification?: TicketRunState['pendingClarification'];
   repositoryScope?: string[];
@@ -31,7 +33,7 @@ export type TicketPromptRequest = {
 
 const INSTRUCTIONS: Record<TicketOperation, string> = {
   select:
-    'Read-only: inspect the configured queue, classify every candidate, and select only one eligible child issue. You must not mutate tickets, claims, labels, comments, parents, or pull requests. Return the Queue result schema.',
+    'Read-only: inspect the configured queue and classify every matching candidate before selecting exactly one. A default selector must resolve the configured ready-for-agent mapping; an explicit label changes selection only, never lifecycle or completion semantics. Validate open state, non-empty objective, at least one checkable acceptance criterion, resolvable blocker information (explicit none is valid), managed/native claim safety, body structure, and revision. Closed or resolved tickets, pull requests, claimed, malformed, and blocked tickets are never eligible. Select the oldest unblocked eligible ticket. Return eligibleCandidates in deterministic selection order: remote candidates by oldest createdAt then source kind and ref as tie-breakers; local files by numeric prefix then deterministic path fallback. selected must equal the first eligibleCandidates source. Return every non-selected match in exactly one blocked, claimed, ineligible, or ambiguous category, including mixed queues. You must not mutate tickets, claims, labels, comments, parents, pull requests, or code. Return the Queue result schema.',
   status:
     'Read-only: fetch and report the authoritative current ticket state, including an unclaimed ticket. You must not mutate tickets, claims, labels, comments, parents, or pull requests.',
   claim:
@@ -137,6 +139,17 @@ export function buildTicketPrompt(request: TicketPromptRequest): string {
     ...(request.selector
       ? [`Queue selector: ${request.selector.kind}:${request.selector.value}`]
       : []),
+    ...(request.queueDrainId
+      ? [`Queue drain id: ${request.queueDrainId}`]
+      : []),
+    ...(request.excludedTickets?.length
+      ? [
+          'Already completed in this queue drain; exclude only these exact source kind + ref pairs:',
+          ...request.excludedTickets.map(
+            (source) => `- ${source.kind}:${source.ref}`,
+          ),
+        ]
+      : []),
     `Auto Action Key: ${request.actionKey}`,
     `Attempt: ${request.attempt}`,
     ...scope,
@@ -152,7 +165,7 @@ export function buildTicketPrompt(request: TicketPromptRequest): string {
     : '';
   const ambiguity = request.manual
     ? '\n\nIf required tracker routing or completion semantics are genuinely ambiguous, ask exactly one bounded ask_user question. If canceled, preserve the claim, return clarification as {kind, prompt} with a blocked result, and perform no mutation. On an answer, persist and apply the resolved operation fact, then return {kind, prompt, resolution} with the completed result.'
-    : '';
+    : '\n\nIn Addy Auto Mode, required tracker ambiguity must return a blocked result with blockedReason configuration-ambiguous and perform no mutation. A required repository outside locked scope must return blockedReason scope-expansion-required and perform no mutation or code edit.';
   const result =
     'End with exactly one hidden JSON result envelope using the versioned Queue or Ticket schema: <!-- ADDY-TICKET-RESULT {JSON} -->. Every Ticket result must include the authoritative claim snapshot or null from the final fetch. Include only bounded orchestration evidence; never include ticket bodies, comments, narrative, logs, tokens, secrets, or credentials.';
 

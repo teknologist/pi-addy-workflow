@@ -62,8 +62,15 @@ export type TicketLifecycleSnapshot = {
 type TicketSource = TicketRunState['source'];
 type TicketClaimSnapshot = NonNullable<TicketRunState['claim']>;
 type TicketOutcome = (typeof OUTCOMES)[number];
+type TicketBlockedReason =
+  | 'configuration-ambiguous'
+  | 'scope-expansion-required';
 type QueueTerminalReason = (typeof TERMINAL_REASONS)[number];
-type QueueCategory = { count: number; refs: string[] };
+type QueueCategory = { count: number; refs: TicketSource[] };
+type QueueEligibleCandidate = {
+  source: TicketSource;
+  createdAt?: string;
+};
 
 export type TicketQueueResult = {
   schemaVersion: 1;
@@ -83,6 +90,7 @@ export type TicketQueueResult = {
     ineligible: QueueCategory;
     ambiguous: QueueCategory;
   };
+  eligibleCandidates: QueueEligibleCandidate[];
   selected?: { source: TicketSource };
   terminalReason: QueueTerminalReason;
 };
@@ -100,6 +108,7 @@ export type TicketPhaseResult = {
   kind: 'ticket-phase-result';
   operation: Exclude<TicketOperation, 'select'>;
   outcome: TicketOutcome;
+  blockedReason?: TicketBlockedReason;
   source: TicketSource;
   runId?: string;
   claimId?: string;
@@ -153,6 +162,7 @@ export type TicketResultExpectation = {
   previousFinishActivityKind?: NonNullable<
     TicketPhaseResult['activity']
   >['kind'];
+  excludedTickets?: TicketSource[];
 };
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -244,18 +254,74 @@ function parseLifecycle(value: unknown): TicketLifecycleSnapshot {
   return value as TicketLifecycleSnapshot;
 }
 
+function sourceKey(source: TicketSource): string {
+  return `${source.kind}:${source.ref}`;
+}
+
 function parseCategory(value: unknown): QueueCategory {
   if (
     !record(value) ||
     !exactKeys(value, ['count', 'refs']) ||
     !safeAttempt(value.count) ||
     !Array.isArray(value.refs) ||
-    !value.refs.every(safeString) ||
-    value.count !== value.refs.length ||
-    new Set(value.refs).size !== value.refs.length
+    value.count !== value.refs.length
   )
     throw new Error('Ticket queue category is malformed.');
-  return value as QueueCategory;
+  const refs = value.refs.map(parseSource);
+  if (new Set(refs.map(sourceKey)).size !== refs.length)
+    throw new Error('Ticket queue category is malformed.');
+  return { count: value.count, refs };
+}
+
+function parseEligibleCandidate(value: unknown): QueueEligibleCandidate {
+  if (
+    !record(value) ||
+    !exactKeys(value, ['source'], ['createdAt']) ||
+    (value.createdAt !== undefined &&
+      (!safeString(value.createdAt) ||
+        new Date(value.createdAt).toISOString() !== value.createdAt))
+  )
+    throw new Error('Ticket queue eligible candidate is malformed.');
+  const source = parseSource(value.source);
+  if ((source.kind === 'local') === (value.createdAt !== undefined))
+    throw new Error('Ticket queue eligible candidate ordering is malformed.');
+  return {
+    source,
+    ...(value.createdAt ? { createdAt: value.createdAt as string } : {}),
+  };
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function localNumericPrefix(ref: string): bigint | undefined {
+  const prefix = /(?:^|[/\\])(\d+)/.exec(ref)?.[1];
+  return prefix === undefined ? undefined : BigInt(prefix);
+}
+
+function compareEligibleCandidates(
+  left: QueueEligibleCandidate,
+  right: QueueEligibleCandidate,
+): number {
+  if (left.source.kind === 'local' && right.source.kind === 'local') {
+    const leftPrefix = localNumericPrefix(left.source.ref);
+    const rightPrefix = localNumericPrefix(right.source.ref);
+    if (leftPrefix !== undefined && rightPrefix !== undefined) {
+      if (leftPrefix < rightPrefix) return -1;
+      if (leftPrefix > rightPrefix) return 1;
+    } else if (leftPrefix !== undefined) return -1;
+    else if (rightPrefix !== undefined) return 1;
+    return compareText(left.source.ref, right.source.ref);
+  }
+  const age = compareText(left.createdAt ?? '', right.createdAt ?? '');
+  if (age !== 0) return age;
+  const kind = compareText(left.source.kind, right.source.kind);
+  return kind || compareText(left.source.ref, right.source.ref);
+}
+
+function sameSource(left: TicketSource, right: TicketSource): boolean {
+  return left.kind === right.kind && left.ref === right.ref;
 }
 
 function derivedTerminalReason(
@@ -287,6 +353,7 @@ function parseQueueResult(value: Record<string, unknown>): TicketQueueResult {
         'attempt',
         'selector',
         'categories',
+        'eligibleCandidates',
         'terminalReason',
       ],
       ['selected'],
@@ -302,6 +369,7 @@ function parseQueueResult(value: Record<string, unknown>): TicketQueueResult {
     !oneOf(value.selector.kind, ['default', 'label', 'status'] as const) ||
     !safeString(value.selector.value) ||
     !record(value.categories) ||
+    !Array.isArray(value.eligibleCandidates) ||
     !exactKeys(value.categories, [
       'eligible',
       'blocked',
@@ -321,15 +389,37 @@ function parseQueueResult(value: Record<string, unknown>): TicketQueueResult {
     ambiguous: parseCategory(value.categories.ambiguous),
   };
   const refs = Object.values(categories).flatMap((category) => category.refs);
-  if (new Set(refs).size !== refs.length)
-    throw new Error('Ticket queue refs must be unique across categories.');
+  if (new Set(refs.map(sourceKey)).size !== refs.length)
+    throw new Error(
+      'Ticket queue identities must be unique across categories.',
+    );
+  const eligibleCandidates = value.eligibleCandidates.map(
+    parseEligibleCandidate,
+  );
+  if (
+    eligibleCandidates.length !== categories.eligible.count ||
+    eligibleCandidates.some(
+      (candidate, index) =>
+        !sameSource(candidate.source, categories.eligible.refs[index]),
+    ) ||
+    eligibleCandidates.some(
+      (candidate, index) =>
+        index > 0 &&
+        compareEligibleCandidates(eligibleCandidates[index - 1], candidate) >=
+          0,
+    )
+  )
+    throw new Error('Ticket queue eligible candidates are not ordered.');
   let selected: TicketQueueResult['selected'];
   if (value.selected !== undefined) {
     if (!record(value.selected) || !exactKeys(value.selected, ['source']))
       throw new Error('Ticket queue selection is malformed.');
     selected = { source: parseSource(value.selected.source) };
-    if (!categories.eligible.refs.includes(selected.source.ref))
-      throw new Error('Selected Ticket is not categorized as eligible.');
+    if (
+      !eligibleCandidates[0] ||
+      !sameSource(selected.source, eligibleCandidates[0].source)
+    )
+      throw new Error('Selected Ticket is not the first eligible candidate.');
   }
   if (value.terminalReason !== derivedTerminalReason(categories, selected))
     throw new Error('Ticket queue terminal reason is inconsistent.');
@@ -342,6 +432,7 @@ function parseQueueResult(value: Record<string, unknown>): TicketQueueResult {
   return {
     ...(value as TicketQueueResult),
     categories,
+    eligibleCandidates,
     ...(selected ? { selected } : {}),
   };
 }
@@ -457,6 +548,7 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
         'runId',
         'claimId',
         'staleClaimId',
+        'blockedReason',
         'activity',
         'repository',
         'reviewDisposition',
@@ -481,6 +573,17 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
     throw new Error('Ticket Phase Result is malformed.');
 
   const operation = value.operation as TicketOperation;
+  const blockedReason = oneOf(value.blockedReason, [
+    'configuration-ambiguous',
+    'scope-expansion-required',
+  ] as const)
+    ? value.blockedReason
+    : undefined;
+  if (
+    value.blockedReason !== undefined &&
+    (!blockedReason || value.outcome !== 'blocked')
+  )
+    throw new Error('Ticket blocked reason is malformed.');
   const source = parseSource(value.source);
   const claim = parseClaim(value.claim);
   const lifecycle = parseLifecycle(value.lifecycle);
@@ -654,6 +757,7 @@ function parseTicketResult(value: Record<string, unknown>): TicketPhaseResult {
 
   return {
     ...(value as TicketPhaseResult),
+    ...(blockedReason ? { blockedReason } : {}),
     source,
     claim,
     lifecycle,
@@ -720,6 +824,15 @@ function assertExpectation(
         result.selector.value !== expected.selector.value)
     )
       throw new Error('Ticket Queue selector is mismatched.');
+    if (
+      result.selected &&
+      expected.excludedTickets?.some((source) =>
+        sameSource(source, result.selected!.source),
+      )
+    )
+      throw new Error(
+        'Selected Ticket was already completed by this queue run.',
+      );
     if (
       result.selected &&
       ((expected.source !== undefined &&

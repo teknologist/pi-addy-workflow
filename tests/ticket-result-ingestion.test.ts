@@ -75,12 +75,18 @@ test('successful Queue selection persists the selected Ticket run identity', () 
     attempt: 1,
     selector: { kind: 'label', value: 'ready-for-agent' },
     categories: {
-      eligible: { count: 1, refs: ['#9'] },
+      eligible: { count: 1, refs: [{ kind: 'github', ref: '#9' }] },
       blocked: { count: 0, refs: [] },
       claimed: { count: 0, refs: [] },
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [
+      {
+        source: { kind: 'github', ref: '#9' },
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
     selected: { source: { kind: 'github', ref: '#9' } },
     terminalReason: 'selected',
   });
@@ -128,12 +134,21 @@ test('Queue duplicate rejects altered persisted identity', () => {
     attempt: 1,
     selector: { kind: 'label' as const, value: 'ready-for-agent' },
     categories: {
-      eligible: { count: 1, refs: ['#9'] },
+      eligible: {
+        count: 1,
+        refs: [{ kind: 'github' as const, ref: '#9' }],
+      },
       blocked: { count: 0, refs: [] },
       claimed: { count: 0, refs: [] },
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [
+      {
+        source: { kind: 'github' as const, ref: '#9' },
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
     selected: { source: { kind: 'github' as const, ref: '#9' } },
     terminalReason: 'selected' as const,
   };
@@ -153,8 +168,14 @@ test('Queue duplicate rejects altered persisted identity', () => {
         selected: { source: { kind: 'github', ref: '#10' } },
         categories: {
           ...result.categories,
-          eligible: { count: 1, refs: ['#10'] },
+          eligible: { count: 1, refs: [{ kind: 'github', ref: '#10' }] },
         },
+        eligibleCandidates: [
+          {
+            source: { kind: 'github', ref: '#10' },
+            createdAt: '2026-07-15T00:00:00.000Z',
+          },
+        ],
       }),
     ).status,
     'rejected',
@@ -186,11 +207,12 @@ test('Queue ingestion does not require an active Ticket run and persists termina
     selector: { kind: 'label', value: 'ready-for-agent' },
     categories: {
       eligible: { count: 0, refs: [] },
-      blocked: { count: 1, refs: ['#9'] },
+      blocked: { count: 1, refs: [{ kind: 'github', ref: '#9' }] },
       claimed: { count: 0, refs: [] },
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [],
     terminalReason: 'all-blocked',
   });
   const ingestion = ingestTicketResult(state, result);
@@ -224,6 +246,7 @@ test('successful Queue result without a selection is rejected without advancing 
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [],
     terminalReason: 'empty',
   });
   const ingestion = ingestTicketResult(state, result);
@@ -253,6 +276,7 @@ test('Queue selector is bound to the pending selection', () => {
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [],
     terminalReason: 'empty' as const,
   };
   for (const selector of [

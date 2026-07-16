@@ -21,6 +21,7 @@ import {
 import {
   coerceTicketExecution,
   coerceTicketHistory,
+  coerceTicketQueue,
   corruptTicketExecution,
   hasTicketAssociation,
 } from './workflow-state-codec-ticket.ts';
@@ -77,6 +78,8 @@ export function coerceWorkflowState(value: unknown): WorkflowState | undefined {
   if (!phases) return invalid();
   const ticketHistory = coerceTicketHistory(candidate.ticketHistory);
   if (candidate.ticketHistory !== undefined && !ticketHistory) return invalid();
+  const ticketQueue = coerceTicketQueue(candidate.ticketQueue);
+  if (candidate.ticketQueue !== undefined && !ticketQueue) return invalid();
 
   const base = {
     ...candidate,
@@ -84,6 +87,7 @@ export function coerceWorkflowState(value: unknown): WorkflowState | undefined {
     committedTasks: migratedCommittedTasks,
     autoPendingAction,
     ticketHistory,
+    ticketQueue,
     current,
     phases,
     warnings: metadata.warnings,

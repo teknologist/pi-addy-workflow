@@ -31,6 +31,7 @@ export type {
   AutoFreshReason,
   AutoPendingActionReason,
   TicketOperation,
+  TicketQueueState,
   TicketRecoveryState,
   TicketRunState,
   WorkflowAutoPausedReason,

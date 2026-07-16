@@ -104,6 +104,10 @@ export function autoFreshContinuationKey(
   reason: AutoFreshReason,
   state: WorkflowState,
 ): string {
+  const pendingTicket =
+    state.autoPendingAction?.executionSource === 'ticket'
+      ? state.autoPendingAction
+      : undefined;
   return [
     reason,
     prompt,
@@ -116,14 +120,16 @@ export function autoFreshContinuationKey(
     state.autoRetryKey ?? '',
     state.autoRetryCount ?? '',
     state.executionSource === 'ticket'
-      ? (state.ticketRun?.source.kind ?? '')
+      ? (state.ticketRun?.source.kind ?? pendingTicket?.sourceKind ?? '')
       : '',
     state.executionSource === 'ticket'
-      ? (state.ticketRun?.source.ref ?? '')
+      ? (state.ticketRun?.source.ref ?? pendingTicket?.ticketRef ?? '')
       : '',
-    state.executionSource === 'ticket' ? (state.ticketRun?.runId ?? '') : '',
     state.executionSource === 'ticket'
-      ? (state.ticketRun?.claim?.id ?? '')
+      ? (state.ticketRun?.runId ?? pendingTicket?.runId ?? '')
+      : '',
+    state.executionSource === 'ticket'
+      ? (state.ticketRun?.claim?.id ?? pendingTicket?.claimId ?? '')
       : '',
   ].join('\u001f');
 }

@@ -574,6 +574,7 @@ test('empty and mixed queue results retain categories and deterministic summarie
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [],
     terminalReason: 'empty',
   };
   const parsedEmpty = extractTicketResultEnvelope(envelope(empty), {
@@ -589,9 +590,18 @@ test('empty and mixed queue results retain categories and deterministic summarie
 
   const mixed = structuredClone(empty) as TicketQueueResult;
   mixed.outcome = 'blocked';
-  mixed.categories.blocked = { count: 1, refs: ['#1'] };
-  mixed.categories.claimed = { count: 1, refs: ['#2'] };
-  mixed.categories.ineligible = { count: 1, refs: ['#3'] };
+  mixed.categories.blocked = {
+    count: 1,
+    refs: [{ kind: 'github', ref: '#1' }],
+  };
+  mixed.categories.claimed = {
+    count: 1,
+    refs: [{ kind: 'github', ref: '#2' }],
+  };
+  mixed.categories.ineligible = {
+    count: 1,
+    refs: [{ kind: 'github', ref: '#3' }],
+  };
   mixed.terminalReason = 'mixed';
   const parsedMixed = extractTicketResultEnvelope(envelope(mixed), {
     operation: 'select',
@@ -622,6 +632,7 @@ test('queue rejects successful terminal results without a selection and duplicat
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [],
     terminalReason: 'empty',
   };
   const expected = {
@@ -636,8 +647,14 @@ test('queue rejects successful terminal results without a selection and duplicat
   }
 
   queue.outcome = 'blocked';
-  queue.categories.blocked = { count: 1, refs: ['#9'] };
-  queue.categories.claimed = { count: 1, refs: ['#9'] };
+  queue.categories.blocked = {
+    count: 1,
+    refs: [{ kind: 'github', ref: '#9' }],
+  };
+  queue.categories.claimed = {
+    count: 1,
+    refs: [{ kind: 'github', ref: '#9' }],
+  };
   queue.terminalReason = 'mixed';
   assert.throws(() => extractTicketResultEnvelope(envelope(queue), expected));
 });
@@ -658,6 +675,7 @@ test('result expectations require only their operation identity fields', () => {
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [],
     terminalReason: 'empty',
   };
   const queueExpectation = {
@@ -699,7 +717,51 @@ test('result expectations require only their operation identity fields', () => {
   );
 });
 
-test('queue selects eligible first and ambiguity has next precedence', () => {
+test('queue category identities allow the same ref from different sources', () => {
+  const github = { kind: 'github' as const, ref: 'ENG-42' };
+  const linear = { kind: 'linear' as const, ref: 'ENG-42' };
+  const queue = {
+    schemaVersion: 1,
+    kind: 'ticket-queue-result',
+    operation: 'select',
+    outcome: 'succeeded',
+    actionKey: 'queue-1',
+    attempt: 0,
+    selector: { kind: 'label', value: 'ready-for-agent' },
+    categories: {
+      eligible: { count: 2, refs: [github, linear] },
+      blocked: { count: 0, refs: [] },
+      claimed: { count: 0, refs: [] },
+      ineligible: { count: 0, refs: [] },
+      ambiguous: { count: 0, refs: [] },
+    },
+    eligibleCandidates: [
+      { source: github, createdAt: '2026-07-14T00:00:00.000Z' },
+      { source: linear, createdAt: '2026-07-14T00:00:00.000Z' },
+    ],
+    selected: { source: github },
+    terminalReason: 'selected',
+  };
+  const expected = {
+    operation: 'select' as const,
+    actionKey: 'queue-1',
+    attempt: 0,
+    selector: { kind: 'label' as const, value: 'ready-for-agent' },
+  };
+
+  assert.equal(
+    extractTicketResultEnvelope(envelope(queue), expected).kind,
+    'ticket-queue-result',
+  );
+  assert.throws(() =>
+    extractTicketResultEnvelope(
+      envelope({ ...queue, selected: { source: linear } }),
+      expected,
+    ),
+  );
+});
+
+test('queue validates deterministic eligible ordering and selects its first candidate', () => {
   const selected = {
     schemaVersion: 1,
     kind: 'ticket-queue-result',
@@ -709,12 +771,28 @@ test('queue selects eligible first and ambiguity has next precedence', () => {
     attempt: 0,
     selector: { kind: 'label', value: 'ready-for-agent' },
     categories: {
-      eligible: { count: 1, refs: ['#2'] },
-      blocked: { count: 1, refs: ['#1'] },
+      eligible: {
+        count: 2,
+        refs: [
+          { kind: 'github', ref: '#2' },
+          { kind: 'github', ref: '#4' },
+        ],
+      },
+      blocked: { count: 1, refs: [{ kind: 'github', ref: '#1' }] },
       claimed: { count: 0, refs: [] },
       ineligible: { count: 0, refs: [] },
-      ambiguous: { count: 1, refs: ['#3'] },
+      ambiguous: { count: 1, refs: [{ kind: 'github', ref: '#3' }] },
     },
+    eligibleCandidates: [
+      {
+        source: { kind: 'github', ref: '#2' },
+        createdAt: '2026-07-14T00:00:00.000Z',
+      },
+      {
+        source: { kind: 'github', ref: '#4' },
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
     selected: { source: { kind: 'github', ref: '#2' } },
     terminalReason: 'selected',
   };
@@ -740,6 +818,51 @@ test('queue selects eligible first and ambiguity has next precedence', () => {
     );
   assert.equal(parsed.kind, 'ticket-queue-result');
   assert.equal(queuePauseSummary(parsed), 'Selected Ticket #2.');
+  for (const invalid of [
+    {
+      ...selected,
+      eligibleCandidates: [...selected.eligibleCandidates].reverse(),
+    },
+    { ...selected, selected: { source: { kind: 'github', ref: '#4' } } },
+    { ...selected, eligibleCandidates: undefined },
+  ])
+    assert.throws(() =>
+      extractTicketResultEnvelope(envelope(invalid), queueExpectation),
+    );
+
+  const local = {
+    ...selected,
+    categories: {
+      ...selected.categories,
+      eligible: {
+        count: 3,
+        refs: [
+          { kind: 'local', ref: 'tickets/2-second.md' },
+          { kind: 'local', ref: 'tickets/10-last.md' },
+          { kind: 'local', ref: 'tickets/no-prefix.md' },
+        ],
+      },
+    },
+    eligibleCandidates: [
+      { source: { kind: 'local', ref: 'tickets/2-second.md' } },
+      { source: { kind: 'local', ref: 'tickets/10-last.md' } },
+      { source: { kind: 'local', ref: 'tickets/no-prefix.md' } },
+    ],
+    selected: { source: { kind: 'local', ref: 'tickets/2-second.md' } },
+  };
+  assert.equal(
+    extractTicketResultEnvelope(envelope(local), queueExpectation).kind,
+    'ticket-queue-result',
+  );
+  assert.throws(() =>
+    extractTicketResultEnvelope(
+      envelope({
+        ...local,
+        eligibleCandidates: [...local.eligibleCandidates].reverse(),
+      }),
+      queueExpectation,
+    ),
+  );
   assert.throws(() =>
     extractTicketResultEnvelope(envelope(selected), {
       operation: 'select',
@@ -752,6 +875,7 @@ test('queue selects eligible first and ambiguity has next precedence', () => {
 
   delete (selected as { selected?: unknown }).selected;
   selected.categories.eligible = { count: 0, refs: [] };
+  selected.eligibleCandidates = [];
   selected.terminalReason = 'configuration-ambiguous';
   selected.outcome = 'failed';
   const ambiguous = extractTicketResultEnvelope(envelope(selected), {

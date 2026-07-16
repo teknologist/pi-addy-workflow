@@ -11,6 +11,7 @@ import {
 import { exitAutoModeControlUpdates } from './workflow-state-control.ts';
 import type {
   TicketOperation,
+  TicketQueueState,
   TicketRecoveryState,
   TicketRunState,
   WorkflowState,
@@ -110,6 +111,7 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
         'repositoryRoot',
         'revision',
         'queueSelector',
+        'queueDrainId',
         'activityMarker',
         'pendingClarification',
         'pendingScopeRequest',
@@ -141,7 +143,11 @@ export function coerceTicketRun(value: unknown): TicketRunState | undefined {
     )
       return undefined;
   }
-  if (!optionalString(value.revision) || !optionalString(value.activityMarker))
+  if (
+    !optionalString(value.revision) ||
+    !optionalString(value.queueDrainId) ||
+    !optionalString(value.activityMarker)
+  )
     return undefined;
   if (value.queueSelector !== undefined) {
     if (
@@ -413,6 +419,23 @@ function possibleTicketRef(value: unknown): string | undefined {
     return value.source.ref;
   if (nonEmptyString(value.ticketRef)) return value.ticketRef;
   return undefined;
+}
+
+export function coerceTicketQueue(
+  value: unknown,
+): TicketQueueState | undefined {
+  if (
+    !record(value) ||
+    !exactKeys(value, ['schemaVersion', 'selector', 'drainId']) ||
+    value.schemaVersion !== 1 ||
+    !nonEmptyString(value.drainId) ||
+    !record(value.selector) ||
+    !exactKeys(value.selector, ['kind', 'value']) ||
+    !oneOf(value.selector.kind, SELECTOR_KINDS) ||
+    !nonEmptyString(value.selector.value)
+  )
+    return undefined;
+  return value as TicketQueueState;
 }
 
 export function coerceTicketHistory(

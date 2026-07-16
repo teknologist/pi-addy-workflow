@@ -103,14 +103,16 @@ function parseAuto(args: string[]): TicketCommandIntent {
   const remaining = args.filter((arg) => arg !== '--tickets');
   if (remaining.length === 0)
     return { kind: 'ticket-queue', selector: DEFAULT_TICKET_QUEUE_SELECTOR };
-  if (
-    remaining.length === 2 &&
-    remaining[0] === '--label' &&
-    optionValue(remaining[1])
-  )
+  const selectorKind =
+    remaining[0] === '--label'
+      ? 'label'
+      : remaining[0] === '--status'
+        ? 'status'
+        : undefined;
+  if (remaining.length === 2 && selectorKind && optionValue(remaining[1]))
     return {
       kind: 'ticket-queue',
-      selector: { kind: 'label', value: remaining[1] },
+      selector: { kind: selectorKind, value: remaining[1] },
     };
   return error();
 }

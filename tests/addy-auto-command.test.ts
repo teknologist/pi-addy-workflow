@@ -264,6 +264,28 @@ test('ticket auto does not resume pending plan continuation or task commit', asy
   assert.equal(harness.watchdogs.length, 1);
 });
 
+test('each explicit ticket queue command starts a new persisted drain', async () => {
+  const harness = createHarness();
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['--tickets', '--label', 'ready'] },
+    {},
+    harness.deps,
+  );
+  const firstDrainId = harness.state.ticketQueue?.drainId;
+
+  await handleAddyAutoCommand(
+    {} as never,
+    { args: ['--tickets', '--label', 'ready'] },
+    {},
+    harness.deps,
+  );
+
+  assert.ok(firstDrainId);
+  assert.notEqual(harness.state.ticketQueue?.drainId, firstDrainId);
+});
+
 test('addy auto command records stop and shows stats', async () => {
   const harness = createHarness();
 

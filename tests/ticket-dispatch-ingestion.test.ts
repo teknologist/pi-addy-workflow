@@ -35,12 +35,18 @@ test('bare Ticket queue keeps its default selector through dispatch and ingestio
     attempt: 0,
     selector: pending.selector!,
     categories: {
-      eligible: { count: 1, refs: ['#9'] },
+      eligible: { count: 1, refs: [{ kind: 'github', ref: '#9' }] },
       blocked: { count: 0, refs: [] },
       claimed: { count: 0, refs: [] },
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [
+      {
+        source: { kind: 'github', ref: '#9' },
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
     selected: { source: { kind: 'github', ref: '#9' } },
     terminalReason: 'selected',
   });
@@ -85,12 +91,18 @@ test('Ticket queue dispatch uses the gateway and ingests one agent result idempo
     attempt: Number(pending.attemptMarker.slice('attempt-'.length)),
     selector: pending.selector!,
     categories: {
-      eligible: { count: 1, refs: ['#9'] },
+      eligible: { count: 1, refs: [{ kind: 'github', ref: '#9' }] },
       blocked: { count: 0, refs: [] },
       claimed: { count: 0, refs: [] },
       ineligible: { count: 0, refs: [] },
       ambiguous: { count: 0, refs: [] },
     },
+    eligibleCandidates: [
+      {
+        source: { kind: 'github', ref: '#9' },
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ],
     selected: { source: { kind: 'github', ref: '#9' } },
     terminalReason: 'selected',
   });

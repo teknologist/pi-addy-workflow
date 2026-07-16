@@ -149,6 +149,16 @@ export function createAutoPromptDispatcher(deps: AutoPromptDispatcherDeps) {
         repository: pending.repository,
         repositoryRoot: state.ticketRun?.repositoryRoot,
         selector: pending.selector,
+        ...(pending.operation === 'select'
+          ? {
+              queueDrainId: state.ticketQueue?.drainId,
+              excludedTickets: (state.ticketHistory ?? [])
+                .filter(
+                  (run) => run.queueDrainId === state.ticketQueue?.drainId,
+                )
+                .map((run) => run.source),
+            }
+          : {}),
         manual: !state.autoMode,
         pendingClarification: state.ticketRun?.pendingClarification,
         repositoryScope: state.ticketRun?.repositoryScope,

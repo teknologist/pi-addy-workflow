@@ -65,6 +65,42 @@ test('valid ticket state round-trips strictly', () => {
   assert.equal(parsed?.ticketRecovery, undefined);
 });
 
+test('queue drain identity round-trips with its selected runs', () => {
+  const ticketQueue = {
+    schemaVersion: 1 as const,
+    selector: { kind: 'label' as const, value: 'ready-for-agent' },
+    drainId: 'drain-a',
+  };
+  const ticketRun = { ...validTicketRun, queueDrainId: ticketQueue.drainId };
+  const parsed = parsePersistedWorkflowState(
+    serializeWorkflowState({
+      ...createInitialWorkflowState(),
+      executionSource: 'ticket',
+      ticketQueue,
+      ticketRun,
+    }),
+  );
+
+  assert.deepEqual(parsed?.ticketQueue, ticketQueue);
+  assert.deepEqual(parsed?.ticketRun, ticketRun);
+});
+
+test('malformed queue drain identity fails closed', () => {
+  const parsed = parsePersistedWorkflowState({
+    ...createInitialWorkflowState(),
+    executionSource: 'ticket',
+    ticketQueue: {
+      schemaVersion: 1,
+      selector: { kind: 'label', value: 'ready-for-agent' },
+      drainId: '',
+    },
+  });
+
+  assert.equal(parsed?.ticketQueue, undefined);
+  assert.equal(parsed?.autoMode, false);
+  assert.equal(parsed?.ticketRecovery?.possibleClaim, true);
+});
+
 test('legacy add-repository evidence migrates its safe pending repository identity', () => {
   const legacyRun = {
     ...validTicketRun,

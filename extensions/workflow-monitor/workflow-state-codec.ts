@@ -3,6 +3,7 @@ export {
   type AutoFreshReason,
   type AutoPendingActionReason,
   type TicketOperation,
+  type TicketQueueState,
   type TicketRecoveryState,
   type TicketRunState,
   type WorkflowAutoPausedReason,

@@ -29,7 +29,9 @@ export function resolveWorkflowStateWithProjectControl(
     return parseWorkflowState(projectState);
   if (
     projectState?.executionSource === 'ticket' &&
-    (projectState.ticketRun || projectState.ticketRecovery)
+    (projectState.ticketQueue ||
+      projectState.ticketRun ||
+      projectState.ticketRecovery)
   )
     return parseWorkflowState(
       preserveWorkflowControlState(

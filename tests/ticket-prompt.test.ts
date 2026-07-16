@@ -60,6 +60,26 @@ test('SELECT and STATUS prompts are minimal and read-only', () => {
   }
 });
 
+test('SELECT prompt binds drain-scoped exclusions by source kind and ref', () => {
+  const prompt = buildTicketPrompt({
+    operation: 'select',
+    selector: { kind: 'label', value: 'ready-for-agent' },
+    queueDrainId: 'drain-a',
+    excludedTickets: [
+      { kind: 'github', ref: '#9' },
+      { kind: 'linear', ref: '#9' },
+    ],
+    actionKey: 'action-1',
+    attempt: 1,
+  });
+
+  assert.match(prompt, /Queue drain id: drain-a/);
+  assert.match(prompt, /exact source kind \+ ref pairs/);
+  assert.match(prompt, /github:#9/);
+  assert.match(prompt, /linear:#9/);
+  assert.match(prompt, /oldest createdAt then source kind and ref/);
+});
+
 test('ownership operations state exact claim, release, and reclaim semantics', () => {
   const prompt = (operation: (typeof operations)[number]) =>
     buildTicketPrompt({

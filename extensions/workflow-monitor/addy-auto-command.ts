@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { pendingAutoActionForPrompt } from './auto-control.ts';
 import { commandFromPrompt } from './command-router.ts';
@@ -202,6 +203,11 @@ export async function handleAddyAutoCommand(
     const ticketState = {
       ...deps.getState(ctx),
       executionSource: 'ticket' as const,
+      ticketQueue: {
+        schemaVersion: 1 as const,
+        selector: intent.selector,
+        drainId: randomUUID(),
+      },
     };
     deps.setState(
       ctx,
