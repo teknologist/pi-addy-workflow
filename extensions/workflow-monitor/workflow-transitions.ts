@@ -43,6 +43,7 @@ export type {
   WorkflowStatsSession,
   WorkflowTaskCommitRecord,
   WorkflowTaskStats,
+  WorkflowTicketStats,
 } from './workflow-core.ts';
 
 function enforcedPhaseIndex(phase: WorkflowPhase): number {

@@ -46,6 +46,15 @@ test('workflow stats presenter returns latest active stats target', () => {
   assert.equal(target?.taskTitle, 'Extract stats presenter');
 });
 
+test('workflow stats presenter reports exact local no-data result for Ticket refs', () => {
+  assert.equal(
+    statsMarkdownWithHeading(createInitialWorkflowState(), {
+      ticketSource: { kind: 'linear', ref: 'A&B<script>' },
+    }),
+    '## Addy Ticket stats\n\nNo Addy stats recorded for Ticket linear:A&B<script>',
+  );
+});
+
 test('workflow stats presenter adds heading without losing markdown hierarchy', () => {
   const markdown = statsMarkdownWithHeading(stateWithStats(), {
     heading: 'Addy auto stopped.',

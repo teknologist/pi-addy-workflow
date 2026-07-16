@@ -11,8 +11,15 @@ import { commandFromArgs, type CommandEvent } from './workflow-host-events.ts';
 import type { FreshContinuationDispatchOptions } from './fresh-continuation.ts';
 import type { WorkflowAction } from './auto-lifecycle.ts';
 import type { AppendEntry } from './workflow-state-store.ts';
-import { latestActiveStatsTarget } from './workflow-stats-target.ts';
-import type { WorkflowPhase, WorkflowState } from './workflow-transitions.ts';
+import {
+  latestActiveStatsTarget,
+  resolveTicketStatsTarget,
+} from './workflow-stats-target.ts';
+import type {
+  TicketRunState,
+  WorkflowPhase,
+  WorkflowState,
+} from './workflow-transitions.ts';
 import { handleAddyAutoCommand } from './addy-auto-command.ts';
 import {
   ticketClaimSafetyWarning,
@@ -63,6 +70,12 @@ type FreshStepCommandDeps = {
   shouldFreshContextBeforeStep(input: string, ctx: unknown): boolean;
 };
 
+type StatsDisplayOptions = {
+  heading?: string;
+  planPath?: string;
+  ticketSource?: TicketRunState['source'];
+};
+
 type AutoCommandDeps = {
   appendEntry(pi: ExtensionAPI): AppendEntry;
   resumePendingFreshContinuation(
@@ -99,7 +112,7 @@ type AutoCommandDeps = {
     pi: ExtensionAPI,
     ctx: unknown,
     state: WorkflowState,
-    options?: { heading?: string; planPath?: string },
+    options?: StatsDisplayOptions,
   ): void;
 };
 
@@ -118,7 +131,7 @@ type StatsCommandDeps = {
     pi: ExtensionAPI,
     ctx: unknown,
     state: WorkflowState,
-    options?: { heading?: string; planPath?: string },
+    options?: StatsDisplayOptions,
   ): void;
 };
 
@@ -212,13 +225,26 @@ export function registerWorkflowCommands(
     handler: (event: CommandEvent, ctx: unknown) => {
       const plan = planStatsCommand(event);
       if (plan.kind === 'error') deps.notify(ctx, plan.message, 'warning');
-      else if (plan.kind === 'ticket-stats')
-        deps.sendUserMessage(
-          pi,
-          ctx,
-          commandFromArgs('/addy-stats', ['--ticket', plan.ticketRef]),
-        );
-      else if (plan.kind === 'plan-stats') {
+      else if (plan.kind === 'ticket-stats') {
+        const state = deps.getState(ctx);
+        const resolution = resolveTicketStatsTarget(state, plan.ticketRef);
+        if (resolution.kind === 'resolved')
+          deps.showWorkflowStats(pi, ctx, state, {
+            ticketSource: resolution.target.source,
+          });
+        else if (resolution.kind === 'ambiguous')
+          deps.notify(
+            ctx,
+            `Addy cannot resolve Ticket ${plan.ticketRef}: the ref is ambiguous across ${resolution.sourceKinds.join(', ')}. Use /addy-stats while the intended Ticket is active.`,
+            'warning',
+          );
+        else
+          deps.notify(
+            ctx,
+            `No Addy stats recorded for Ticket ${plan.ticketRef}; its source kind cannot be resolved safely.`,
+            'warning',
+          );
+      } else if (plan.kind === 'plan-stats') {
         const state = deps.getState(ctx);
         deps.showWorkflowStats(pi, ctx, state, {
           planPath: plan.all ? undefined : (plan.planPath ?? state.activePlan),

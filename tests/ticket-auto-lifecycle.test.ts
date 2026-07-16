@@ -65,6 +65,55 @@ test('Ticket Auto routes BUILD through FINISH and never chooses SIMPLIFY', () =>
   );
 });
 
+test('validated Ticket results record local stats once', () => {
+  const state = {
+    ...createInitialWorkflowState(),
+    autoMode: true,
+    executionSource: 'ticket' as const,
+    ticketRun: run({ implemented: true, verified: true, reviewed: false }),
+  };
+  const pending = pendingAutoActionForPrompt(
+    '/addy-review --ticket #12',
+    state,
+    undefined,
+    'next-action',
+    '',
+  );
+  if (pending.executionSource !== 'ticket') assert.fail('expected ticket');
+  const result = formatTicketResultEnvelope({
+    schemaVersion: 1,
+    kind: 'ticket-phase-result',
+    operation: 'review',
+    outcome: 'succeeded',
+    source: { kind: 'github', ref: '#12' },
+    runId: 'run-1',
+    claimId: claim.id,
+    claim,
+    actionKey: pending.key,
+    attempt: 0,
+    postRevision: 'rev-2',
+    lifecycle: { implemented: true, verified: true, reviewed: false },
+    activity: { marker: `${pending.key}:0` },
+    repositoryScope: ['.'],
+    reviewDisposition: { status: 'findings', count: 2 },
+  } as any);
+
+  const accepted = ingestTicketResult(
+    { ...state, autoPendingAction: pending },
+    result,
+  );
+  assert.equal(accepted.status, 'accepted', accepted.state.warnings.at(-1));
+  const stats = Object.values(accepted.state.stats?.active.tickets ?? {})[0];
+  assert.equal(stats.reviewRuns, 1);
+  assert.equal(stats.findings, 2);
+  const duplicate = ingestTicketResult(accepted.state, result);
+  assert.equal(duplicate.status, 'duplicate');
+  assert.equal(
+    Object.values(duplicate.state.stats?.active.tickets ?? {})[0].reviewRuns,
+    1,
+  );
+});
+
 test('Auto ambiguity contract pauses without mutation', () => {
   const prompt = buildTicketPrompt({
     operation: 'build',

@@ -248,6 +248,7 @@
   - type TicketQueueResult
   - type TicketReviewDisposition
   - _...4 more_
+- `extensions/workflow-monitor/ticket-presentation.ts` — function boundedTicketDisplay: (value) => string, function ticketLifecycleFrontier: (lifecycle) => 'build' | 'verify' | 'review' | 'finish'
 - `extensions/workflow-monitor/ticket-prompt.ts` — function buildTicketPrompt: (request) => string, type TicketPromptRequest
 - `extensions/workflow-monitor/ticket-result-ingestion.ts` — function ingestTicketResult: (state, text, repositoryRoot?) => TicketResultIngestion, type TicketResultIngestion
 - `extensions/workflow-monitor/ticket-source-switch.ts` — function ticketStateBlocksReset: (state) => boolean, function ticketClaimSafetyWarning: (state, input) => string | undefined
@@ -256,9 +257,9 @@
   - type WorkflowIssueStats
   - type WorkflowTaskStats
   - type WorkflowTaskCommitRecord
+  - type WorkflowTicketStats
   - type WorkflowStatsSession
-  - type WorkflowStats
-  - _...14 more_
+  - _...15 more_
 - `extensions/workflow-monitor/workflow-delivery.ts` — function createWorkflowDelivery: (deps) => void, type WorkflowDeliveryOptions
 - `extensions/workflow-monitor/workflow-handler.ts`
   - function handleWorkflowEvent: (ctx, event, appendEntry?) => WorkflowState
@@ -380,8 +381,15 @@
   - function showWorkflowStats: (pi, ctx, state, options, notify) => void
   - function renderWorkflowStatsMessage: (message) => Markdown
   - const ADDY_STATS_MESSAGE_TYPE
-- `extensions/workflow-monitor/workflow-stats-report.ts` — function renderWorkflowStatsText: (state, planPath?) => string, function renderWorkflowStatsMarkdown: (state, planPath?) => string
-- `extensions/workflow-monitor/workflow-stats-target.ts` — function statsTargetFromTask: (task) => WorkflowStatsTarget, function latestActiveStatsTarget: (state) => WorkflowStatsTarget | undefined
+- `extensions/workflow-monitor/workflow-stats-report.ts`
+  - function renderWorkflowStatsText: (state, filter?) => string
+  - function renderWorkflowStatsMarkdown: (state, filter?) => string
+  - type WorkflowStatsFilter
+- `extensions/workflow-monitor/workflow-stats-target.ts`
+  - function statsTargetFromTask: (task) => WorkflowPlanStatsTarget
+  - function latestActiveStatsTarget: (state) => WorkflowPlanStatsTarget | undefined
+  - function resolveTicketStatsTarget: (state, ticketRef) => TicketStatsTargetResolution
+  - type TicketStatsTargetResolution
 - `extensions/workflow-monitor/workflow-stats.ts`
   - function emptyIssueStats: () => WorkflowIssueStats
   - function addIssueStats: (left, right) => WorkflowIssueStats
@@ -389,7 +397,7 @@
   - function normalizeWorkflowStats: (value) => WorkflowStats
   - function recordWorkflowTaskTurn: (state, target, phase?, now) => void
   - function recordWorkflowTaskFinished: (state, target, finishedAt) => void
-  - _...8 more_
+  - _...11 more_
 - `extensions/workflow-monitor/workflow-task-identity.ts`
   - function hasLegacyTaskIdentity: (identity) => boolean
   - function legacyTaskIdentityMatches: (identity, candidate) => boolean

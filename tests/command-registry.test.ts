@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import { registerWorkflowCommands } from '../extensions/workflow-monitor/command-registry.ts';
 import { createInitialWorkflowState } from '../extensions/workflow-monitor/workflow-transitions.ts';
 
+function ticketStats(kind: 'github' | 'linear', ref: string) {
+  return {
+    target: { kind: 'ticket' as const, source: { kind, ref } },
+    turns: 1,
+    verifyRuns: 0,
+    reviewRuns: 0,
+    fixRuns: 0,
+    findings: 0,
+    recordedAttempts: [],
+  };
+}
+
 function createHarness() {
   const commands = new Map<
     string,
@@ -13,6 +25,9 @@ function createHarness() {
   const notifications: string[] = [];
   let statsHeading: string | undefined;
   let statsPlanPath: string | undefined;
+  let statsTicketSource:
+    | { kind: 'github' | 'linear' | 'local'; ref: string }
+    | undefined;
   const state = createInitialWorkflowState();
   registerWorkflowCommands(
     {
@@ -48,6 +63,7 @@ function createHarness() {
       showWorkflowStats: (_pi, _ctx, _state, options) => {
         statsHeading = options?.heading;
         statsPlanPath = options?.planPath;
+        statsTicketSource = options?.ticketSource;
       },
     },
   );
@@ -61,6 +77,9 @@ function createHarness() {
     },
     get statsPlanPath() {
       return statsPlanPath;
+    },
+    get statsTicketSource() {
+      return statsTicketSource;
     },
     state,
   };
@@ -135,16 +154,59 @@ test('addy-stats preserves supplied plan and explicit all-history mode', () => {
   assert.equal(harness.statsPlanPath, undefined);
 });
 
-test('addy-stats preserves an opaque ticket ref', () => {
+test('addy-stats uses the active Ticket source for an opaque ref', () => {
   const harness = createHarness();
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'local', ref: 'local tickets/01.md' },
+    runId: 'run-1',
+    lifecycle: { implemented: false, verified: false, reviewed: false },
+    repositoryScope: ['.'],
+  };
 
   harness.commands
     .get('addy-stats')
     ?.handler({ args: ['--ticket', 'local tickets/01.md'] }, {});
 
-  assert.deepEqual(harness.sent, [
-    '/addy-stats --ticket "local tickets/01.md"',
-  ]);
+  assert.deepEqual(harness.sent, []);
+  assert.deepEqual(harness.statsTicketSource, {
+    kind: 'local',
+    ref: 'local tickets/01.md',
+  });
+});
+
+test('addy-stats refuses an ambiguous cross-source Ticket ref', () => {
+  const harness = createHarness();
+  harness.state.stats = {
+    active: {
+      tasks: {},
+      tickets: {
+        github: ticketStats('github', '42'),
+        linear: ticketStats('linear', '42'),
+      },
+    },
+    history: [],
+  };
+
+  harness.commands.get('addy-stats')?.handler({ args: ['--ticket', '42'] }, {});
+
+  assert.equal(harness.statsTicketSource, undefined);
+  assert.match(
+    harness.notifications.at(-1) ?? '',
+    /ambiguous.*github.*linear/i,
+  );
+
+  harness.state.executionSource = 'ticket';
+  harness.state.ticketRun = {
+    schemaVersion: 1,
+    source: { kind: 'linear', ref: '42' },
+    runId: 'run-1',
+    lifecycle: { implemented: true, verified: false, reviewed: false },
+    repositoryScope: ['.'],
+  };
+  harness.commands.get('addy-stats')?.handler({ args: ['--ticket', '42'] }, {});
+  assert.deepEqual(harness.statsTicketSource, { kind: 'linear', ref: '42' });
 });
 
 test('addy-ticket preserves opaque args and blocks mutation of another live claim', () => {

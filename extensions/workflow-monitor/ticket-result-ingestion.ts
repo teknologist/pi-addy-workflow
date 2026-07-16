@@ -29,6 +29,7 @@ import type {
 } from './workflow-core.ts';
 import { exitAutoModeControlUpdates } from './workflow-state-control.ts';
 import type { WorkflowState } from './workflow-transitions.ts';
+import { recordValidatedTicketAttempt } from './workflow-stats.ts';
 
 export type TicketResultIngestion = {
   state: WorkflowState;
@@ -443,6 +444,22 @@ export function ingestTicketResult(
       },
     },
   };
+  if (completed && phase) {
+    nextState = recordValidatedTicketAttempt(
+      nextState,
+      { kind: 'ticket', source: parsed.source },
+      {
+        operation: parsed.operation,
+        outcome: parsed.outcome,
+        actionKey: parsed.actionKey,
+        attempt: parsed.attempt,
+        ...(parsed.reviewDisposition?.status === 'findings'
+          ? { findings: parsed.reviewDisposition.count }
+          : {}),
+      },
+      pending?.createdAt,
+    );
+  }
   if (parsed.clarification) {
     const { resolution, ...clarification } = parsed.clarification;
     nextState = setTicketClarification(nextState, clarification);

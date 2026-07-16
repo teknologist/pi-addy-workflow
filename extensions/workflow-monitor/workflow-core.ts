@@ -41,8 +41,30 @@ export type WorkflowTaskCommitRecord = {
   committedAt: string;
 };
 
+export type WorkflowTicketStats = {
+  target: {
+    kind: 'ticket';
+    source: TicketRunState['source'];
+  };
+  startedAt?: string;
+  finishedAt?: string;
+  phaseDurationsMs?: Partial<
+    Record<
+      'build' | 'simplify' | 'verify' | 'review' | 'fix-all' | 'finish',
+      number
+    >
+  >;
+  turns: number;
+  verifyRuns: number;
+  reviewRuns: number;
+  fixRuns: number;
+  findings: number;
+  recordedAttempts: string[];
+};
+
 export type WorkflowStatsSession = {
   tasks: Record<string, WorkflowTaskStats>;
+  tickets?: Record<string, WorkflowTicketStats>;
   endedReason?: string;
 };
 
