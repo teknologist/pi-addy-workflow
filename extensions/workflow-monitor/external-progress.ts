@@ -204,6 +204,7 @@ export type InitializeExternalProgressTicketSlicesInput = StorageOptions & {
   cwd?: string;
   source?: ExternalProgressSource;
   ticketSlices: unknown;
+  now?: Date;
 };
 
 export type UpdateExternalProgressTicketSliceInput = StorageOptions & {
@@ -389,13 +390,13 @@ export function parseExternalProgressTicketSlices(
     if (!isRecord(entry)) throw new Error(`Invalid ticketSlices[${index}]`);
     for (const key of Object.keys(entry)) {
       if (!TICKET_SLICE_FIELDS.has(key))
-        throw new Error(`Unknown ticketSlices[${index}] field: ${key}`);
+        throw new Error(`Unknown ticketSlices[${index}] field`);
     }
     const key = normalizedTicketSliceKey(
       entry.key,
       `ticketSlices[${index}].key`,
     );
-    if (keys.has(key)) throw new Error(`Duplicate Ticket Slice key: ${key}`);
+    if (keys.has(key)) throw new Error('Duplicate normalized Ticket Slice key');
     keys.add(key);
     return {
       key,
@@ -528,6 +529,7 @@ export function initializeExternalProgressTicketSlices(
       const next = parseIssueImplementationProgressSnapshot({
         ...previous,
         ticketSlices,
+        updatedAt: isoNowAfter(input.now, previous.updatedAt),
       });
       persistSnapshot(next, true);
       return next;
