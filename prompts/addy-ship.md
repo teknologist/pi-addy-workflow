@@ -20,7 +20,7 @@ Use the supplied plan path when present and update the Addy workflow state's act
 
 ## Phase A — Parallel fan-out
 
-Spawn three subagents concurrently with the Pi `subagent` tool in parallel mode. Before spawning, call `subagent({ action: "list", agentScope: "user" })` and use available user-scoped agents. Do not pass explicit model overrides.
+Run one foreground `workflow` whose JavaScript uses `parallel()` to call `agent()` once for each persona below. Set each call's `agentType` to the exact persona name, do not use worktree isolation, and do not pass model, timeout, retry, or token-budget overrides. The workflow must return all three reports to this main session. Use `background: false`, `maxAgents: 3`, and `concurrency: 3` on the workflow call.
 
 Preferred personas:
 
@@ -28,7 +28,7 @@ Preferred personas:
 2. **`addy-security-auditor`** — Run a vulnerability and threat-model pass. Check OWASP Top 10, secrets handling, auth/authz, dependency CVEs. Output the standard audit report.
 3. **`addy-test-engineer`** — Analyze test coverage for the change. Identify gaps in happy path, edge cases, error paths, and concurrency scenarios. Output the standard coverage analysis.
 
-If one of these exact agents is unavailable, use the closest available user-scoped addy-prefixed reviewer/security/test agent. If no good fallback exists, perform that persona's review in the main context and clearly mark it as main-context review.
+If the workflow or one of these exact agent types is unavailable, perform that persona's review in the main context and clearly mark it as main-context review. Do not substitute an unknown agent name because runtimes may silently fall back to a generic role.
 
 Constraints:
 

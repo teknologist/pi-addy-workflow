@@ -20,7 +20,6 @@ export default function addyBootstrap(pi: ExtensionAPI) {
     const nextPrompt = injectAddyBootstrap({
       systemPrompt: ctx.systemPrompt,
       tools: normalizeTools(ctx.tools),
-      env: process.env,
     });
 
     if (nextPrompt !== undefined) ctx.systemPrompt = nextPrompt;

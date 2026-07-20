@@ -4,7 +4,7 @@
 
 > 1 routes (1 inferred) | 0 models | 0 components | 110 lib files | 7 env vars | 2 middleware | 100% test coverage
 > **Token savings:** this file is ~10,200 tokens. Without it, AI exploration would cost ~39,700 tokens. **Saves ~29,500 tokens per conversation.**
-> **Last scanned:** 2026-07-20 13:15 — re-run after significant changes
+> **Last scanned:** 2026-07-20 13:25 — re-run after significant changes
 
 ---
 
@@ -25,13 +25,12 @@
   - function relativeAgentSyncSummary: (result, targetRoot) => string
   - _...2 more_
 - `extensions/bootstrap/core.ts`
-  - function shouldSkipBootstrap: (env, string | undefined>) => boolean
   - function toolAvailable: (tools, name) => boolean
   - function buildAddyBootstrap: (tools?) => string
   - function injectAddyBootstrap: (options) => string | undefined
   - type BootstrapToolAvailability
   - type BootstrapOptions
-  - _...1 more_
+  - const ADDY_BOOTSTRAP_MARKER
 - `extensions/dashboard-installer/core.ts`
   - function defaultDashboardBinDir: (home) => void
   - function packageRoot: (importMetaUrl) => string

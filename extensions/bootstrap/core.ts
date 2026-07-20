@@ -2,25 +2,17 @@ export const ADDY_BOOTSTRAP_MARKER = '<!-- pi-addy-workflow-bootstrap -->';
 
 export type BootstrapToolAvailability = {
   todo?: boolean;
-  subagent?: boolean;
+  workflow?: boolean;
 };
 
 export type BootstrapOptions = {
   systemPrompt?: string;
   tools?: BootstrapToolAvailability | string[];
-  env?: Record<string, string | undefined>;
 };
-
-export function shouldSkipBootstrap(
-  env: Record<string, string | undefined> = process.env,
-): boolean {
-  const depth = Number(env.PI_SUBAGENT_DEPTH ?? '0');
-  return Number.isFinite(depth) && depth > 0;
-}
 
 export function toolAvailable(
   tools: BootstrapToolAvailability | string[] | undefined,
-  name: 'todo' | 'subagent',
+  name: 'todo' | 'workflow',
 ): boolean {
   if (Array.isArray(tools)) return tools.includes(name);
   return tools?.[name] === true;
@@ -37,9 +29,9 @@ export function buildAddyBootstrap(
     );
   }
 
-  if (!toolAvailable(tools, 'subagent')) {
+  if (!toolAvailable(tools, 'workflow')) {
     warnings.push(
-      '- Warning: `subagent` tool unavailable; run Addy review/ship fan-out manually or install pi-subagents.',
+      '- Warning: `workflow` tool unavailable; run Addy review/ship fan-out manually or install pi-dynamic-workflows.',
     );
   }
 
@@ -62,7 +54,7 @@ export function buildAddyBootstrap(
     '',
     'Pi mappings:',
     '- Task tracking → `todo`.',
-    '- Delegated reviewers/implementers → `subagent`.',
+    '- Complex review/ship fan-out → `workflow`.',
     '- File reads/writes → Pi native file tools.',
     ...(warnings.length > 0 ? ['', 'Companion warnings:', ...warnings] : []),
   ]
@@ -74,7 +66,6 @@ export function injectAddyBootstrap(
   options: BootstrapOptions = {},
 ): string | undefined {
   const systemPrompt = options.systemPrompt ?? '';
-  if (shouldSkipBootstrap(options.env)) return systemPrompt;
   if (systemPrompt.includes(ADDY_BOOTSTRAP_MARKER)) return systemPrompt;
 
   const block = buildAddyBootstrap(options.tools);

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import {
   GENERATED_AGENT_NOTICE,
   addGeneratedNotice,
+  defaultAgentTargetRoot,
   packageAgentSourceRoot,
   syncAgents,
 } from '../extensions/agent-installer/core.ts';
@@ -28,6 +29,13 @@ test('package agent source root decodes file URLs', () => {
   assert.equal(
     packageAgentSourceRoot(extensionUrl),
     join(packageRoot, 'agents'),
+  );
+});
+
+test('targets the shared top-level agent directory', () => {
+  assert.equal(
+    defaultAgentTargetRoot('/tmp/home'),
+    join('/tmp/home', '.pi', 'agent', 'agents'),
   );
 });
 
@@ -82,4 +90,28 @@ test('sync preserves nested directories and does not remove user files', async (
     await readFile(join(target, 'user.md'), 'utf8'),
     'user content\n',
   );
+});
+
+test('sync removes stale generated agents from the legacy nested directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'addy-agent-sync-legacy-'));
+  const source = join(root, 'source');
+  const target = join(root, 'agents');
+  const legacy = join(target, 'pi-addy-workflow');
+  await mkdir(source);
+  await mkdir(legacy, { recursive: true });
+  await writeFile(
+    join(source, 'addy-reviewer.md'),
+    '---\nname: addy-reviewer\n---\n\nBody\n',
+  );
+  await writeFile(
+    join(legacy, 'addy-reviewer.md'),
+    `---\nname: addy-reviewer\n---\n${GENERATED_AGENT_NOTICE}\n\nBody\n`,
+  );
+
+  const result = await syncAgents({ sourceRoot: source, targetRoot: target });
+
+  assert.equal(result.written.length, 1);
+  assert.equal(result.removed.length, 1);
+  assert.equal(result.removed[0], join(legacy, 'addy-reviewer.md'));
+  await assert.rejects(readFile(join(legacy, 'addy-reviewer.md'), 'utf8'));
 });

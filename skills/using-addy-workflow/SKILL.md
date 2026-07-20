@@ -30,5 +30,5 @@ Rules:
 - Treat checked lifecycle boxes as valid only when the owning phase actually ran for that task/slice. In particular, `[x] Reviewed` is not complete unless `/addy-review` ran for that task/slice.
 - Ask before implementing a plan unless the user already ordered implementation.
 - Use `todo` for multi-step tracking when available.
-- Use `subagent` for review/ship fan-out when available.
+- Use `workflow` for complex review/ship fan-out when available.
 - Never commit, push, deploy, or publish unless the user explicitly asks.

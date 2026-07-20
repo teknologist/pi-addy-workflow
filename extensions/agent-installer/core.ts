@@ -14,7 +14,7 @@ export type AgentSyncResult = {
 export function defaultAgentTargetRoot(
   home = process.env.HOME ?? process.cwd(),
 ): string {
-  return join(home, '.pi', 'agent', 'agents', 'pi-addy-workflow');
+  return join(home, '.pi', 'agent', 'agents');
 }
 
 export function addGeneratedNotice(markdown: string): string {

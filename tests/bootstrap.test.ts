@@ -4,39 +4,25 @@ import {
   ADDY_BOOTSTRAP_MARKER,
   buildAddyBootstrap,
   injectAddyBootstrap,
-  shouldSkipBootstrap,
 } from '../extensions/bootstrap/core.ts';
 
 test('injects Addy bootstrap once', () => {
   const once = injectAddyBootstrap({
     systemPrompt: 'base',
-    tools: ['todo', 'subagent'],
-    env: {},
+    tools: ['todo', 'workflow'],
   });
   assert.ok(once?.includes(ADDY_BOOTSTRAP_MARKER));
   assert.equal(
     injectAddyBootstrap({
       systemPrompt: once,
-      tools: ['todo', 'subagent'],
-      env: {},
+      tools: ['todo', 'workflow'],
     }),
     once,
-  );
-});
-
-test('skips nested subagent sessions', () => {
-  assert.equal(shouldSkipBootstrap({ PI_SUBAGENT_DEPTH: '1' }), true);
-  assert.equal(
-    injectAddyBootstrap({
-      systemPrompt: 'base',
-      env: { PI_SUBAGENT_DEPTH: '2' },
-    }),
-    'base',
   );
 });
 
 test('warns when companion tools are unavailable', () => {
   const block = buildAddyBootstrap([]);
   assert.match(block, /`todo` tool unavailable/);
-  assert.match(block, /`subagent` tool unavailable/);
+  assert.match(block, /`workflow` tool unavailable/);
 });

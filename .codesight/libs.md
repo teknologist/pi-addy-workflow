@@ -9,13 +9,12 @@
   - function relativeAgentSyncSummary: (result, targetRoot) => string
   - _...2 more_
 - `extensions/bootstrap/core.ts`
-  - function shouldSkipBootstrap: (env, string | undefined>) => boolean
   - function toolAvailable: (tools, name) => boolean
   - function buildAddyBootstrap: (tools?) => string
   - function injectAddyBootstrap: (options) => string | undefined
   - type BootstrapToolAvailability
   - type BootstrapOptions
-  - _...1 more_
+  - const ADDY_BOOTSTRAP_MARKER
 - `extensions/dashboard-installer/core.ts`
   - function defaultDashboardBinDir: (home) => void
   - function packageRoot: (importMetaUrl) => string

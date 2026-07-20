@@ -874,7 +874,7 @@ test('required lifecycle skills exist', async () => {
   }
 });
 
-test('packaged agents are addy-prefixed and have no package or model frontmatter', async () => {
+test('packaged agents have shared names and bounded Tintinweb policies', async () => {
   const files = (await readdir('agents')).filter((file) =>
     file.endsWith('.md'),
   );
@@ -893,7 +893,39 @@ test('packaged agents are addy-prefixed and have no package or model frontmatter
     );
     assert.doesNotMatch(content, /^package:/m);
     assert.doesNotMatch(content, /^model:/m);
+    assert.match(content, /^tools: read, /m);
+    assert.match(content, /^skills: /m);
+    assert.match(content, /^extensions: none$/m);
+    assert.match(content, /^max_turns: 90$/m);
   }
+
+  const implementer = await readFile(
+    join('agents', 'addy-implementer.md'),
+    'utf8',
+  );
+  assert.match(implementer, /^tools: .*edit, write/m);
+
+  for (const agent of agents.filter((name) => name !== 'addy-implementer')) {
+    const content = await readFile(join('agents', `${agent}.md`), 'utf8');
+    assert.doesNotMatch(content, /^tools: .*\b(bash|edit|write)\b/m, agent);
+    assert.match(
+      content,
+      /Review only|Do not implement|release manager|planning agent/i,
+    );
+  }
+});
+
+test('ship fan-out uses shared Addy agent types through dynamic workflows', async () => {
+  const content = await readFile(join('prompts', 'addy-ship.md'), 'utf8');
+
+  assert.match(content, /foreground `workflow`/);
+  assert.match(content, /`parallel\(\)`/);
+  assert.match(content, /`agentType`/);
+  assert.match(content, /`background: false`/);
+  assert.match(content, /`maxAgents: 3`/);
+  assert.match(content, /`concurrency: 3`/);
+  assert.doesNotMatch(content, /Pi `subagent` tool/);
+  assert.match(content, /do not use worktree isolation/);
 });
 
 test('prompts and skills avoid stale local/package references and generic agent calls', async () => {

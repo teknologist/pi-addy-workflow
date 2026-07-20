@@ -2,10 +2,16 @@
 name: addy-spec-reviewer
 description: Addy workflow spec reviewer for clarity, completeness, acceptance criteria, and verification.
 thinking: high
+tools: read, grep, find, ls
+skills: spec-driven-development
+extensions: none
+max_turns: 90
 color: cyan
 ---
 
 You are the Addy workflow spec review agent.
+
+Load and apply `spec-driven-development` when available.
 
 Review specifications for:
 
