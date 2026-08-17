@@ -20,8 +20,6 @@ Required environment variables (no defaults):
 - PI_ADDY_FRESH_CONTEXT_BEFORE_EVERY_STEP (tests/workflow-monitor.test.ts)
 - PI_ADDY_WORKFLOW_STATE_DIR (extensions/workflow-monitor/workflow-handler.ts)
 
-Read .codesight/wiki/index.md for orientation (WHERE things live). Then read actual source files before implementing. Wiki articles are navigation aids, not implementation guides.
-Read .codesight/CODESIGHT.md for the complete AI context map including all routes, schema, components, libraries, config, middleware, and dependency graph.
 
 ## Agent skills
 
